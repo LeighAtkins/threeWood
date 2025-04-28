@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ThreeWood - PS1 Style Golf Game</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Lato:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+      /* Replace problematic font-face with web-safe fonts */
+      body {
+        font-family: 'Lato', 'Trebuchet MS', sans-serif;
+        margin: 0;
+      }
+      #info {
+        position: absolute;
+        top: 10px;
+        width: 100%;
+        text-align: center;
+        z-index: 100;
+        display:block;
+        color: white;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="container"></div>
+    <div id="title">ThreeWood</div>
+    <div id="info">A PS1-style random generated golf game<br>Press SPACE or CLICK to start</div>
+    <script type="module" src="/main.js"></script>
+  </body>
+</html>
