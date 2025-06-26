@@ -8,6 +8,7 @@ class CameraController {
   constructor(camera, target, options = {}) {
     this.camera = camera;
     this.target = target; // Usually the golf ball
+    this.terrain = options.terrain; // Add terrain reference
     
     // Log initial positions before setup
     console.log('[CameraController.constructor] Initial Cam Pos:', camera.position.toArray(), 'Initial Target (Ball) Pos:', target.position.toArray());
@@ -78,6 +79,9 @@ class CameraController {
    * Update the camera position and rotation based on current mode
    */
   update(deltaTime) {
+    // Store previous camera position to detect movement
+    const previousCameraPosition = this.camera.position.clone();
+    
     // Calculate target velocity for prediction
     if (this.target.position) {
       this.targetVelocity.subVectors(this.target.position, this.lastTargetPosition)
@@ -104,7 +108,17 @@ class CameraController {
     this.adjustCameraHeight();
     
     // Apply PS1-style jitter if enabled
-    this.applyJitter();
+    if (this.options.jitterAmount > 0) {
+      this.applyJitter();
+    }
+    
+    // Check if camera position has changed significantly
+    if (!previousCameraPosition.equals(this.camera.position)) {
+      // Trigger direction arrow update if game object is available
+      if (this.game && typeof this.game.updateDirectionArrow === 'function') {
+        this.game.updateDirectionArrow();
+      }
+    }
     
     // Actually update the camera
     this.camera.position.copy(this.currentPosition);
@@ -433,9 +447,9 @@ class CameraController {
     if (normalizedAngle < 0) normalizedAngle += Math.PI * 2;
 
     return new THREE.Vector3(
-      -Math.sin(normalizedAngle),
+      Math.cos(normalizedAngle),
       0,
-      -Math.cos(normalizedAngle)
+      Math.sin(normalizedAngle)
     ).normalize();
   }
   
@@ -511,22 +525,21 @@ class CameraController {
    */
   getAimingCameraTargets() {
     const ballPosition = this.target.position;
-    const safeBox = this.options.safeBox;
-    const targetScreenY = (safeBox.minY + safeBox.maxY) / 2;
-    const behindDistance = 3.0;
-    const lookAheadDistance = 15;
-    const fov = this.camera.fov * Math.PI / 180;
-    const ndcY = 1 - 2 * targetScreenY;
-    const dx = Math.sin(this.aimingAngle);
-    const dz = Math.cos(this.aimingAngle);
+    const behindDistance = 5.0; // Distance behind the ball
+    const lookAheadFactor = 5.0; // How far in front of the ball the camera looks
+
+    const dx = Math.cos(this.aimingAngle);
+    const dz = Math.sin(this.aimingAngle);
     const forward = new THREE.Vector3(dx, 0, dz).normalize();
+
     const camOffset = forward.clone().multiplyScalar(-behindDistance);
-    const z = behindDistance;
-    const verticalOffset = ndcY * z * Math.tan(fov / 2);
+    const verticalOffset = 2.0; // Fixed vertical offset
     const cameraPos = ballPosition.clone().add(camOffset);
     cameraPos.y = ballPosition.y + verticalOffset;
-    const lookAtTarget = ballPosition.clone().add(forward.clone().multiplyScalar(lookAheadDistance));
-    lookAtTarget.y = ballPosition.y;
+
+    const lookAtTarget = ballPosition.clone().add(forward.clone().multiplyScalar(lookAheadFactor));
+    lookAtTarget.y = ballPosition.y; // Keep lookAt at ball's height
+
     return { position: cameraPos, lookAt: lookAtTarget };
   }
 }

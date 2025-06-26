@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { CSS3DRenderer, CSS3DObject } from 'three/examples/jsm/renderers/CSS3DRenderer.js';
 import Game from './src/game.js';
+import { FPSCounter } from './src/fpsCounter.js';
 
 // Create scene for the title screen
 const titleScene = new THREE.Scene();
@@ -185,7 +186,7 @@ function startGameTransition() {
       // Initialize game
       try {
         console.log("Creating game instance");
-        game = new Game();
+        game = new Game(fpsCounter);
         
         // Remove event listeners
         window.removeEventListener('click', handleStartInput);
@@ -308,6 +309,8 @@ function ensureGameVisible() {
 }
 
 // Title screen animation
+const fpsCounter = new FPSCounter();
+
 let animationId;
 function animate() {
   animationId = requestAnimationFrame(animate);
@@ -319,6 +322,8 @@ function animate() {
   // Render both scenes
   webGLRenderer.render(titleScene, camera);
   cssRenderer.render(new THREE.Scene(), camera); // Empty scene for CSS renderer
+
+  fpsCounter.update();
 }
 
 // Start the title animation

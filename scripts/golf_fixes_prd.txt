@@ -1,0 +1,47 @@
+# ThreeWood Golf Game Fixes PRD
+
+## Overview
+This PRD outlines the necessary fixes and improvements for the ThreeWood golf game. We need to address several issues to improve the gameplay experience and visual quality.
+
+## Required Fixes
+
+### 1. Stylized Grass Texture Fix
+The putting green is using the wrong texture. We need to update it to use the correct stylized grass texture.
+
+- **Current Issue**: The texture path is incorrect or the texture is not loading properly
+- **Required Fix**: Update the texture path to use `C:\Users\Memory is RAM\Documents\projects\threeWood\src\Textures\Stylized_Grass_003_SD-20250506T130641Z-1-001\Stylized_Grass_003_SD\Material_1786.jpg`
+- **Expected Outcome**: The putting green should display the correct stylized grass texture
+
+### 2. Direction Arrow Enhancement
+The direction arrow that points to the hole needs to be improved to dynamically update as the camera moves.
+
+- **Current Issue**: The arrow doesn't update its direction when the camera position changes
+- **Required Fix**: Update the direction arrow logic to recalculate its orientation based on camera position
+- **Expected Outcome**: The arrow should always accurately point toward the hole regardless of camera movement
+
+### 3. Golf Flag 3D Model Implementation
+The golf flag needs to be replaced with a proper 3D model.
+
+- **Current Issue**: Currently using a simple geometric representation instead of the 3D model
+- **Required Fix**: Implement the 3D model from `src\Assets\golf hole flag.glb`
+- **Expected Outcome**: A visually appealing 3D flag model should appear at the hole
+
+### 4. Ball Reset and Hit Functionality
+After the ball resets, the player should be able to hit it again.
+
+- **Current Issue**: After the ball resets, the player cannot hit it again
+- **Required Fix**: Ensure the game state properly transitions to allow hitting after a reset
+- **Expected Outcome**: Player should be able to hit the ball after it has been reset
+
+## Implementation Priority
+The issues should be addressed in the following order:
+
+1. Ball Reset and Hit Functionality (most critical for gameplay)
+2. Stylized Grass Texture Fix (visual improvement)
+3. Golf Flag 3D Model Implementation (visual enhancement)
+4. Direction Arrow Enhancement (usability improvement)
+
+## Technical Considerations
+- All fixes should maintain compatibility with the existing codebase
+- Performance should not be significantly impacted
+- Code should follow the existing patterns and conventions

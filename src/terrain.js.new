@@ -1,0 +1,87 @@
+import * as THREE from 'three';
+import { createNoise2D } from 'simplex-noise';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+
+/**
+ * Terrain generation for ThreeWood
+ * Creates procedural terrain with various features
+ */
+class TerrainGenerator {
+  constructor(options = {}) {
+    this.options = {
+      width: options.width || 400,
+      length: options.length || 400,
+      maxHeight: options.maxHeight || 10,
+      minHeight: options.minHeight || -5,
+      segmentsW: options.segmentsW || 100,
+      segmentsL: options.segmentsL || 100,
+      noiseScale: options.noiseScale || 0.05,
+      noiseOctaves: options.noiseOctaves || 3,
+      noisePersistence: options.noisePersistence || 0.5,
+      heightScale: options.heightScale || 1.0,
+      waterLevel: options.waterLevel || -0.8,
+      waterColor: options.waterColor || 0x4466aa,
+      waterOpacity: options.waterOpacity || 0.8
+    };
+    
+    // Initialize noise generator
+    this.noise = createNoise2D();
+    
+    // Terrain types (by height)
+    this.terrainTypes = [
+      { name: 'water', height: this.options.waterLevel, color: this.options.waterColor },
+      { name: 'bunker', height: -0.5, color: 0xDDCC88 },
+      { name: 'rough', height: 0.0, color: 0x669944 },
+      { name: 'fairway', height: 0.5, color: 0x88CC66 },
+      { name: 'green', height: 1.0, color: 0x66BB55 }
+    ];
+    
+    // Initialize positions
+    this.teePosition = new THREE.Vector3(0, 0, 0);
+    this.holePosition = new THREE.Vector3(0, 0, 0);
+    
+    // Initialize terrain mesh
+    this.terrainMesh = null;
+    
+    // Initialize water surface
+    this.waterMesh = null;
+    this.waterTime = 0;
+  }
+
+  /**
+   * Generate Perlin noise height at given coordinates
+   */
+  getNoiseHeight(x, y) {
+    // Use the new options structure
+    const octaves = this.options.noiseOctaves;
+    const persistence = this.options.noisePersistence;
+    const scale = 1 / this.options.noiseScale;
+    const lacunarity = 2.0; // Default value
+    
+    let amplitude = 1;
+    let frequency = 1;
+    let noiseHeight = 0;
+
+    for (let i = 0; i < octaves; i++) {
+      const sampleX = x / scale * frequency;
+      const sampleY = y / scale * frequency;
+      
+      const noise = this.noise(sampleX, sampleY);
+      noiseHeight += noise * amplitude;
+      
+      amplitude *= persistence;
+      frequency *= lacunarity;
+    }
+
+    // Add a slight slope from tee to hole
+    if (this.teePosition && this.holePosition) {
+      const totalDistance = this.teePosition.distanceTo(this.holePosition);
+      const distanceFromTee = Math.sqrt((x - this.teePosition.x) ** 2 + (y - this.teePosition.z) ** 2);
+      const slopeFactor = (distanceFromTee / totalDistance) * 0.3; // Subtle slope
+      noiseHeight -= slopeFactor;
+    }
+
+    // Normalize and scale to min/max height
+    const { minHeight, maxHeight } = this.options;
+    return THREE.MathUtils.mapLinear(noiseHeight, -1, 1, minHeight, maxHeight);
+  }

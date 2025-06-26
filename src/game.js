@@ -1,15 +1,19 @@
 import * as THREE from 'three';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import TerrainGenerator from './terrain.js';
 import GolfBall from './ball.js';
 import CameraController from './camera.js';
 import UI from './ui.js';
+import handleHoleComplete from './holeComplete.js';
+import { DirectionArrow } from './directionArrow.js';
 
 /**
  * Main game controller for ThreeWood
  * Integrates all components and handles game loop
  */
 class Game {
-  constructor() {
+  constructor(fpsCounter) {
+    this.fpsCounter = fpsCounter;
     // Scene and renderer
     this.scene = new THREE.Scene();
     this.renderer = null;
@@ -23,6 +27,7 @@ class Game {
     this.terrainMesh = null;
     this.ball = null;
     this.shotArrow = null;
+    this.directionArrow = null;
     
     // UI
     this.ui = null;
@@ -63,6 +68,11 @@ class Game {
     
     // First hit flag
     this.firstHit = true;
+    
+    // Spin selector state
+    this.isSpinSelectorOpen = false;
+    
+    this.renderDirty = true;
     
     // Initialize the game
     this.init();
@@ -118,6 +128,7 @@ class Game {
       
       // Force initial render to ensure the scene is visible
       this.renderer.render(this.scene, this.camera);
+      this.renderDirty = true;
       console.log("Initial render forced");
       
       console.log("Game initialized successfully");
@@ -192,8 +203,8 @@ class Game {
     directionalLight.castShadow = true;
     
     // Configure shadow properties
-    directionalLight.shadow.mapSize.width = 1024;
-    directionalLight.shadow.mapSize.height = 1024;
+    directionalLight.shadow.mapSize.width = 512;
+    directionalLight.shadow.mapSize.height = 512;
     directionalLight.shadow.camera.near = 10;
     directionalLight.shadow.camera.far = 500;
     directionalLight.shadow.camera.left = -100;
@@ -220,21 +231,31 @@ class Game {
       length: 400,
       maxHeight: 5,
       minHeight: -1,
-      segmentsW: 200,
-      segmentsL: 200
+      segmentsW: 100,
+      segmentsL: 100,
+      waterLevel: -0.8,
+      waterColor: 0x4466aa,
+      waterOpacity: 0.8
     });
     
+    // Generate terrain mesh
     this.terrainMesh = this.terrain.generateTerrain();
     this.terrainMesh.receiveShadow = true;
     this.scene.add(this.terrainMesh);
+    
+    // Create water surface
+    this.terrain.createWaterSurface(this.scene);
+    
+    // Create golf hole flag
+    this.flag = this.terrain.createFlag(this.scene);
     console.log('[Game.init] Tee Position:', this.terrain.teePosition.toArray());
 
     // Create golf ball
     this.ball = new GolfBall(this.terrain);
     this.scene.add(this.ball.getMesh());
-    console.log('[Game.init] Ball created at Pos:', this.ball.position.toArray());
+    console.log('[Game.init] GolfBall created at Pos:', this.ball.position.toArray());
     
-    // Reset ball to tee position
+    // Reset golf ball to tee position
     this.ball.reset(this.terrain.teePosition);
     console.log('[Game.init] Ball reset to Pos:', this.ball.position.toArray());
     
@@ -247,11 +268,26 @@ class Game {
     this.scene.add(this.shotArrow);
     
     // Initialize camera controller with ball as target
-    this.cameraController = new CameraController(this.camera, this.ball);
+    this.cameraController = new CameraController(this.camera, this.ball, { terrain: this.terrain });
+    // Set a reference to the game instance in the camera controller
+    this.cameraController.game = this;
     console.log('[Game.init] CameraController created. Initial Cam Pos:', this.camera.position.toArray());
+
+    // Calculate initial aiming angle towards the hole after terrain is ready
+    if (this.terrain && this.terrain.teePosition && this.terrain.holePosition) {
+      const teeToHole = new THREE.Vector2(
+        this.terrain.holePosition.x - this.terrain.teePosition.x,
+        this.terrain.holePosition.z - this.terrain.teePosition.z
+      );
+      this.cameraController.aimingAngle = 0; // Set to 0 to point along positive X-axis (towards hole)
+      console.log('[Game.init] Initial aiming angle set to:', this.cameraController.aimingAngle);
+    }
     
     // Add a hole flag
-    this.addHoleFlag();
+    // this.addHoleFlag(); // Removed as flag is created in TerrainGenerator
+    
+    // Create direction arrow UI
+    this.createDirectionArrow();
     
     console.log("Game objects initialized successfully");
   }
@@ -330,50 +366,41 @@ class Game {
   }
   
   /**
-   * Handle key press events
+   * Handle key press
    */
   handleKeyPress(key) {
-    // If game is paused (instructions showing), only allow 'h' key to work
-    if (this.isPaused && key !== 'h') {
-      console.log("Game input ignored while instructions are showing");
-      return;
-    }
+    if (this.isPaused) return;
+    this.renderDirty = true;
     
-    switch (key) {
+    switch (key.toLowerCase()) {
       case ' ': // Space bar
         if (this.gameState === 'AIMING') {
-          this.startPowerMeter();
+          // Start power meter (if not already active)
+          if (!this.powerMeter.active) {
+            this.startPowerMeter();
+            this.setGameState('HITTING');
+          }
         } else if (this.gameState === 'HITTING') {
+          // Execute hit with current power
           this.hitBall();
-        } else if (this.gameState === 'TITLE') {
-          this.setGameState('READY_TO_HIT');
         }
         break;
-        
-      case 'c': // Change camera mode
-        if (this.gameState === 'READY_TO_HIT' || this.gameState === 'AIMING') {
-          this.toggleCameraMode();
-        }
+      case 'r': // Reset ball
+        this.resetBall();
+        this.setGameState('AIMING');
         break;
-        
-      case 'r': // Reset ball to tee
-        if (this.gameState === 'READY_TO_HIT') {
-          this.resetBall();
-        }
+      case 'c': // Toggle camera mode
+        this.toggleCameraMode();
         break;
-        
-      case 'h': // Show instructions
-        this.ui.showInstructions();
+      case 'arrowup': // Increase loft
+        this.adjustLoft(1);
         break;
-
-      case 'ArrowUp':
+      case 'arrowdown': // Decrease loft
+        this.adjustLoft(-1);
+        break;
+      case 's': // Toggle spin selector
         if (this.gameState === 'AIMING') {
-          this.adjustLoft(1); // Use +1 direction
-        }
-        break;
-      case 'ArrowDown':
-        if (this.gameState === 'AIMING') {
-          this.adjustLoft(-1); // Use -1 direction
+          this.toggleSpinSelector();
         }
         break;
     }
@@ -389,9 +416,22 @@ class Game {
       return;
     }
     
+    // Skip if user is interacting with the spin selector
+    if (this.isSpinSelectorOpen) {
+      console.log("Mouse input ignored while spin selector is open");
+      return;
+    }
+    this.renderDirty = true;
+    
     if (this.gameState === 'AIMING') {
       this.ui.hideReadyIndicator(); // Hide indicator when starting swing
+      
+      // Start power meter
       this.startPowerMeter();
+      this.setGameState('HITTING');
+    } else if (this.gameState === 'HITTING') {
+      // Execute hit with current power
+      this.hitBall();
     } else if (this.gameState === 'TITLE') {
       this.setGameState('READY_TO_HIT');
     }
@@ -401,9 +441,9 @@ class Game {
    * Handle mouse up events
    */
   handleMouseUp() {
-    if (this.gameState === 'HITTING') {
-      this.hitBall();
-    }
+    // We're now using a two-click process for hitting the ball,
+    // so mouse up does not automatically trigger the hit
+    // This is intentionally empty
   }
   
   /**
@@ -421,6 +461,60 @@ class Game {
     if (this.gameState === 'WATCHING') {
       // Ball is in motion after being hit
       this.ball.update(this.deltaTime);
+      
+      // Check if ball has entered the hole
+      if (this.terrain && this.terrain.checkBallInHole && this.terrain.checkBallInHole(this.ball)) {
+        // Ball has entered the hole!
+        this.handleHoleComplete();
+      }
+    }
+    
+    // Update water animation and check for ball-water collisions
+    if (this.terrain) {
+      // Update water surface waves
+      if (this.terrain.updateWater) {
+        this.terrain.updateWater(this.deltaTime);
+      }
+      
+      // Check for ball-water collision and create splash if needed
+      if (this.gameState === 'WATCHING' && this.ball && this.terrain.checkBallWaterCollision) {
+        // Get ball velocity for splash intensity
+        const ballVelocity = this.ball.velocity ? this.ball.velocity.length() : 0;
+        
+        // Check collision and create splash if needed
+        const isInWater = this.terrain.checkBallWaterCollision(
+          this.ball, 
+          this.scene, 
+          ballVelocity
+        );
+        
+        // Apply water physics to ball if in water
+        if (isInWater) {
+          // Make sure ball has velocity object
+          if (!this.ball.velocity) {
+            this.ball.velocity = new THREE.Vector3(0, 0, 0);
+          }
+          
+          // Slow down the ball in water (water resistance)
+          this.ball.velocity.multiplyScalar(0.95);
+          
+          // Apply slight downward force (sinking)
+          this.ball.velocity.y -= 0.05;
+          
+          // Ensure the ball keeps moving if it's in water
+          if (this.ball.velocity.length() < 0.1) {
+            // Add a small random movement to prevent complete stopping in water
+            this.ball.velocity.x += (Math.random() - 0.5) * 0.02;
+            this.ball.velocity.z += (Math.random() - 0.5) * 0.02;
+            this.ball.velocity.y -= 0.1; // Ensure it sinks
+          }
+        }
+      }
+      
+      // Update splash and ripple effects
+      if (this.terrain.updateSplashEffects) {
+        this.terrain.updateSplashEffects(this.deltaTime, this.scene);
+      }
     }
     
     // Log state BEFORE camera update
@@ -431,6 +525,9 @@ class Game {
     
     // Update camera controller
     this.cameraController.update(this.deltaTime);
+    
+    // Update direction arrow to point to hole
+    this.updateDirectionArrow();
     
     // Log state AFTER camera update
     if (window.DEBUG_CAMERA) {
@@ -493,8 +590,10 @@ class Game {
       this.shotArrow.setDirection(shotDir);
       this.shotArrow.setLength(1.2, 0.25, 0.15);
       this.shotArrow.visible = true;
+      this.renderDirty = true;
     } else if (this.shotArrow) {
       this.shotArrow.visible = false;
+      this.renderDirty = true;
     }
     
     // Check if ball has stopped after being hit
@@ -594,19 +693,38 @@ class Game {
    * Start the power meter
    */
   startPowerMeter() {
+    // Don't start if already active
+    if (this.powerMeter.active) {
+      console.log("Power meter already active");
+      return;
+    }
+    
+    // Initialize power meter
     this.powerMeter.active = true;
     this.powerMeter.power = 0;
     this.powerMeter.direction = 1;
+    
+    // Change game state
     this.setGameState('HITTING');
     
     // Show UI power meter
     this.ui.showPowerMeter();
+    
+    console.log("Power meter started - Click again to hit ball");
   }
   
   /**
    * Hit the ball with current power and direction
    */
   hitBall() {
+    // Ensure the power meter is active
+    if (!this.powerMeter.active) {
+      console.warn("Attempted to hit ball without active power meter");
+      return;
+    }
+    
+    console.log("Hitting ball with power: " + this.powerMeter.power.toFixed(1));
+    
     // Get current power and direction
     let power = this.powerMeter.power;
     
@@ -646,9 +764,35 @@ class Game {
     // Store this direction on the ball for deflection logic on first impact
     this.ball.lastShotDirection = launchDirection.clone();
     
-    // Hit the ball using the *horizontal* direction and loft angle
-    // The ball.hit() method applies loft internally to calculate initial velocity
-    this.ball.hit(power, direction, loft);
+    // Get spin values with safe default
+    let spinValues = this.spinValues || { x: 0, y: 0 };
+    if (!spinValues.x && !spinValues.y) {
+      // If no spin values stored, try getting from UI
+      try {
+        if (this.ui && this.ui.spinValues) {
+          spinValues = this.ui.spinValues;
+        }
+      } catch (e) {
+        console.warn("Error getting spin values:", e);
+      }
+    }
+    
+    // Calculate sidespin based on horizontal (x) position
+    // Negative x = left spin (hook), Positive x = right spin (slice)
+    let sidespin = (spinValues.x || 0); // Use raw value from spin selector
+    
+    // Hit the ball using the horizontal direction, loft angle, and sidespin
+    this.ball.hit(power, direction, loft, sidespin);
+    
+    // Hide the spin selector and indicator after hitting
+    try {
+      if (this.ui) {
+        if (this.ui.hideSpinSelector) this.ui.hideSpinSelector();
+        if (this.ui.hideSpinIndicator) this.ui.hideSpinIndicator();
+      }
+    } catch (e) {
+      console.warn("Error hiding spin UI:", e);
+    }
     
     // Increment stroke count
     this.strokes++;
@@ -668,9 +812,20 @@ class Game {
   }
   
   /**
+   * Show the spin selector UI
+   */
+  showSpinSelector() {
+    if (this.gameState !== 'AIMING') return;
+    
+    // Show the spin selector UI
+    this.ui.showSpinSelector();
+  }
+  
+  /**
    * Toggle camera mode (follow/overview)
    */
   toggleCameraMode() {
+    this.renderDirty = true;
     if (this.cameraController.currentMode === this.cameraController.MODES.FOLLOW) {
       this.cameraController.setMode(this.cameraController.MODES.OVERVIEW);
     } else {
@@ -682,6 +837,7 @@ class Game {
    * Reset the ball to the tee
    */
   resetBall() {
+    this.renderDirty = true;
     console.log('[Game.resetBall] Resetting ball. Tee Pos:', this.terrain.teePosition.toArray());
     this.ball.reset(); // Ball.reset() uses terrain.teePosition if no arg is given
     console.log('[Game.resetBall] Ball position after reset:', this.ball.position.toArray());
@@ -689,6 +845,40 @@ class Game {
     
     // Update UI
     this.ui.updateStrokes(this.strokes);
+    
+    // Point the camera toward the hole before setting game state
+    if (this.cameraController && this.terrain && this.terrain.holePosition) {
+      // Calculate direction from ball to hole
+      const ballPos = this.ball.position;
+      const holePos = this.terrain.holePosition;
+      
+      // Calculate angle to hole in the XZ plane
+      const angleToHole = Math.atan2(
+        holePos.x - ballPos.x,
+        holePos.z - ballPos.z
+      );
+      
+      // Reset the camera controller's aiming angle to point at the hole
+      this.cameraController.aimingAngle = angleToHole;
+      console.log('[Game.resetBall] Camera aimed toward hole at angle:', angleToHole);
+    }
+    
+    // Ensure the game state is set to allow hitting
+    // We need to set it to READY_TO_HIT which will transition to AIMING
+    // This is critical for allowing the player to hit the ball again
+    this.setGameState('READY_TO_HIT');
+    
+    // Show the shot arrow again
+    if (this.shotArrow) {
+      this.shotArrow.visible = true;
+    }
+    
+    // Reset any other game state variables that might prevent hitting
+    this.powerMeter.active = false;
+    if (this.ui) {
+      this.ui.hidePowerMeter();
+      this.ui.showReadyIndicator();
+    }
   }
   
   /**
@@ -726,13 +916,29 @@ class Game {
    */
   setGameState(state) {
     console.log(`Game state changing from ${this.gameState} to ${state}`);
+    
+    // Store previous state for reference
+    const previousState = this.gameState;
     this.gameState = state;
+    this.renderDirty = true;
     
     // Handle state transitions
     switch (state) {
       case 'READY_TO_HIT':
         // Prepare for the next shot (e.g., enable aiming)
-        this.setGameState('AIMING'); // Immediately transition to aiming
+        
+        // Reset any lingering state from previous gameplay
+        if (previousState === 'HOLE_COMPLETE') {
+          console.log('Transitioning from HOLE_COMPLETE to READY_TO_HIT');
+          // Make sure ball is not moving
+          if (this.ball && this.ball.velocity) {
+            this.ball.velocity.set(0, 0, 0);
+            this.ball.isResting = true;
+          }
+        }
+        
+        // Immediately transition to aiming
+        this.setGameState('AIMING');
         break;
       case 'AIMING':
         // Reset aiming angle when entering aiming state after a shot
@@ -742,6 +948,19 @@ class Game {
         // Set camera to aiming mode
         this.cameraController?.setMode(this.cameraController.MODES.AIMING);
         console.log("Player can now aim/adjust loft");
+        
+        // Reset spin values for a new shot
+        this.resetSpinValues();
+        
+        // Show spin indicator if there's spin applied
+        try {
+          if (this.ui && this.ui.spinValues && 
+              (Math.abs(this.ui.spinValues.x) > 0.05 || Math.abs(this.ui.spinValues.y) > 0.05)) {
+            this.ui.updateSpinIndicator();
+          }
+        } catch (e) {
+          console.warn("Could not update spin indicator:", e);
+        }
         break;
       case 'HITTING':
         // Start power meter
@@ -752,6 +971,15 @@ class Game {
         // Ball is in motion
         console.log("Ball in motion");
         if (this.shotArrow) this.shotArrow.visible = false; // Hide visual indicator
+        
+        // Hide spin indicator while ball is in motion
+        try {
+          if (this.ui && this.ui.hideSpinIndicator) {
+            this.ui.hideSpinIndicator();
+          }
+        } catch (e) {
+          console.warn("Could not hide spin indicator:", e);
+        }
         break;
       case 'CAMERA_TRANSITION':
         // Camera is smoothly moving to aiming position
@@ -765,6 +993,39 @@ class Game {
   }
   
   /**
+   * Toggle the spin selector visibility
+   */
+  toggleSpinSelector() {
+    try {
+      if (!this.ui) return;
+      
+      if (!this.isSpinSelectorOpen) {
+        // Show spin selector
+        this.isSpinSelectorOpen = true;
+        
+        // Use the UI's showSpinSelector method
+        if (this.ui.showSpinSelector) {
+          this.ui.showSpinSelector((spinValues) => {
+            // This is the callback when spin is confirmed
+            console.log("Spin applied:", spinValues);
+            // Store spin values for use when hitting
+            this.spinValues = spinValues;
+          });
+        }
+      } else {
+        // Hide spin selector
+        this.isSpinSelectorOpen = false;
+        
+        if (this.ui.closeSpinSelector) {
+          this.ui.closeSpinSelector(false); // false = don't call callback
+        }
+      }
+    } catch (e) {
+      console.warn("Error toggling spin selector:", e);
+    }
+  }
+  
+  /**
    * Main animation/game loop
    */
   animate() {
@@ -774,8 +1035,16 @@ class Game {
       // Update game state
       this.update();
       
-      // Render the scene
-      this.renderer.render(this.scene, this.camera);
+      // Render the scene only when necessary
+      if (this.renderDirty || this.gameState === 'WATCHING') {
+        this.renderer.render(this.scene, this.camera);
+        this.renderDirty = false;
+      }
+
+      // Update FPS counter
+      if (this.fpsCounter) {
+        this.fpsCounter.update();
+      }
     } catch (error) {
       console.error("Error in animation loop:", error);
     }
@@ -786,6 +1055,7 @@ class Game {
    */
   adjustLoft(direction) { // Parameter is now direction (+1 or -1)
     if (this.gameState !== 'AIMING') return;
+    this.renderDirty = true;
 
     this.currentLoft += direction * this.LOFT_INCREMENT; // Use this.LOFT_INCREMENT
     // Clamp loft angle
@@ -798,6 +1068,76 @@ class Game {
     }
     // No need to update indicator geometry here, 'update' loop handles rotation
   }
+
+  /**
+   * Reset power meter state
+   * Called when closing spin selector or other cases where we need
+   * to cancel any accidental power meter activation
+   */
+  resetPowerMeterState() {
+    if (this.gameState === 'HITTING' && !this.ball.isMoving) {
+      // Only reset if we're in HITTING state but the ball isn't moving yet
+      this.powerMeter.active = false;
+      this.ui.hidePowerMeter();
+      this.setGameState('AIMING');
+      
+      // Show ready indicator again
+      if (this.ui && this.ui.showReadyIndicator) {
+        this.ui.showReadyIndicator();
+      }
+      
+      console.log("Power meter state reset");
+    }
+  }
+
+  /**
+   * Reset spin values for a new shot
+   */
+  resetSpinValues() {
+    this.spinValues = { x: 0, y: 0 };
+    if (this.ui) {
+      this.ui.updateSpinIndicator();
+    }
+  }
+  
+  /**
+   * Create the direction arrow UI element
+   */
+  createDirectionArrow() {
+    // Create the direction arrow UI element
+    const container = document.getElementById('game-container') || document.body;
+    this.directionArrow = new DirectionArrow(container);
+    
+    // Initially hide the arrow until the game starts
+    this.directionArrow.setVisible(false);
+  }
+  
+  /**
+   * Update the direction arrow to point toward the hole
+   * Dynamically recalculates orientation based on camera position
+   */
+  updateDirectionArrow() {
+    if (!this.directionArrow || !this.ball || !this.terrain || !this.terrain.holePosition || !this.camera) {
+      return;
+    }
+    this.renderDirty = true;
+    
+    // Only show the arrow when the ball is stationary and we're ready to hit
+    const shouldShowArrow = ['READY_TO_HIT', 'AIMING'].includes(this.gameState) && !this.ball.isMoving;
+    this.directionArrow.setVisible(shouldShowArrow);
+    
+    if (shouldShowArrow) {
+      // Update the arrow direction with camera position for perspective adjustment
+      this.directionArrow.update(
+        this.ball.position,
+        this.terrain.holePosition,
+        this.camera.position
+      );
+    }
+  }
 }
 
-export default Game; 
+// Add the handleHoleComplete method to the Game class prototype
+Game.prototype.handleHoleComplete = handleHoleComplete;
+
+export default Game;

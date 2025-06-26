@@ -8,7 +8,7 @@
   - [x] Add spin effects for backspin/topspin
   - [x] Create more realistic stopping behavior
   - [x] Add terrain interaction (slope handling)
-  - [ ] Add side-spin for hook/slice shots
+  - [x] Add side-spin for hook/slice shots
   - [ ] Implement wind effects on ball flight
 
 ### Camera System

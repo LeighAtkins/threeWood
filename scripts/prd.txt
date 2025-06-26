@@ -1,0 +1,122 @@
+# ThreeWood Golf Game Development PRD
+
+## Overview
+ThreeWood is a browser-based golf game that simulates realistic golf mechanics, physics, and gameplay. The game aims to provide an engaging golf experience with accurate physics, varied gameplay modes, and polished audiovisual presentation.
+
+## Core Features
+
+### Physics Engine
+- Realistic ball physics with friction and rolling resistance
+- Spin effects (backspin/topspin)
+- Terrain interaction with slope handling
+- Side-spin for hook/slice shots
+- Wind effects on ball flight
+
+### Camera System
+- Dynamic camera following
+- Predictive following for fast ball movement
+- Terrain clipping prevention
+- Dynamic field of view adjustments
+- Camera shake effects
+
+### Course Design
+- 9-hole golf course with varying difficulty
+- Tee boxes, fairways, and greens
+- Hazards and bunkers
+- Elevation changes
+- Unique course features
+
+### Club System
+- Driver for distance
+- Mid-range irons
+- Wedges for high loft shots
+- Putters for green shots
+- Automatic club selection
+
+### Input System
+- Power meter control
+- Shot shaping (fade/draw)
+- Advanced aiming
+- Putting green grid overlay
+- Controller support
+
+## User Experience
+
+### User Flows
+1. Main Menu -> Course Selection -> Play Hole
+2. Shot Preparation -> Power/Aim Control -> Execute Shot
+3. Ball Flight -> Terrain Interaction -> Next Shot
+4. Hole Completion -> Score Tracking -> Next Hole
+
+### UI/UX Considerations
+- Intuitive control schemes
+- Clear HUD indicators
+- Visual feedback for shots
+- Progress tracking
+- Tutorial integration
+
+## Technical Architecture
+
+### Core Components
+- Physics Engine (Cannon.js)
+- Render Engine (Three.js)
+- Input System
+- Course Management
+- Scoring System
+- Audio System
+
+### Data Models
+- Ball State
+- Course Layout
+- Player Stats
+- Shot Data
+- Score Tracking
+
+## Development Roadmap
+
+### Phase 1: Core Physics
+- Ball physics implementation
+- Terrain interaction
+- Basic camera system
+- Simple course layout
+
+### Phase 2: Game Mechanics
+- Club system
+- Input controls
+- Scoring system
+- Basic UI
+
+### Phase 3: Features
+- Advanced camera
+- Course design
+- Audio system
+- Tutorials
+
+### Phase 4: Polish
+- Visual effects
+- Audio enhancements
+- UI polish
+- Performance optimization
+
+## Risks and Mitigations
+
+### Technical Risks
+- Physics engine complexity
+- Performance optimization
+- Input responsiveness
+- Terrain generation
+
+### Mitigations
+- Modular architecture
+- Performance testing
+- Regular optimization
+- Incremental development
+
+## Appendix
+
+### Technical Specifications
+- Three.js for rendering
+- Cannon.js for physics
+- Web Audio API for sound
+- Responsive design
+- Cross-platform compatibility

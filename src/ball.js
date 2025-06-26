@@ -46,6 +46,7 @@ class GolfBall {
     this.acceleration = new THREE.Vector3(0, 0, 0);
     this.angularVelocity = new THREE.Vector3(0, 0, 0); // For rolling
     this.spin = 0; // Backspin/topspin factor
+    this.sidespin = 0; // Sidespin factor
     this.forces = new THREE.Vector3(0, 0, 0);
     this.isResting = true;
     this.inAir = false;
@@ -103,8 +104,12 @@ class GolfBall {
   
   /**
    * Apply a hit to the ball with specified power and direction
+   * @param {number} power - Power of the hit (0-100)
+   * @param {THREE.Vector3} direction - Direction vector
+   * @param {number} loft - Loft angle in degrees
+   * @param {number} sidespin - Side spin value (-1 to 1, negative = hook/left, positive = slice/right)
    */
-  hit(power, direction, loft) {
+  hit(power, direction, loft, sidespin) {
     if (!this.isResting) return false;
     
     // Debug - log if the ball is potentially embedded in terrain
@@ -140,13 +145,24 @@ class GolfBall {
     // Add backspin based on loft angle and power
     // Higher loft = more backspin, high power = more spin
     const spinIntensity = Math.min(1.0, power / 70); // Power factor (max at 70% power)
+    
+    // Store backspin/topspin in this.spin (vertical spin)
     this.spin = -loftRadians * 6 * spinIntensity; // Increased backspin factor
     
     // Add slight random variation to spin (±10%)
     this.spin *= 0.9 + Math.random() * 0.2;
     
-    // Ensure spin stays within reasonable limits
+    // Ensure vertical spin stays within reasonable limits
     this.spin = Math.max(-this.options.maxSpinRate, Math.min(0, this.spin));
+    
+    // Store sidespin in a new property
+    this.sidespin = (sidespin || 0) * spinIntensity * this.options.maxSpinRate;
+    
+    // Apply slight random variation to sidespin (±5%)
+    this.sidespin *= 0.95 + Math.random() * 0.1;
+    
+    // Log the spin values
+    console.log(`Applied spin - Vertical: ${this.spin.toFixed(2)}, Side: ${this.sidespin.toFixed(2)}`);
     
     // Ball is now in motion
     this.isResting = false;
@@ -161,7 +177,7 @@ class GolfBall {
     this.playHitSound(power);
     
     // Log the hit for debugging
-    console.log(`Ball hit with power: ${power.toFixed(1)}, speed: ${speed.toFixed(2)} m/s, loft: ${loft.toFixed(1)}°, spin: ${this.spin.toFixed(2)}`);
+    console.log(`Ball hit with power: ${power.toFixed(1)}, speed: ${speed.toFixed(2)} m/s, loft: ${loft.toFixed(1)}°, spin: ${this.spin.toFixed(2)}, sidespin: ${this.sidespin.toFixed(2)}`);
     
     return true;
   }
@@ -294,19 +310,20 @@ class GolfBall {
   }
 
   /**
-   * Apply spin effects (backspin, topspin) to the ball
+   * Apply spin effects (backspin, topspin, sidespin) to the ball
+   * @param {number} dt - Time step in seconds
    * @param {boolean} nearGround - Whether the ball is near the ground
    */
   applySpinEffects(dt, nearGround) {
-    // Skip if no significant spin
-    if (Math.abs(this.spin) < 0.1) return;
+    // Skip if no significant spin (either vertical or side)
+    if (Math.abs(this.spin) < 0.1 && Math.abs(this.sidespin || 0) < 0.1) return;
     
     // Get horizontal velocity components
-      const horizontalVelocity = new THREE.Vector3(
-        this.velocity.x, 
-        0, 
-        this.velocity.z
-      );
+    const horizontalVelocity = new THREE.Vector3(
+      this.velocity.x, 
+      0, 
+      this.velocity.z
+    );
     const horizontalSpeed = horizontalVelocity.length();
     
     // Normalize horizontal velocity if it exists
@@ -317,36 +334,59 @@ class GolfBall {
       if ((this.inAir && nearGround) || !this.inAir) {
         // Calculate spin effects based on spin magnitude and direction
         
-        // 1. Vertical lift/drop effect
+        // 1. Vertical lift/drop effect from backspin/topspin
         // Positive spin (topspin) pushes ball down, negative (backspin) creates lift
         const liftForce = -this.spin * dt * 3.0;
         this.velocity.y += liftForce;
         
-        // 2. Forward/backward effect on horizontal movement
+        // 2. Forward/backward effect on horizontal movement from backspin/topspin
         // Topspin accelerates forward, backspin slows
         const horizontalForce = -this.spin * dt * 1.8;
         
         // Apply horizontal force in direction of movement
         this.velocity.x += horizontalVelocity.x * horizontalForce;
         this.velocity.z += horizontalVelocity.z * horizontalForce;
+      }
+      
+      // 3. Apply sidespin effect (hook/slice)
+      if (this.inAir && Math.abs(this.sidespin || 0) > 0.1) {
+        // Create a perpendicular vector for the side force (right hand rule)
+        // For golf:
+        // - Negative sidespin (hook) curves left (for right-handed golfer)
+        // - Positive sidespin (slice) curves right (for right-handed golfer)
+        const sideDirection = new THREE.Vector3(
+          -horizontalVelocity.z,  // Perpendicular to velocity
+          0,
+          horizontalVelocity.x
+        );
         
-        // 3. Side spin effect (simulate hook/slice when in air)
-        if (this.inAir && Math.abs(this.spin) > 1.0) {
-          // Calculate perpendicular vector for side force (right hand rule)
-          const sideDirection = new THREE.Vector3(
-            -horizontalVelocity.z,
-            0,
-            horizontalVelocity.x
-          );
-          
-          // Spin direction determines side force direction
-          // Positive spin creates right curve, negative creates left curve
-          const sideForce = Math.sign(this.spin) * Math.abs(this.spin) * dt * 0.4;
-          
-          // Apply side force
-          this.velocity.x += sideDirection.x * sideForce;
-          this.velocity.z += sideDirection.z * sideForce;
+        // Calculate side force magnitude based on sidespin value
+        const sideForce = -(this.sidespin || 0) * dt * 0.8;
+        
+        // Apply side force - negative sidespin (hook) creates right-to-left curve
+        this.velocity.x += sideDirection.x * sideForce;
+        this.velocity.z += sideDirection.z * sideForce;
+        
+        // Add slight downward force for slice, slight upward for hook
+        // (Slices tend to lose distance, hooks tend to roll more)
+        if (this.sidespin > 0) {
+          // Slice - add downward component
+          this.velocity.y -= Math.abs(this.sidespin) * dt * 0.3;
+        } else if (this.sidespin < 0) {
+          // Hook - add very slight upward component initially, then more roll
+          if (this.inAir && this.velocity.y > 0) {
+            this.velocity.y += Math.abs(this.sidespin) * dt * 0.15;
+          }
         }
+      }
+    }
+    
+    // Decay sidespin over time (slightly faster than backspin)
+    if (this.sidespin) {
+      if (this.inAir) {
+        this.sidespin *= this.options.spinDecay;
+      } else {
+        this.sidespin *= (this.options.spinDecay * 0.8);
       }
     }
   }
@@ -1102,6 +1142,7 @@ class GolfBall {
     this.acceleration.set(0, 0, 0);
     this.forces.set(0, 0, 0);
     this.spin = 0;
+    this.sidespin = 0;
     this.isResting = true;
     this.inAir = false;
     this.inWaterHazard = false;

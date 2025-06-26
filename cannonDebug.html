@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ThreeWood - Cannon-ES Debug</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      font-family: Arial, sans-serif;
+      background-color: #111;
+      color: #fff;
+    }
+    
+    #debug {
+      position: fixed;
+      top: 10px;
+      left: 10px;
+      width: 80%;
+      height: 80%;
+      background-color: rgba(0, 0, 0, 0.8);
+      color: #fff;
+      padding: 20px;
+      font-family: monospace;
+      overflow: auto;
+      white-space: pre;
+      z-index: 1000;
+      border: 1px solid #666;
+    }
+  </style>
+</head>
+<body>
+  <div id="debug">Initializing debugger...</div>
+
+  <script type="module">
+    const debugEl = document.getElementById('debug');
+    
+    function log(message) {
+      debugEl.textContent += '\n' + message;
+      debugEl.scrollTop = debugEl.scrollHeight;
+    }
+    
+    window.onerror = function(message, source, lineno, colno, error) {
+      log(`ERROR: ${message}\nAt: ${source}:${lineno}:${colno}\nStack: ${error ? error.stack : 'N/A'}`);
+      return true;
+    };
+    
+    // Step-by-step import debugging
+    try {
+      log('Testing THREE import...');
+      const THREE = await import('three');
+      log('✓ THREE imported successfully');
+      
+      log('Testing CANNON import...');
+      const CANNON = await import('cannon-es');
+      log('✓ CANNON-ES imported successfully');
+      
+      log('Testing PhysicsManager import...');
+      const PhysicsManager = await import('./src/physics.js');
+      log('✓ PhysicsManager imported successfully');
+      
+      log('Testing TerrainGenerator import...');
+      const TerrainGenerator = await import('./src/terrain.js');
+      log('✓ TerrainGenerator imported successfully');
+      
+      // Initialize simple physics world
+      log('Creating physics world...');
+      const physicsManager = new PhysicsManager.default();
+      log('✓ Physics world created');
+      
+      // Initialize simple terrain
+      log('Creating terrain...');
+      const terrainGen = new TerrainGenerator.default({
+        width: 100,
+        length: 100,
+        segmentsW: 50,  // Lower resolution for faster debugging
+        segmentsL: 50,
+        maxHeight: 5,
+        minHeight: -2
+      });
+      
+      log('Generating terrain mesh...');
+      try {
+        const terrainMesh = terrainGen.generateTerrain();
+        log('✓ Terrain mesh generated');
+        
+        log('Getting tee position...');
+        const teePos = terrainGen.getTeePosition();
+        log(`✓ Tee position: ${JSON.stringify(teePos)}`);
+        
+        log('Getting hole position...');
+        const holePos = terrainGen.getHolePosition();
+        log(`✓ Hole position: ${JSON.stringify(holePos)}`);
+      } catch (e) {
+        log(`ERROR: Failed to generate terrain: ${e.message}\nStack: ${e.stack}`);
+      }
+      
+      // Try importing the ball
+      log('Testing CannonGolfBall import...');
+      const CannonGolfBall = await import('./src/cannonBall.js');
+      log('✓ CannonGolfBall imported successfully');
+      
+      log('All critical components imported successfully!');
+      log('If you see this message without errors, you should be able to run the full demo.');
+      
+    } catch (error) {
+      log(`FATAL ERROR: ${error.message}\nStack: ${error.stack}`);
+    }
+  </script>
+</body>
+</html> 

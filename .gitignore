@@ -25,4 +25,15 @@ lerna-debug.log*
 *.ntvs*
 *.njsproj
 *.sln
-*.sw? 
+*.sw?
+
+# Added by Claude Task Master
+dev-debug.log
+# Dependency directories
+# Environment variables
+.env
+.vscode
+# OS specific
+# Task files
+tasks.json
+tasks/ 
