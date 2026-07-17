@@ -5,8 +5,9 @@ import * as THREE from 'three';
  * Handles ball physics, movement, and collision
  */
 class GolfBall {
-  constructor(terrain, options = {}) {
+  constructor(terrain, audioManager = null, options = {}) {
     this.terrain = terrain;
+    this.audioManager = audioManager;
     this.options = {
       radius: options.radius || 0.05,
       mass: options.mass || 0.045, // kg (golf ball mass)
@@ -21,9 +22,9 @@ class GolfBall {
       positionPrecision: options.positionPrecision || 0.01,
       // Collision detection options
       useSubstepping: true, // Enable physics sub-stepping for high velocities
-      maxSubsteps: 3, // Maximum number of substeps per frame
-      tunnelThreshold: 3, // Velocity threshold for considering CCD
-      safeOffset: 0.05, // Safe offset from terrain (increased from 0.03)
+      maxSubsteps: 2, // Reduced from 3 for better performance
+      tunnelThreshold: 5, // Increased threshold to use substepping less often
+      safeOffset: 0.005, // Safe offset from terrain - reduced for better ground contact
       // Phase 2: Enhanced bounce physics
       minBounceVelocity: options.minBounceVelocity || 0.3, // Minimum velocity to bounce
       slopeEnergyLoss: options.slopeEnergyLoss || 0.2, // Additional energy loss on slopes
@@ -50,7 +51,7 @@ class GolfBall {
     this.forces = new THREE.Vector3(0, 0, 0);
     this.isResting = true;
     this.inAir = false;
-    
+
     // Game state
     this.inWaterHazard = false;
     this.lastSafePosition = new THREE.Vector3();
@@ -72,7 +73,15 @@ class GolfBall {
     // For debug visualization
     this.debugRays = [];
   }
-  
+
+  /**
+   * Whether the ball is currently in motion.
+   * Convenience accessor mirroring isResting; game.js reads isMoving.
+   */
+  get isMoving() {
+    return !this.isResting;
+  }
+
   /**
    * Create the golf ball mesh
    */
@@ -116,7 +125,7 @@ class GolfBall {
     const terrainHeight = this.terrain.getHeightAtPosition(this.position.x, this.position.z);
     if (this.position.y - this.options.radius < terrainHeight) {
       console.warn("Ball may be embedded in terrain before hit. Fixing position...");
-      this.position.y = terrainHeight + this.options.radius + 0.01;
+      this.position.y = terrainHeight + this.options.radius + 0.002;
     }
     
     // Save current position as last safe position
@@ -162,7 +171,7 @@ class GolfBall {
     this.sidespin *= 0.95 + Math.random() * 0.1;
     
     // Log the spin values
-    console.log(`Applied spin - Vertical: ${this.spin.toFixed(2)}, Side: ${this.sidespin.toFixed(2)}`);
+    if (window.DEBUG) console.log(`Applied spin - Vertical: ${this.spin.toFixed(2)}, Side: ${this.sidespin.toFixed(2)}`);
     
     // Ball is now in motion
     this.isResting = false;
@@ -170,14 +179,13 @@ class GolfBall {
     this.inWaterHazard = false;
     this.stationaryFrames = 0;
     
-    // Ensure the ball is lifted slightly off the ground to prevent immediate collision
-    this.position.y += 0.02;
+    // Ball is already positioned properly at terrain + radius, no additional lift needed
     
     // Play hit sound
     this.playHitSound(power);
     
     // Log the hit for debugging
-    console.log(`Ball hit with power: ${power.toFixed(1)}, speed: ${speed.toFixed(2)} m/s, loft: ${loft.toFixed(1)}°, spin: ${this.spin.toFixed(2)}, sidespin: ${this.sidespin.toFixed(2)}`);
+    if (window.DEBUG) console.log(`Ball hit with power: ${power.toFixed(1)}, speed: ${speed.toFixed(2)} m/s, loft: ${loft.toFixed(1)}°, spin: ${this.spin.toFixed(2)}, sidespin: ${this.sidespin.toFixed(2)}`);
     
     return true;
   }
@@ -404,18 +412,25 @@ class GolfBall {
     // First check if start position is already embedded in terrain
     // This can happen due to numerical issues or previous physics steps
     const startTerrainHeight = this.terrain.getHeightAtPosition(startPos.x, startPos.z);
-    if (startPos.y - this.options.radius < startTerrainHeight) {
-      // Ball is already embedded - fix position and handle as collision
-      console.warn("Ball already embedded in terrain - fixing position");
-      this.position.y = startTerrainHeight + this.options.radius + 0.01;
+    const embeddingDepth = startTerrainHeight - (startPos.y - this.options.radius);
+    
+    // Only consider it embedded if significantly below terrain (avoid numerical noise)
+    if (embeddingDepth > 0.01) {
+      // Ball is significantly embedded - fix position without bouncing
+      this.position.y = startTerrainHeight + this.options.radius;
       
-      // Get proper normal at this location
-      const normal = this.terrain.getNormalAtPosition(startPos.x, startPos.z);
-      if (normal) {
+      // Stop vertical velocity to prevent oscillation
+      if (this.velocity.y < 0) {
+        this.velocity.y = 0;
+      }
+      
+      // Don't trigger a bounce unless ball is moving fast
+      if (this.velocity.length() > 2.0) {
+        const normal = this.terrain.getNormalAtPosition(startPos.x, startPos.z) || new THREE.Vector3(0, 1, 0);
         this.handleBounce(normal, dt);
       } else {
-        // Fallback to default upward normal
-        this.handleBounce(new THREE.Vector3(0, 1, 0), dt);
+        // Just settle the ball on the ground
+        this.inAir = false;
       }
       return true;
     }
@@ -498,13 +513,7 @@ class GolfBall {
     const impactDot = Math.abs(velocityUnit.dot(normal));
     const impactAngle = Math.acos(impactDot);
     
-    // Log detailed bounce information for debugging
-    if (speed > 2.0) {
-      console.log(`Bounce detected:
-        - Speed: ${speed.toFixed(2)} m/s
-        - Normal: ${normal.x.toFixed(2)}, ${normal.y.toFixed(2)}, ${normal.z.toFixed(2)}
-        - Impact angle: ${(impactAngle * 180 / Math.PI).toFixed(2)}°`);
-    }
+    // Bounce logging disabled for performance
     
     // For very low angle impacts (skimming), enhance the ability to continue along the surface
     // Less than 15 degrees impact angle is considered a skimming impact
@@ -656,9 +665,9 @@ class GolfBall {
       this.velocity.multiplyScalar(0.85);
     }
     
-    // Position exactly on the ground with small offset to prevent z-fighting
+    // Position exactly on the ground (ball center at terrain height + radius)
     const terrainHeight = this.terrain.getHeightAtPosition(this.position.x, this.position.z);
-    this.position.y = terrainHeight + this.options.radius + 0.01;
+    this.position.y = terrainHeight + this.options.radius;
     
     // Update the last safe position
     this.lastSafePosition.copy(this.position);
@@ -730,7 +739,7 @@ class GolfBall {
           this.terrain.getHeightAtPosition(this.position.x, this.position.z) + 0.02) {
         // Force grounding for very low energy balls near the ground
         const terrainHeight = this.terrain.getHeightAtPosition(this.position.x, this.position.z);
-        this.position.y = terrainHeight + this.options.radius + 0.01;
+        this.position.y = terrainHeight + this.options.radius;
         this.velocity.y = 0;
         this.inAir = false;
       }
@@ -745,9 +754,9 @@ class GolfBall {
       
       // After several frames of being slow, fully stop the ball
       if (this.stationaryFrames > this.options.minimumStopFrames) { 
-        // Ensure the ball is properly resting on the terrain with clearance
+        // Ensure the ball is properly resting on the terrain
         const terrainHeight = this.terrain.getHeightAtPosition(this.position.x, this.position.z);
-        this.position.y = terrainHeight + this.options.radius + 0.01; // Add small clearance
+        this.position.y = terrainHeight + this.options.radius; // Ball center at terrain + radius
         
         // Zero out all movement
         this.velocity.set(0, 0, 0);
@@ -758,7 +767,7 @@ class GolfBall {
         
         // Save current position as safe position when coming to rest
         this.lastSafePosition.copy(this.position);
-        console.log("Ball has come to rest");
+        if (window.DEBUG) console.log("Ball has come to rest");
         
         // Play stop sound
         this.playStopSound();
@@ -800,8 +809,8 @@ class GolfBall {
     
     // Ball has penetrated terrain or is exactly at terrain height
     if (ballBottomHeight <= terrainHeight) {
-      // Position ball precisely on terrain surface with small clearance
-      this.position.y = terrainHeight + this.options.radius + 0.01;
+      // Position ball precisely on terrain surface (center at terrain + radius)
+      this.position.y = terrainHeight + this.options.radius;
       
       // Check if this is a high-speed impact or a gentle landing
       const impactSpeed = Math.abs(this.velocity.y);
@@ -844,8 +853,8 @@ class GolfBall {
       // Ball was on ground but might be slightly above it now (e.g., after moving on a slope)
       if (ballBottomHeight > terrainHeight && 
           ballBottomHeight < terrainHeight + 0.1) {
-        // Gently reset to exactly on ground with clearance
-        this.position.y = terrainHeight + this.options.radius + 0.01;
+        // Gently reset to exactly on ground (center at terrain + radius)
+        this.position.y = terrainHeight + this.options.radius;
         this.velocity.y = 0;
       }
     }
@@ -902,7 +911,7 @@ class GolfBall {
   handleWaterHazard() {
     if (this.inWaterHazard) return; // Already handled
     
-    console.log("Ball in water hazard!");
+    if (window.DEBUG) console.log("Ball in water hazard!");
     this.inWaterHazard = true;
     
     // Reset to last safe position
@@ -916,7 +925,7 @@ class GolfBall {
     // Ensure we're not below the terrain (fix for potential embedding)
     const terrainHeight = this.terrain.getHeightAtPosition(this.position.x, this.position.z);
     if (this.position.y - this.options.radius < terrainHeight) {
-      this.position.y = terrainHeight + this.options.radius + 0.01;
+      this.position.y = terrainHeight + this.options.radius;
     }
     
     if (this.velocity.lengthSq() < 0.0001) {
@@ -1124,15 +1133,15 @@ class GolfBall {
       if (this.terrain) {
         const terrainHeight = this.terrain.getHeightAtPosition(this.position.x, this.position.z);
         // Make sure ball is properly positioned above terrain
-        if (this.position.y < terrainHeight + this.options.radius + 0.01) {
-          this.position.y = terrainHeight + this.options.radius + 0.01;
+        if (this.position.y < terrainHeight + this.options.radius) {
+          this.position.y = terrainHeight + this.options.radius;
         }
       }
     } else {
       // Reset to tee position
       this.position.copy(this.terrain.teePosition);
-      // Raise slightly above the tee
-      this.position.y += this.options.radius + 0.01;
+      // Position ball so it's exactly touching the ground (center at terrain height + radius)
+      this.position.y += this.options.radius;
     }
       
       // This is now our safe position
@@ -1163,92 +1172,32 @@ class GolfBall {
    * Play sound effect for hitting the ball
    */
   playHitSound(power) {
-    if (!this.audioContext) return;
+    if (!this.audioManager) return;
     
-    try {
-      // Create oscillator for the "hit" sound
-      const oscillator = this.audioContext.createOscillator();
-      const gainNode = this.audioContext.createGain();
-      
-      // Connect nodes
-      oscillator.connect(gainNode);
-      gainNode.connect(this.audioContext.destination);
-      
-      // Set properties based on hit power
-      oscillator.type = 'triangle';
-      const baseFreq = 400 + (power * 3); // Higher pitch for harder hits
-      oscillator.frequency.setValueAtTime(baseFreq, this.audioContext.currentTime);
-      oscillator.frequency.exponentialRampToValueAtTime(
-        baseFreq * 0.5,
-        this.audioContext.currentTime + 0.1
-      );
-      
-      // Volume envelope
-      gainNode.gain.setValueAtTime(0.0001, this.audioContext.currentTime);
-      gainNode.gain.exponentialRampToValueAtTime(
-        Math.min(0.3, 0.1 + (power / 300)), // Louder for harder hits, but capped
-        this.audioContext.currentTime + 0.01
-      );
-      gainNode.gain.exponentialRampToValueAtTime(
-        0.0001,
-        this.audioContext.currentTime + 0.3
-      );
-      
-      // Start and stop
-      oscillator.start(this.audioContext.currentTime);
-      oscillator.stop(this.audioContext.currentTime + 0.3);
-    } catch (e) {
-      console.error("Error playing hit sound:", e);
-    }
+    // Get current hit parameters
+    const speed = this.velocity.length();
+    const surfaceType = this.terrain?.getSurfaceTypeAtPosition?.(this.position.x, this.position.z) || 'fairway';
+    
+    // Play appropriate hit sound based on power, loft, and speed
+    this.audioManager.playHitSound(power, this.currentLoft || 10, speed, surfaceType);
   }
   
   /**
    * Play bounce sound effect
    */
   playBounceSound(impactSpeed) {
-    if (!this.audioContext) return;
+    if (!this.audioManager) return;
     
     // Prevent too many bounce sounds in quick succession
     const now = Date.now();
     if (now - this.bounceTime < 150) return;
     this.bounceTime = now;
     
-    try {
-      // Create oscillator for bounce sound
-      const oscillator = this.audioContext.createOscillator();
-      const gainNode = this.audioContext.createGain();
-      
-      // Connect nodes
-      oscillator.connect(gainNode);
-      gainNode.connect(this.audioContext.destination);
-      
-      // Set properties based on impact speed
-      oscillator.type = 'sine';
-      const normalizedImpact = Math.min(1, impactSpeed / 20);
-      const bounceFreq = 150 + (normalizedImpact * 250);
-      oscillator.frequency.setValueAtTime(bounceFreq, this.audioContext.currentTime);
-      oscillator.frequency.exponentialRampToValueAtTime(
-        bounceFreq * 0.5,
-        this.audioContext.currentTime + 0.15
-      );
-      
-      // Volume envelope
-      gainNode.gain.setValueAtTime(0.0001, this.audioContext.currentTime);
-      gainNode.gain.exponentialRampToValueAtTime(
-        Math.min(0.2, normalizedImpact * 0.2),
-        this.audioContext.currentTime + 0.01
-      );
-      gainNode.gain.exponentialRampToValueAtTime(
-        0.0001,
-        this.audioContext.currentTime + 0.2
-      );
-      
-      // Start and stop
-      oscillator.start(this.audioContext.currentTime);
-      oscillator.stop(this.audioContext.currentTime + 0.2);
-    } catch (e) {
-      console.error("Error playing bounce sound:", e);
-    }
+    // Get surface type at current position
+    const surfaceType = this.terrain?.getSurfaceTypeAtPosition?.(this.position.x, this.position.z) || 'fairway';
+    
+    // Play appropriate surface sound based on impact force
+    this.audioManager.playSurfaceSound(surfaceType, impactSpeed);
   }
   
   /**
@@ -1348,7 +1297,7 @@ class GolfBall {
       // Visual feedback for impact
       if (speed > 2.0 && this.options.showImpactEffects) {
         // Could add particle effects or other visual indicators here
-        console.log(`Impact at speed: ${speed.toFixed(2)}`);
+        if (window.DEBUG) console.log(`Impact at speed: ${speed.toFixed(2)}`);
       }
     }
   }

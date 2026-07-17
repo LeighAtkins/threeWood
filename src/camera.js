@@ -11,7 +11,7 @@ class CameraController {
     this.terrain = options.terrain; // Add terrain reference
     
     // Log initial positions before setup
-    console.log('[CameraController.constructor] Initial Cam Pos:', camera.position.toArray(), 'Initial Target (Ball) Pos:', target.position.toArray());
+    if (window.DEBUG) console.log('[CameraController.constructor] Initial Cam Pos:', camera.position.toArray(), 'Initial Target (Ball) Pos:', target.position.toArray());
     
     // Camera modes
     this.MODES = {
@@ -30,9 +30,9 @@ class CameraController {
       fastTransitionSpeed: options.fastTransitionSpeed || 7, // Faster transition for when ball is moving quickly
       lookAheadFactor: options.lookAheadFactor || 1.2, // Increased from 0.5 to look further ahead
       // PS1-style camera limitations
-      jitterAmount: options.jitterAmount || 0.015, // Reduced jitter for better visibility
-      positionSnap: options.positionSnap || 0.1,
-      positionSnapEnabled: options.positionSnapEnabled !== undefined ? options.positionSnapEnabled : true,
+      jitterAmount: options.jitterAmount || 0, // Disabled jitter for clean REZ-style aesthetic
+      positionSnap: options.positionSnap || 0.01, // Much smaller snapping for smoother movement
+      positionSnapEnabled: options.positionSnapEnabled !== undefined ? options.positionSnapEnabled : false, // Disabled for smooth movement
       // Safe box in normalized screen space (0-1)
       safeBox: options.safeBox || { minX: 0.35, maxX: 0.65, minY: 0.4, maxY: 0.6 },
     };
@@ -71,7 +71,7 @@ class CameraController {
     }
     
     // Log final initial snapped position
-    console.log('[CameraController.constructor] Final Snapped Cam Pos:', this.camera.position.toArray());
+    if (window.DEBUG) console.log('[CameraController.constructor] Final Snapped Cam Pos:', this.camera.position.toArray());
     this._ballOffScreenWarned = false;
   }
   
@@ -241,7 +241,7 @@ class CameraController {
     
     // --- Debug logging ---
     if (window.DEBUG_CAMERA) {
-      console.log('[CameraController][FOLLOW] Camera position:', this.targetPosition.toArray(), 'LookAt:', this.targetLookAt.toArray(), 'Ball:', ballPosition.toArray());
+      if (window.DEBUG) console.log('[CameraController][FOLLOW] Camera position:', this.targetPosition.toArray(), 'LookAt:', this.targetLookAt.toArray(), 'Ball:', ballPosition.toArray());
     }
   }
   
@@ -286,7 +286,7 @@ class CameraController {
     }
     // --- Debug logging ---
     if (window.DEBUG_CAMERA) {
-      console.log('[CameraController][AIMING] Mode: AIMING, Cam Target:', this.targetPosition.toArray(), 'LookAt Target:', this.targetLookAt.toArray(), 'Ball:', this.target.position.toArray());
+      if (window.DEBUG) console.log('[CameraController][AIMING] Mode: AIMING, Cam Target:', this.targetPosition.toArray(), 'LookAt Target:', this.targetLookAt.toArray(), 'Ball:', this.target.position.toArray());
     }
   }
   
@@ -402,7 +402,7 @@ class CameraController {
     this.camera.lookAt(this.currentLookAt);
     
     // Log the position set by snapToTargets
-    console.log('[CameraController.snapToTargets] Position Set:', this.camera.position.toArray(), 'LookAt Set:', this.currentLookAt.toArray());
+    if (window.DEBUG) console.log('[CameraController.snapToTargets] Position Set:', this.camera.position.toArray(), 'LookAt Set:', this.currentLookAt.toArray());
   }
   
   /**
@@ -478,7 +478,7 @@ class CameraController {
 
     // Now set the mode (after snapping)
     this.setMode(this.MODES.WATCHING);
-    console.log('[CameraController.watchBallInFlight] Snapped camera for WATCHING mode.');
+    if (window.DEBUG) console.log('[CameraController.watchBallInFlight] Snapped camera for WATCHING mode.');
   }
   
   /**

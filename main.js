@@ -87,7 +87,7 @@ document.body.appendChild(clickFeedback);
 
 // Handle window resize
 window.addEventListener('resize', () => {
-  console.log("Window resize event detected in main.js");
+  if (window.DEBUG) console.log("Window resize event detected in main.js");
   const width = window.innerWidth;
   const height = window.innerHeight;
   
@@ -100,7 +100,7 @@ window.addEventListener('resize', () => {
   // If game is active, ensure it renders properly
   if (game && game.renderer) {
     game.renderer.setSize(width, height);
-    console.log("Game renderer size updated in resize handler");
+    if (window.DEBUG) console.log("Game renderer size updated in resize handler");
   }
 });
 
@@ -150,7 +150,7 @@ function playClickSound() {
 function startGameTransition() {
   if (isTransitioning) return;
   
-  console.log("Starting game transition");
+  if (window.DEBUG) console.log("Starting game transition");
   isTransitioning = true;
   transitionStartTime = Date.now();
   
@@ -185,7 +185,7 @@ function startGameTransition() {
     setTimeout(() => {
       // Initialize game
       try {
-        console.log("Creating game instance");
+        if (window.DEBUG) console.log("Creating game instance");
         game = new Game(fpsCounter);
         
         // Remove event listeners
@@ -203,7 +203,7 @@ function startGameTransition() {
 
 // Finish transition to game
 function finishTransition() {
-  console.log("Finishing transition animation");
+  if (window.DEBUG) console.log("Finishing transition animation");
   
   // Hide title elements with animation
   const titleElement = document.getElementById('title');
@@ -245,7 +245,7 @@ function finishTransition() {
 
 // Complete transition to game
 function completeTransition() {
-  console.log("Completing transition to game");
+  if (window.DEBUG) console.log("Completing transition to game");
   
   // Hide loading text
   loadingElement.style.opacity = '0';
@@ -273,7 +273,7 @@ function completeTransition() {
     }
     
     // Force a window resize event to ensure the renderer updates correctly
-    console.log("Forcing window resize to refresh game view");
+    if (window.DEBUG) console.log("Forcing window resize to refresh game view");
     window.dispatchEvent(new Event('resize'));
     
     // Make sure game renderer is visible and properly sized
@@ -282,12 +282,12 @@ function completeTransition() {
     }
   }, 500);
   
-  console.log("Game transition completed");
+  if (window.DEBUG) console.log("Game transition completed");
 }
 
 // Function to ensure game is visible
 function ensureGameVisible() {
-  console.log("Ensuring game is visible");
+  if (window.DEBUG) console.log("Ensuring game is visible");
   
   if (!game || !game.renderer) {
     console.error("Game or renderer not available");
@@ -304,7 +304,7 @@ function ensureGameVisible() {
   // Force a render
   if (game.scene && game.camera) {
     game.renderer.render(game.scene, game.camera);
-    console.log("Forced initial game render");
+    if (window.DEBUG) console.log("Forced initial game render");
   }
 }
 

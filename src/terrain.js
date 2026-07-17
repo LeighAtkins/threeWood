@@ -13,8 +13,8 @@ class TerrainGenerator {
       length: options.length || 400,
       maxHeight: options.maxHeight || 10,
       minHeight: options.minHeight || -5,
-      segmentsW: options.segmentsW || 100,
-      segmentsL: options.segmentsL || 100,
+      segmentsW: options.segmentsW || 50,  // Reduced for better performance
+      segmentsL: options.segmentsL || 50,  // Reduced for better performance
       noiseScale: options.noiseScale || 0.05,
       noiseOctaves: options.noiseOctaves || 3,
       noisePersistence: options.noisePersistence || 0.5,
@@ -118,6 +118,38 @@ class TerrainGenerator {
   }
 
   /**
+   * Create a small hole depression at the specified location
+   * @param {number} centerX - X coordinate of the hole
+   * @param {number} centerZ - Z coordinate of the hole
+   * @param {number} surfaceHeight - Height of the green surface
+   * @returns {Function} A function that returns the height at a given point
+   */
+  createHoleDepression(centerX, centerZ, surfaceHeight) {
+    return (x, z) => {
+      const dx = x - centerX;
+      const dz = z - centerZ;
+      const distance = Math.sqrt(dx * dx + dz * dz);
+      
+      const holeRadius = 0.3; // Larger for visibility  
+      const lipRadius = 0.6; // Larger for the sloped edge
+      
+      // Core hole area (below surface)
+      if (distance < holeRadius) {
+        return surfaceHeight - 0.1; // Hole depth
+      }
+      
+      // Sloped lip around hole
+      if (distance < lipRadius) {
+        const blendFactor = (distance - holeRadius) / (lipRadius - holeRadius);
+        const slopeHeight = THREE.MathUtils.lerp(surfaceHeight - 0.1, surfaceHeight, blendFactor);
+        return slopeHeight;
+      }
+      
+      return null; // Outside hole influence
+    };
+  }
+
+  /**
    * Create a kidney-shaped putting green area
    * @param {number} centerX - X coordinate of the center
    * @param {number} centerZ - Z coordinate of the center
@@ -162,27 +194,271 @@ class TerrainGenerator {
   }
 
   /**
-   * Create a circular water area
+   * Create an organic water area with smooth curves (pond/lake shape)
    */
   createWaterArea(centerX, centerZ, radius, height) {
     return (x, z) => {
-      const distance = Math.sqrt((x - centerX) ** 2 + (z - centerZ) ** 2);
-      if (distance < radius) {
+      const dx = x - centerX;
+      const dz = z - centerZ;
+      const distance = Math.sqrt(dx * dx + dz * dz);
+      
+      // Create organic shape using multiple sine waves for natural pond contours
+      const angle = Math.atan2(dz, dx);
+      const organicFactor = 1 + 0.3 * Math.sin(angle * 3) + 0.2 * Math.sin(angle * 5) + 0.15 * Math.sin(angle * 7);
+      const organicRadius = radius * organicFactor;
+      
+      // Core water area
+      if (distance < organicRadius * 0.7) {
         return height;
       }
+      
+      // Smooth edge blending for natural shoreline
+      if (distance < organicRadius) {
+        const blendFactor = (distance - organicRadius * 0.7) / (organicRadius * 0.3);
+        const smoothBlend = Math.pow(blendFactor, 2); // Quadratic curve for smooth transition
+        
+        const terrainHeight = this.getNoiseHeight(x, z);
+        return THREE.MathUtils.lerp(height, terrainHeight, smoothBlend);
+      }
+      
       return null;
     };
   }
 
   /**
-   * Create a circular sand area (bunker)
+   * Create a water moat around the kidney-shaped green with a bridge crossing
+   */
+  createWaterMoatAroundGreen(centerX, centerZ, greenSize, waterHeight) {
+    // Calculate appropriate bridge height based on surrounding terrain
+    const bridgeCenterX = centerX - greenSize * 0.7;
+    const approachTerrainHeight = this.getNoiseHeight(bridgeCenterX - 6, centerZ); // Terrain before bridge
+    const greenSideTerrainHeight = this.getNoiseHeight(bridgeCenterX + 6, centerZ); // Terrain after bridge
+    const averageTerrainHeight = (approachTerrainHeight + greenSideTerrainHeight) / 2;
+    
+    // Store bridge info for later rendering
+    this.bridgeInfo = {
+      centerX: bridgeCenterX,
+      centerZ: centerZ,
+      width: 4,
+      length: 12,
+      height: Math.max(averageTerrainHeight + 0.2, waterHeight + 0.8) // Bridge above terrain or well above water
+    };
+    
+    
+    return (x, z) => {
+      const dx = x - centerX;
+      const dz = z - centerZ;
+      
+      // Same kidney shape calculation as the green for the moat outline
+      const localX = dx;
+      const localZ = dz;
+      
+      // Kidney shape calculation (matching the green shape)
+      const ellipseDistance = Math.sqrt((localX / 1.5) ** 2 + localZ ** 2) / greenSize;
+      const circleDistance = Math.sqrt((localX + greenSize * 0.3) ** 2 + (localZ - greenSize * 0.1) ** 2) / (greenSize * 0.7);
+      const kidneyDistance = Math.max(ellipseDistance, 1 - circleDistance);
+      
+      // Define the moat as a ring around the green
+      const innerRadius = 1.2; // Just outside the green
+      const outerRadius = 1.8; // Outer edge of moat
+      
+      // Check if we're in the bridge area (skip water here)
+      const bridgeInfo = this.bridgeInfo;
+      const isInBridgeArea = (
+        Math.abs(x - bridgeInfo.centerX) < bridgeInfo.length / 2 &&
+        Math.abs(z - bridgeInfo.centerZ) < bridgeInfo.width / 2
+      );
+      
+      // Create moat ring, but skip bridge area
+      if (kidneyDistance > innerRadius && kidneyDistance < outerRadius && !isInBridgeArea) {
+        // Add some organic variation to moat edges
+        const angle = Math.atan2(dz, dx);
+        const variation = 1 + 0.1 * Math.sin(angle * 4) + 0.05 * Math.sin(angle * 8);
+        const adjustedDistance = kidneyDistance * variation;
+        
+        if (adjustedDistance > innerRadius && adjustedDistance < outerRadius) {
+          // Core water area
+          if (adjustedDistance < innerRadius + (outerRadius - innerRadius) * 0.7) {
+            return waterHeight;
+          }
+          
+          // Smooth edge blending
+          const blendFactor = (adjustedDistance - (innerRadius + (outerRadius - innerRadius) * 0.7)) / 
+                            ((outerRadius - innerRadius) * 0.3);
+          const terrainHeight = this.getNoiseHeight(x, z);
+          return THREE.MathUtils.lerp(waterHeight, terrainHeight, blendFactor);
+        }
+      }
+      
+      return null;
+    };
+  }
+
+  /**
+   * Create bridge terrain elevation to match bridge height with proper ramps
+   */
+  createBridgeTerrain() {
+    if (!this.bridgeInfo) return null;
+    
+    const { centerX, centerZ, width, length, height } = this.bridgeInfo;
+    
+    return (x, z) => {
+      // Extended area for ramps and transitions
+      const rampLength = 3; // Length of ramps on each end
+      const totalLength = length + (rampLength * 2);
+      const padding = 2; // Extra space around bridge for smooth blending
+      
+      const isInBridgeArea = (
+        Math.abs(x - centerX) < (totalLength / 2 + padding) &&
+        Math.abs(z - centerZ) < (width / 2 + padding)
+      );
+      
+      if (!isInBridgeArea) return null;
+      
+      // Core bridge area (flat deck)
+      const isCoreBridge = (
+        Math.abs(x - centerX) < length / 2 &&
+        Math.abs(z - centerZ) < width / 2
+      );
+      
+      if (isCoreBridge) {
+        return height; // Bridge deck height
+      }
+      
+      // Calculate distance along bridge length (X direction)
+      const distanceAlongX = x - centerX;
+      const distanceFromCenterZ = Math.abs(z - centerZ);
+      
+      // Check if we're in the ramp areas (extending beyond core bridge)
+      const isInRampArea = (
+        Math.abs(distanceAlongX) > length / 2 &&
+        Math.abs(distanceAlongX) < (length / 2 + rampLength) &&
+        distanceFromCenterZ < width / 2
+      );
+      
+      if (isInRampArea) {
+        // Create ramps on each end of the bridge
+        const rampDistance = Math.abs(distanceAlongX) - length / 2;
+        const rampFactor = rampDistance / rampLength; // 0 at bridge end, 1 at ramp end
+        
+        // Get terrain height at this position
+        const terrainHeight = this.getNoiseHeight(x, z);
+        
+        // Smooth transition from bridge height to terrain height
+        return THREE.MathUtils.lerp(height, terrainHeight, rampFactor);
+      }
+      
+      // Width transition areas (sides of bridge including ramps)
+      if (distanceFromCenterZ < width / 2 + padding) {
+        const sideDistance = Math.max(0, distanceFromCenterZ - width / 2);
+        const sideFactor = sideDistance / padding;
+        
+        // Get the height we would have at this X position (either bridge or ramp)
+        let targetHeight = height;
+        if (Math.abs(distanceAlongX) > length / 2) {
+          // We're in ramp area
+          const rampDistance = Math.abs(distanceAlongX) - length / 2;
+          const rampFactor = Math.min(1, rampDistance / rampLength);
+          const terrainHeight = this.getNoiseHeight(x, z);
+          targetHeight = THREE.MathUtils.lerp(height, terrainHeight, rampFactor);
+        }
+        
+        // Blend from bridge/ramp height to terrain height
+        const terrainHeight = this.getNoiseHeight(x, z);
+        return THREE.MathUtils.lerp(targetHeight, terrainHeight, sideFactor);
+      }
+      
+      return null;
+    };
+  }
+
+  /**
+   * Create bridge terrain area with proper height for visual/physical terrain
+   */
+  createBridgeTerrainArea() {
+    if (!this.bridgeInfo) return null;
+    
+    const { centerX, centerZ, width, length, height } = this.bridgeInfo;
+    
+    return (x, z) => {
+      // Bridge area with some padding for ramps
+      const rampLength = 2; // Ramp length on each end
+      const totalLength = length + (rampLength * 2);
+      
+      const isInBridgeArea = (
+        Math.abs(x - centerX) < totalLength / 2 &&
+        Math.abs(z - centerZ) < width / 2
+      );
+      
+      if (!isInBridgeArea) return null;
+      
+      // Core bridge area (flat deck)
+      const isCoreBridge = (
+        Math.abs(x - centerX) < length / 2 &&
+        Math.abs(z - centerZ) < width / 2
+      );
+      
+      if (isCoreBridge) {
+        // Create gentle arch across bridge length
+        const distanceFromCenterX = Math.abs(x - centerX);
+        const normalizedDistance = distanceFromCenterX / (length / 2);
+        const archFactor = 1 - Math.pow(normalizedDistance, 2);
+        const archHeight = 0.5;
+        return height + (archHeight * archFactor);
+      }
+      
+      // Ramp areas on bridge ends
+      const distanceAlongX = x - centerX;
+      const isInRampArea = (
+        Math.abs(distanceAlongX) > length / 2 &&
+        Math.abs(distanceAlongX) < (length / 2 + rampLength)
+      );
+      
+      if (isInRampArea) {
+        // Create ramps that connect to surrounding terrain
+        const rampDistance = Math.abs(distanceAlongX) - length / 2;
+        const rampFactor = rampDistance / rampLength; // 0 at bridge end, 1 at ramp end
+        
+        // Get terrain height at this position
+        const terrainHeight = this.getNoiseHeight(x, z);
+        
+        // Smooth transition from bridge height to terrain height
+        return THREE.MathUtils.lerp(height, terrainHeight, rampFactor);
+      }
+      
+      return null;
+    };
+  }
+
+  /**
+   * Create an organic sand bunker with smooth curves and natural shape
    */
   createSandArea(centerX, centerZ, radius, height) {
     return (x, z) => {
-      const distance = Math.sqrt((x - centerX) ** 2 + (z - centerZ) ** 2);
-      if (distance < radius) {
+      const dx = x - centerX;
+      const dz = z - centerZ;
+      const distance = Math.sqrt(dx * dx + dz * dz);
+      
+      // Create kidney/oval shaped bunker with organic curves
+      const angle = Math.atan2(dz, dx);
+      const organicFactor = 1 + 0.4 * Math.sin(angle * 2) + 0.25 * Math.sin(angle * 4) - 0.15 * Math.cos(angle * 3);
+      const organicRadius = radius * Math.max(0.5, organicFactor); // Prevent negative radius
+      
+      // Core bunker area (flat sand)
+      if (distance < organicRadius * 0.6) {
         return height;
       }
+      
+      // Sloped edges for realistic bunker lip
+      if (distance < organicRadius) {
+        const blendFactor = (distance - organicRadius * 0.6) / (organicRadius * 0.4);
+        const bunkerLip = Math.pow(1 - blendFactor, 0.8); // Create raised lip around bunker
+        
+        const terrainHeight = this.getNoiseHeight(x, z);
+        const lipHeight = height + bunkerLip * 0.3; // Raise the lip slightly
+        return THREE.MathUtils.lerp(lipHeight, terrainHeight, blendFactor);
+      }
+      
       return null;
     };
   }
@@ -207,30 +483,24 @@ class TerrainGenerator {
     // Position at water level
     waterGeometry.translate(0, this.options.waterLevel, 0);
     
-    // Create enhanced water material
-    const waterMaterial = new THREE.MeshPhysicalMaterial({
-      color: new THREE.Color(0x4477cc), // Slightly more vibrant blue
+    // PS1-retro water: cheap flat-shaded Phong with a simple specular highlight.
+    // (No env map exists, so the old PhysicalMaterial's reflectivity/clearcoat
+    //  was costing perf for nothing.)
+    const waterMaterial = new THREE.MeshPhongMaterial({
+      color: new THREE.Color(0x3b6fb0),
       transparent: true,
-      opacity: 0.85,
-      roughness: 0.05, // Very smooth for better reflections
-      metalness: 0.1,
-      reflectivity: 0.9, // High reflectivity
-      clearcoat: 0.5, // Add clearcoat for better water look
-      clearcoatRoughness: 0.1,
+      opacity: 0.82,
+      shininess: 80,
+      specular: 0xbfe0ff,
+      flatShading: true,
       side: THREE.DoubleSide,
-      envMapIntensity: 1.5 // Enhance environment reflections
     });
-    
+
     // Create water mesh
     this.waterMesh = new THREE.Mesh(waterGeometry, waterMaterial);
     this.waterMesh.name = 'waterSurface';
     this.waterMesh.receiveShadow = true;
     this.waterMesh.castShadow = false; // Water doesn't cast shadows
-    
-    // Add subtle blue point light under water for glow effect
-    const waterLight = new THREE.PointLight(0x0066cc, 0.5, 50);
-    waterLight.position.set(0, this.options.waterLevel - 2, 0);
-    this.waterMesh.add(waterLight);
     
     // Add to scene if provided
     if (scene) {
@@ -247,8 +517,13 @@ class TerrainGenerator {
   updateWater(deltaTime) {
     if (!this.waterMesh) return;
     
+    // Performance: Only update water animation 30fps instead of 60fps
+    this.waterUpdateAccumulator = (this.waterUpdateAccumulator || 0) + deltaTime;
+    if (this.waterUpdateAccumulator < 0.033) return; // ~30fps
+    
     // Update time with scaled delta for smoother animation
-    this.waterTime += deltaTime * 0.8;
+    this.waterTime += this.waterUpdateAccumulator * 0.8;
+    this.waterUpdateAccumulator = 0;
     
     // Enhanced wave animation with multiple wave patterns
     const positions = this.waterMesh.geometry.attributes.position;
@@ -274,25 +549,10 @@ class TerrainGenerator {
       if (Math.abs(x) < this.options.width / 2 - 10 && 
           Math.abs(z) < this.options.length / 2 - 10) {
         
-        // Primary wave pattern - larger, slower waves
-        const wave1 = Math.sin(x * primaryWaveFreq + this.waterTime * primaryWaveSpeed) * 
-                     Math.cos(z * primaryWaveFreq * 0.8 + this.waterTime * primaryWaveSpeed * 0.8) * 
-                     primaryWaveHeight;
-        
-        // Secondary wave pattern - medium, perpendicular waves
-        const wave2 = Math.sin(z * secondaryWaveFreq + this.waterTime * secondaryWaveSpeed) * 
-                     Math.cos(x * secondaryWaveFreq * 0.9 + this.waterTime * secondaryWaveSpeed * 1.1) * 
-                     secondaryWaveHeight;
-        
-        // Tertiary wave pattern - small ripples
-        const wave3 = Math.sin((x + z) * tertiaryWaveFreq + this.waterTime * tertiaryWaveSpeed) * 
-                     Math.sin((x - z) * tertiaryWaveFreq * 1.1 + this.waterTime * tertiaryWaveSpeed * 1.3) * 
-                     tertiaryWaveHeight;
-        
-        // Combine wave patterns with distance-based attenuation for smoother edges
-        const distFromCenter = Math.sqrt(x*x + z*z) / (this.options.width / 2);
-        const edgeFactor = Math.max(0, 1 - Math.max(0, distFromCenter - 0.7) * 3);
-        const combinedWave = (wave1 + wave2 + wave3) * edgeFactor;
+        // Simplified single wave pattern for performance
+        const combinedWave = Math.sin(x * 0.05 + this.waterTime * 0.5) * 
+                            Math.cos(z * 0.04 + this.waterTime * 0.6) * 
+                            0.08; // Reduced wave height
         
         // Update Y position with combined wave pattern
         positions.setY(i, this.options.waterLevel + combinedWave);
@@ -301,14 +561,16 @@ class TerrainGenerator {
     
     // Mark attributes for update
     positions.needsUpdate = true;
-    
-    // Update normals for better lighting
-    this.waterMesh.geometry.computeVertexNormals();
-    
+
+    // NOTE: computeVertexNormals() intentionally skipped.
+    // Water uses flatShading: true, so Three.js derives per-face normals in the
+    // shader — recomputing vertex normals every ~33ms was wasted work (and the
+    // biggest per-frame cost on the water system).
+
     // Animate water material properties for subtle color changes
     if (this.waterMesh.material) {
       // Subtle opacity pulsing
-      const opacityPulse = 0.85 + Math.sin(this.waterTime * 0.2) * 0.05;
+      const opacityPulse = 0.82 + Math.sin(this.waterTime * 0.2) * 0.04;
       this.waterMesh.material.opacity = opacityPulse;
     }
   }
@@ -593,7 +855,7 @@ class TerrainGenerator {
       segmentsL
     );
     
-    // Initialize heightmap with appropriate dimensions
+    // Initialize heightmap with appropriate dimensions (clear any previous data)
     this.heightMap = new Array(segmentsW + 1).fill(0).map(() => new Array(segmentsL + 1).fill(0));
 
     // Rotate to be horizontal (XZ plane)
@@ -622,12 +884,12 @@ class TerrainGenerator {
       this.holePosition.y
     );
 
-    // Define water hazard area
-    const waterHazard = this.createWaterArea(
-      -width * 0.1, // X position
-      length * 0.2, // Z position
-      15, // Radius
-      this.options.waterLevel // Height at water level
+    // Define water moat around the green
+    const waterMoat = this.createWaterMoatAroundGreen(
+      this.holePosition.x,
+      this.holePosition.z,
+      this.greenSize,
+      this.options.waterLevel
     );
 
     // Define sand bunker area
@@ -638,8 +900,21 @@ class TerrainGenerator {
       this.terrainTypes[1].height + 0.1 // Slightly above bunker base
     );
 
-    this.waterHazardArea = waterHazard;
+    // Create hole depression at the hole position
+    const holeDepression = this.createHoleDepression(
+      this.holePosition.x,
+      this.holePosition.z,
+      this.holePosition.y
+    );
+
+    // Create bridge terrain at the correct height
+    const bridgeTerrain = this.bridgeInfo ? this.createBridgeTerrainArea() : null;
+
+    this.waterHazardArea = waterMoat;
     this.sandBunkerArea = sandBunker;
+    
+    // Create flat fairway between tee and hole
+    const flatFairway = this.createFlatFairway();
     
     // Modify each vertex height based on noise
     for (let i = 0; i < positions.count; i++) {
@@ -650,28 +925,27 @@ class TerrainGenerator {
       const worldX = x;
       const worldZ = z;
       
-      // Check for special areas first
+      // Check for special areas first (prioritized order)
       let y = teeArea(worldX, worldZ);
       if (y === null) y = greenArea(worldX, worldZ);
-      if (y === null) y = waterHazard(worldX, worldZ);
+      
+      // Apply hole depression - this should override green area if present
+      const holeY = holeDepression(worldX, worldZ);
+      if (holeY !== null) y = holeY;
+      
+      // Apply bridge terrain elevation 
+      if (bridgeTerrain) {
+        const bridgeY = bridgeTerrain(worldX, worldZ);
+        if (bridgeY !== null) y = bridgeY;
+      }
+      
+      if (y === null) y = waterMoat(worldX, worldZ);
       if (y === null) y = sandBunker(worldX, worldZ);
+      if (y === null && flatFairway) y = flatFairway(worldX, worldZ);
       
       if (y === null) {
+        // Use standard noise terrain for areas not covered by special zones
         y = this.getNoiseHeight(worldX, worldZ);
-        
-        // Ensure fairway is playable and flatter
-        if (this.isOnFairway(worldX, worldZ)) {
-          // Smooth fairway by averaging with neighbors and reducing height variation
-          const samples = 5;
-          let sum = y;
-          for (let s = 0; s < samples; s++) {
-            const offsetX = (Math.random() - 0.5) * 2;
-            const offsetZ = (Math.random() - 0.5) * 2;
-            sum += this.getNoiseHeight(worldX + offsetX, worldZ + offsetZ);
-          }
-          y = sum / (samples + 1);
-          y = THREE.MathUtils.lerp(y, this.holePosition.y, 0.5); // Increased flattening towards hole
-        }
       }
       
       // Set the vertex height directly (no snapping)
@@ -744,11 +1018,8 @@ class TerrainGenerator {
       }
     };
 
-    // === TEXTURE TILING CONSTANT ===
-    const TERRAIN_TEXTURE_REPEAT = 50; // Increase/decrease for sharper or more stretched look
-
     // Helper to load textures with error logging and proper tiling
-    function loadTextureWithTiling(path, renderer, repeat = TERRAIN_TEXTURE_REPEAT) {
+    function loadTextureWithTiling(path, renderer, repeat = 60) {
       const tex = textureLoader.load(
         path,
         () => {
@@ -771,43 +1042,40 @@ class TerrainGenerator {
     // Get renderer for anisotropy settings
     const renderer = this.scene ? this.scene.renderer : null;
 
-    // Create a material for each surface type with proper tiling
+    // PS1-retro materials: flat-shaded, vertex-colored, no PBR normal/roughness maps.
+    // We keep a single low-repeat base-color texture per surface for subtle grain;
+    // the dominant look comes from the geometry's per-vertex colors + flat shading.
+    const RETRO_TEXTURE_REPEAT = 60; // coarse tiling for a low-res PS1 feel
+
     this.surfaceMaterials = {
-      water: new THREE.MeshPhysicalMaterial({
-        color: new THREE.Color(0x4477cc), // Slightly more vibrant blue
+      water: new THREE.MeshPhongMaterial({
+        color: new THREE.Color(0x3b6fb0),
         transparent: true,
-        opacity: 0.85,
-        roughness: 0.05, // Very smooth for better reflections
-        metalness: 0.1,
-        reflectivity: 0.9, // High reflectivity
-        clearcoat: 0.5, // Add clearcoat for better water look
-        clearcoatRoughness: 0.1,
+        opacity: 0.82,
+        shininess: 80,           // cheap specular highlight, no env map needed
+        specular: 0xbfe0ff,
+        flatShading: true,
         side: THREE.DoubleSide,
-        envMapIntensity: 1.5 // Enhance environment reflections
       }),
-      green: new THREE.MeshStandardMaterial({
-        map: loadTextureWithTiling(texturePaths.green.map, renderer),
-        normalMap: loadTextureWithTiling(texturePaths.green.normalMap, renderer),
-        roughnessMap: loadTextureWithTiling(texturePaths.green.roughnessMap, renderer),
-        flatShading: false, // Set to false for smoother normals with normal maps
+      green: new THREE.MeshLambertMaterial({
+        map: loadTextureWithTiling(texturePaths.green.map, renderer, RETRO_TEXTURE_REPEAT),
+        vertexColors: true,
+        flatShading: true,
       }),
-      fairway: new THREE.MeshStandardMaterial({
-        map: loadTextureWithTiling(texturePaths.fairway.map, renderer),
-        normalMap: loadTextureWithTiling(texturePaths.fairway.normalMap, renderer),
-        roughnessMap: loadTextureWithTiling(texturePaths.fairway.roughnessMap, renderer),
-        flatShading: false,
+      fairway: new THREE.MeshLambertMaterial({
+        map: loadTextureWithTiling(texturePaths.fairway.map, renderer, RETRO_TEXTURE_REPEAT),
+        vertexColors: true,
+        flatShading: true,
       }),
-      rough: new THREE.MeshStandardMaterial({
-        map: loadTextureWithTiling(texturePaths.rough.map, renderer),
-        normalMap: loadTextureWithTiling(texturePaths.rough.normalMap, renderer),
-        roughnessMap: loadTextureWithTiling(texturePaths.rough.roughnessMap, renderer),
-        flatShading: false,
+      rough: new THREE.MeshLambertMaterial({
+        map: loadTextureWithTiling(texturePaths.rough.map, renderer, RETRO_TEXTURE_REPEAT),
+        vertexColors: true,
+        flatShading: true,
       }),
-      bunker: new THREE.MeshStandardMaterial({
-        map: loadTextureWithTiling(texturePaths.bunker.map, renderer),
-        normalMap: loadTextureWithTiling(texturePaths.bunker.normalMap, renderer),
-        roughnessMap: loadTextureWithTiling(texturePaths.bunker.roughnessMap, renderer),
-        flatShading: false,
+      bunker: new THREE.MeshLambertMaterial({
+        map: loadTextureWithTiling(texturePaths.bunker.map, renderer, RETRO_TEXTURE_REPEAT),
+        vertexColors: true,
+        flatShading: true,
       }),
     };
 
@@ -914,9 +1182,12 @@ class TerrainGenerator {
     // Hole placement - on the putting green
     const holeX = width * 0.3;
     const holeZ = 0;
-    // Dynamically get the terrain height at the hole position, ensure it's above rough level
-    const baseHoleY = this.getHeightAtPosition(holeX, holeZ);
+    // Get the base noise height without any terrain features applied (original surface)
+    const baseHoleY = this.getNoiseHeight(holeX, holeZ);
     const holeY = Math.max(baseHoleY, this.terrainTypes[2].height + 0.1); // Ensure it's above rough
+    
+    // Store the original surface height for flag positioning (before hole depression is applied)
+    this.holeSurfaceHeight = holeY;
     
     this.teePosition = new THREE.Vector3(teeX, teeY, teeZ);
     this.holePosition = new THREE.Vector3(holeX, holeY, holeZ);
@@ -946,7 +1217,7 @@ class TerrainGenerator {
     loader.load(
       modelPath,
       (gltf) => {
-        console.log('Flag model loaded successfully');
+        if (window.DEBUG) console.log('Flag model loaded successfully');
         // Remove all children (if fallback was added by error)
         while (flagGroup.children.length > 0) {
           const child = flagGroup.children[0];
@@ -957,7 +1228,15 @@ class TerrainGenerator {
         // Add the model to the group
         const model = gltf.scene;
         model.scale.set(2.5, 2.5, 2.5); // Increased scale
-        model.position.y = 0; // Position at the group's origin
+        
+        // Calculate the bounding box to position the flag correctly
+        const box = new THREE.Box3().setFromObject(model);
+        const modelHeight = box.max.y - box.min.y;
+        const modelBottom = box.min.y;
+        
+        // Position the model so its bottom sits at the group's origin (surface level)
+        model.position.y = -modelBottom;
+        
         flagGroup.add(model);
         model.traverse((child) => {
           if (child.isMesh && child.name.toLowerCase().includes('flag')) {
@@ -975,12 +1254,20 @@ class TerrainGenerator {
     
     
     // Position flagGroup at hole position
-    if (this.holePosition) {
+    if (this.holePosition && this.holeSurfaceHeight !== undefined) {
+      // Use the stored original surface height instead of querying current terrain height
+      // This ensures flag base stays at surface level even with hole depression
+      const surfaceHeight = this.holeSurfaceHeight;
+      
       flagGroup.position.set(
         this.holePosition.x,
-        this.holePosition.y, // Use actual terrain height for the group's base
+        surfaceHeight, // Flag base at original ground surface level
         this.holePosition.z
       );
+      
+      // Store both surface level and hole level for collision detection
+      flagGroup.userData.surfaceLevel = surfaceHeight;
+      flagGroup.userData.holeLevel = surfaceHeight - 0.1; // Hole is 0.1 units below surface
     }
     
     // Add to scene if provided
@@ -993,7 +1280,7 @@ class TerrainGenerator {
     
     // Add collision detection properties
     flagGroup.userData.isFlag = true;
-    flagGroup.userData.holeRadius = 0.15;
+    flagGroup.userData.holeRadius = 0.3;
     
     return flagGroup;
   }
@@ -1026,6 +1313,172 @@ class TerrainGenerator {
   }
   
   /**
+   * Create and position the bridge over the water moat
+   * @param {THREE.Scene} scene - The scene to add the bridge to
+   * @returns {THREE.Group} The bridge object
+   */
+  createBridge(scene) {
+    if (!this.bridgeInfo) return null;
+    
+    // Create a group to hold the bridge
+    const bridgeGroup = new THREE.Group();
+    bridgeGroup.name = 'bridge';
+    
+    // Initialize collision meshes array
+    this.bridgeCollisionMeshes = [];
+    
+    // Load the 3D bridge model
+    const loader = new GLTFLoader();
+    const modelPath = 'src/Assets/Small Bridge.glb';
+    
+    loader.load(
+      modelPath,
+      (gltf) => {
+        if (window.DEBUG) console.log('Bridge model loaded successfully');
+        
+        // Add the model to the group
+        const model = gltf.scene;
+        model.scale.set(1.5, 1.5, 1.5); // Scale appropriately
+        
+        // Calculate the bounding box to position the bridge correctly
+        const box = new THREE.Box3().setFromObject(model);
+        const modelBottom = box.min.y;
+        
+        // Position the model so its bottom sits at the bridge height
+        model.position.y = -modelBottom;
+        
+        bridgeGroup.add(model);
+        
+        // Extract collision geometry from the loaded model
+        this.extractBridgeCollisionGeometry(model, bridgeGroup);
+        
+        // Mark bridge surfaces for audio system
+        model.traverse((child) => {
+          if (child.isMesh) {
+            child.userData.surfaceType = 'bridge';
+          }
+        });
+      },
+      undefined,
+      (error) => {
+        console.error('Error loading bridge model:', error);
+        // Create a simple fallback bridge with collision
+        this.createFallbackBridge(bridgeGroup);
+        this.createFallbackBridgeCollision(bridgeGroup);
+      }
+    );
+    
+    // Position bridge group at calculated position
+    bridgeGroup.position.set(
+      this.bridgeInfo.centerX,
+      this.bridgeInfo.height,
+      this.bridgeInfo.centerZ
+    );
+    
+    // Add to scene if provided
+    if (scene) {
+      scene.add(bridgeGroup);
+    }
+    
+    // Store reference to bridge
+    this.bridgeObject = bridgeGroup;
+    
+    return bridgeGroup;
+  }
+  
+  /**
+   * Create a fallback bridge when 3D model fails to load
+   * @param {THREE.Group} bridgeGroup - The group to add the fallback bridge to
+   */
+  createFallbackBridge(bridgeGroup) {
+    // Create a simple wooden plank bridge
+    const bridgeGeometry = new THREE.BoxGeometry(this.bridgeInfo.length, 0.2, this.bridgeInfo.width);
+    const bridgeMaterial = new THREE.MeshStandardMaterial({ 
+      color: 0x8B4513, // Brown wood color
+      roughness: 0.8
+    });
+    const bridge = new THREE.Mesh(bridgeGeometry, bridgeMaterial);
+    bridge.position.y = 0.1; // Slightly above the group origin
+    bridge.userData.surfaceType = 'bridge';
+    bridgeGroup.add(bridge);
+    
+    // Add some railings
+    const railingGeometry = new THREE.BoxGeometry(this.bridgeInfo.length, 0.8, 0.1);
+    const railingMaterial = new THREE.MeshStandardMaterial({ color: 0x654321 });
+    
+    const leftRailing = new THREE.Mesh(railingGeometry, railingMaterial);
+    leftRailing.position.set(0, 0.5, this.bridgeInfo.width / 2 - 0.05);
+    bridgeGroup.add(leftRailing);
+    
+    const rightRailing = new THREE.Mesh(railingGeometry, railingMaterial);
+    rightRailing.position.set(0, 0.5, -this.bridgeInfo.width / 2 + 0.05);
+    bridgeGroup.add(rightRailing);
+  }
+  
+  /**
+   * Extract collision geometry from loaded bridge model
+   * @param {THREE.Object3D} model - The loaded bridge model
+   * @param {THREE.Group} bridgeGroup - The bridge group for positioning
+   */
+  extractBridgeCollisionGeometry(model, bridgeGroup) {
+    // Traverse the model to find collision-suitable meshes
+    model.traverse((child) => {
+      if (child.isMesh && child.geometry) {
+        // Create invisible collision mesh with world transform
+        const collisionMesh = child.clone();
+        
+        // Apply the bridge group's world transform to the collision mesh
+        collisionMesh.updateMatrixWorld(true);
+        
+        // Make collision mesh invisible but keep geometry
+        collisionMesh.material = new THREE.MeshBasicMaterial({ 
+          transparent: true, 
+          opacity: 0,
+          visible: false 
+        });
+        
+        // Store for collision detection
+        this.bridgeCollisionMeshes.push({
+          mesh: collisionMesh,
+          originalMesh: child
+        });
+      }
+    });
+    
+    if (window.DEBUG) console.log(`Created ${this.bridgeCollisionMeshes.length} bridge collision meshes`);
+  }
+  
+  /**
+   * Create collision geometry for fallback bridge
+   * @param {THREE.Group} bridgeGroup - The bridge group
+   */
+  createFallbackBridgeCollision(bridgeGroup) {
+    // Create a simple box collision mesh for the bridge deck
+    const collisionGeometry = new THREE.BoxGeometry(
+      this.bridgeInfo.length, 
+      0.2, 
+      this.bridgeInfo.width
+    );
+    
+    const collisionMaterial = new THREE.MeshBasicMaterial({ 
+      transparent: true, 
+      opacity: 0,
+      visible: false 
+    });
+    
+    const collisionMesh = new THREE.Mesh(collisionGeometry, collisionMaterial);
+    collisionMesh.position.y = 0.1; // Same as visible bridge
+    
+    // Store for collision detection
+    this.bridgeCollisionMeshes = [{
+      mesh: collisionMesh,
+      originalMesh: null
+    }];
+    
+    if (window.DEBUG) console.log('Created fallback bridge collision mesh');
+  }
+  
+  /**
    * Check if the ball has entered the hole
    * @param {THREE.Object3D} ball - The golf ball object
    * @returns {boolean} Whether the ball is in the hole
@@ -1046,10 +1499,14 @@ class TerrainGenerator {
     // Check if ball is within hole radius
     const isOverHole = horizontalDist < this.flagObject.userData.holeRadius;
     
-    // Check if ball is at the right height (at or slightly below hole level)
-    // The hole is now positioned below ground level, so check for a lower position
-    const isAtHoleLevel = (ballPosition.y <= holePosition.y + 0.1) && 
-                         (ballPosition.y >= holePosition.y - 0.3);
+    // Use the proper hole level (below surface) for collision detection
+    const surfaceLevel = this.flagObject.userData.surfaceLevel || this.holePosition.y;
+    const holeLevel = this.flagObject.userData.holeLevel || (surfaceLevel - 0.1);
+    
+    // Check if ball is at the right height - ball center should be at or below surface level
+    // but above the bottom of the hole
+    const isAtHoleLevel = (ballPosition.y <= surfaceLevel + 0.05) && 
+                         (ballPosition.y >= holeLevel - 0.05);
     
     // Check if ball velocity is low enough to be considered stopped
     const isStopped = ball.velocity ? ball.velocity.length() < 0.5 : true;
@@ -1069,6 +1526,65 @@ class TerrainGenerator {
   }
 
   /**
+   * Create a flat fairway with smooth curves and natural shape between tee and hole
+   * @returns {Function} A function that returns the height at a given point
+   */
+  createFlatFairway() {
+    if (!this.teePosition || !this.holePosition) return null;
+    
+    const start = new THREE.Vector2(this.teePosition.x, this.teePosition.z);
+    const end = new THREE.Vector2(this.holePosition.x, this.holePosition.z);
+    const width = 22; // Slightly wider for more natural look
+    const curveBlendRadius = 12; // Larger curved edge blending radius
+    
+    // Calculate fairway height as average between tee and hole
+    const fairwayHeight = (this.teePosition.y + this.holePosition.y) / 2;
+    
+    return (x, z) => {
+      const point = new THREE.Vector2(x, z);
+      const line = end.clone().sub(start);
+      const len = line.length();
+      
+      if (len === 0) return null; // Avoid division by zero
+      
+      const lineDir = line.clone().divideScalar(len);
+      const pointVec = point.clone().sub(start);
+      const projection = pointVec.dot(lineDir);
+      
+      // Check if point is along the fairway line
+      if (projection < -width || projection > len + width) return null;
+      
+      // Calculate perpendicular distance from fairway centerline
+      const perpDist = pointVec.clone().sub(lineDir.clone().multiplyScalar(Math.max(0, Math.min(len, projection)))).length();
+      
+      // Add organic width variation along the fairway length
+      const progressAlongFairway = Math.max(0, Math.min(1, projection / len));
+      const widthVariation = 1 + 0.3 * Math.sin(progressAlongFairway * Math.PI * 2) * Math.sin(progressAlongFairway * Math.PI * 3);
+      const dynamicWidth = (width / 2) * widthVariation;
+      
+      // Core fairway area (completely flat) with organic shape
+      if (perpDist <= dynamicWidth) {
+        return fairwayHeight;
+      }
+      
+      // Curved edge blending area with smooth organic curves
+      if (perpDist <= dynamicWidth + curveBlendRadius) {
+        const blendDistance = perpDist - dynamicWidth;
+        const blendFactor = blendDistance / curveBlendRadius;
+        
+        // Use smooth organic curve for natural blending
+        const smoothBlend = Math.pow(blendFactor, 1.5); // More gradual curve
+        
+        // Get surrounding terrain height for blending
+        const terrainHeight = this.getNoiseHeight(x, z);
+        return THREE.MathUtils.lerp(fairwayHeight, terrainHeight, smoothBlend);
+      }
+      
+      return null; // Outside fairway influence area
+    };
+  }
+
+  /**
    * Create a fairway between tee and hole
    */
   createFairway() {
@@ -1077,12 +1593,13 @@ class TerrainGenerator {
     this.fairwayPath = {
       start: new THREE.Vector2(this.teePosition.x, this.teePosition.z),
       end: new THREE.Vector2(this.holePosition.x, this.holePosition.z),
-      width: 15 // Width of the fairway
+      width: 20, // Increased width for more natural look
+      curveBlendRadius: 8 // Radius for curved edge blending
     };
   }
 
   /**
-   * Check if a point is on the fairway
+   * Check if a point is on the fairway (including curved edge area)
    */
   isOnFairway(x, z) {
     if (!this.fairwayPath) return false;
@@ -1094,39 +1611,144 @@ class TerrainGenerator {
     // Calculate distance from point to line segment (fairway)
     const line = end.clone().sub(start);
     const len = line.length();
-    const lineDir = line.clone().divideScalar(len);
     
+    if (len === 0) return false;
+    
+    const lineDir = line.clone().divideScalar(len);
     const pointVec = point.clone().sub(start);
     const projection = pointVec.dot(lineDir);
     
-    // Check if point is between start and end
-    if (projection < 0 || projection > len) return false;
+    // Check if point is along the fairway line (with some extension)
+    if (projection < -this.fairwayPath.width || projection > len + this.fairwayPath.width) return false;
     
-    // Calculate perpendicular distance
-    const perpDist = pointVec.clone().sub(lineDir.clone().multiplyScalar(projection)).length();
+    // Calculate perpendicular distance from fairway centerline
+    const perpDist = pointVec.clone().sub(lineDir.clone().multiplyScalar(Math.max(0, Math.min(len, projection)))).length();
     
-    // Check if within fairway width
-    return perpDist <= this.fairwayPath.width;
+    // Add organic width variation to match the fairway shape
+    const progressAlongFairway = Math.max(0, Math.min(1, projection / len));
+    const widthVariation = 1 + 0.3 * Math.sin(progressAlongFairway * Math.PI * 2) * Math.sin(progressAlongFairway * Math.PI * 3);
+    const dynamicWidth = (this.fairwayPath.width / 2) * widthVariation;
+    
+    // Check if within organic fairway width including curved blend area
+    return perpDist <= dynamicWidth + (this.fairwayPath.curveBlendRadius || 0);
   }
 
   /**
    * Get terrain height at specific world coordinates (for physics)
+   * Uses the same logic as terrain generation to ensure consistency
    */
   getHeightAtPosition(x, z) {
-    // If heightmap is available, use it for faster lookups
-    if (this.heightMap && this.heightMap.length > 0) {
-      const { width, length, segmentsW, segmentsL } = this.options;
-      const xIndex = Math.floor((x + width / 2) / width * segmentsW);
-      const zIndex = Math.floor((z + length / 2) / length * segmentsL);
-
-      if (xIndex >= 0 && xIndex <= segmentsW && zIndex >= 0 && zIndex <= segmentsL) {
-        return this.heightMap[xIndex][zIndex];
+    // Check for bridge collision first (highest priority)
+    const bridgeHeight = this.getBridgeHeightAtPosition(x, z);
+    if (bridgeHeight !== null) {
+      return bridgeHeight;
+    }
+    
+    // Use the same terrain feature logic as in generateTerrain()
+    // This ensures physics matches visual terrain
+    
+    // Check tee area
+    if (this.teePosition) {
+      const distanceFromTee = Math.sqrt((x - this.teePosition.x) ** 2 + (z - this.teePosition.z) ** 2);
+      if (distanceFromTee < 3) {
+        return this.teePosition.y;
       }
     }
     
-    // Fallback to the noise height if heightmap is not available or out of bounds
-    const height = this.getNoiseHeight(x, z);
-    return height;
+    // Check putting green (kidney-shaped area around hole)
+    if (this.greenParams) {
+      const localX = x - this.greenParams.centerX;
+      const localZ = z - this.greenParams.centerZ;
+      const size = this.greenParams.size;
+      
+      const ellipseDistance = Math.sqrt((localX / 1.5) ** 2 + localZ ** 2) / size;
+      const circleDistance = Math.sqrt((localX + size * 0.3) ** 2 + (localZ - size * 0.1) ** 2) / (size * 0.7);
+      const kidneyDistance = Math.max(ellipseDistance, 1 - circleDistance);
+      
+      if (kidneyDistance < 1) {
+        // Check for hole depression within green
+        const holeDistance = Math.sqrt((x - this.holePosition.x) ** 2 + (z - this.holePosition.z) ** 2);
+        if (holeDistance < 0.3) {
+          // Core hole area
+          return this.holePosition.y - 0.1;
+        } else if (holeDistance < 0.6) {
+          // Sloped lip around hole
+          const blendFactor = (holeDistance - 0.3) / (0.6 - 0.3);
+          return THREE.MathUtils.lerp(this.holePosition.y - 0.1, this.holePosition.y, blendFactor);
+        }
+        // Regular green area
+        return this.holePosition.y;
+      }
+    }
+    
+    // Check water moat (if it exists)
+    if (this.waterHazardArea) {
+      const waterHeight = this.waterHazardArea(x, z);
+      if (waterHeight !== null) {
+        return waterHeight;
+      }
+    }
+    
+    // Check sand bunker (if it exists)
+    if (this.sandBunkerArea) {
+      const bunkerHeight = this.sandBunkerArea(x, z);
+      if (bunkerHeight !== null) {
+        return bunkerHeight;
+      }
+    }
+    
+    // Check fairway
+    if (this.isOnFairway && this.isOnFairway(x, z)) {
+      // Get fairway height - approximate based on tee and hole heights
+      const fairwayHeight = (this.teePosition.y + this.holePosition.y) / 2;
+      return fairwayHeight;
+    }
+    
+    // Default to noise height for rough areas
+    return this.getNoiseHeight(x, z);
+  }
+
+  /**
+   * Get bridge height at position using 3D raycasting collision
+   * @param {number} x - X coordinate in world space
+   * @param {number} z - Z coordinate in world space
+   * @returns {number|null} Bridge surface height or null if not over bridge
+   */
+  getBridgeHeightAtPosition(x, z) {
+    if (!this.bridgeCollisionMeshes || this.bridgeCollisionMeshes.length === 0) {
+      return null;
+    }
+    
+    // Create a raycaster pointing downward from high above the bridge
+    const raycaster = new THREE.Raycaster();
+    const origin = new THREE.Vector3(x, this.bridgeInfo.height + 10, z);
+    const direction = new THREE.Vector3(0, -1, 0); // Pointing down
+    
+    raycaster.set(origin, direction);
+    
+    // Test intersection with all bridge collision meshes
+    const collisionMeshes = this.bridgeCollisionMeshes.map(item => {
+      // Update world matrix for accurate collision detection
+      if (item.mesh.parent) {
+        item.mesh.parent.updateMatrixWorld(true);
+      }
+      item.mesh.updateMatrixWorld(true);
+      return item.mesh;
+    });
+    
+    const intersections = raycaster.intersectObjects(collisionMeshes, true);
+    
+    if (intersections.length > 0) {
+      // Return the highest intersection point (closest to ray origin)
+      const highestIntersection = intersections.reduce((highest, current) => {
+        return current.point.y > highest.point.y ? current : highest;
+      });
+      
+      // Add small offset to prevent ball from clipping into bridge
+      return highestIntersection.point.y + 0.05;
+    }
+    
+    return null;
   }
 
   /**
@@ -1179,6 +1801,18 @@ class TerrainGenerator {
     // console.log(`getSurfaceTypeAtPosition(${x}, ${z}) - height: ${y}`); // Debugging
 
     // Check if it's in special areas
+    
+    // Check if on bridge
+    if (this.bridgeInfo) {
+      const isOnBridge = (
+        Math.abs(x - this.bridgeInfo.centerX) < this.bridgeInfo.length / 2 &&
+        Math.abs(z - this.bridgeInfo.centerZ) < this.bridgeInfo.width / 2 &&
+        Math.abs(y - this.bridgeInfo.height) < 0.5 // Allow some height tolerance
+      );
+      if (isOnBridge) {
+        return "bridge";
+      }
+    }
     
     // Check if on putting green (kidney-shaped area around hole)
     if (this.greenParams) {
