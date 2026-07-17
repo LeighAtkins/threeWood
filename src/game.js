@@ -711,12 +711,12 @@ class Game {
     
     // Handle input based on game state
     this.handleInput();
-    
+
     // Update power meter
     this.updatePowerMeter();
-    
-    // Check if ball is in the hole
-    this.checkBallInHole();
+    // NOTE: hole-in detection is handled in the WATCHING branch above via
+    // terrain.checkBallInHole() -> handleHoleComplete(), which is guarded to
+    // fire once. Do not add a second detection path here.
   }
   
   /**
@@ -953,30 +953,10 @@ class Game {
       this.ui.showReadyIndicator();
     }
   }
-  
-  /**
-   * Check if the ball is in the hole
-   */
-  checkBallInHole() {
-    // Use the terrain's sophisticated hole detection method
-    if (this.terrain && this.terrain.checkBallInHole && this.terrain.checkBallInHole(this.ball.getMesh())) {
-      // Ball is in the hole!
-      if (window.DEBUG) console.log(`Hole completed in ${this.strokes} strokes!`);
-      
-      // Update score
-      const relativeScore = this.strokes - this.par;
-      this.score += relativeScore;
-      
-      // Update UI
-      this.ui.updateScore(this.score);
-      this.ui.showHoleCompleteMessage(this.strokes, this.par);
-      
-      // Reset for next hole
-      setTimeout(() => {
-        this.resetBall();
-      }, 3000);
-    }
-  }
+
+  // Hole-in detection is handled in update()'s WATCHING branch via
+  // terrain.checkBallInHole(this.ball) -> this.handleHoleComplete().
+  // That path is guarded to fire once; no separate checkBallInHole here.
   
   /**
    * Set the game state

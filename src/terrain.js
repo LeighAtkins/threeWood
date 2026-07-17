@@ -125,26 +125,29 @@ class TerrainGenerator {
    * @returns {Function} A function that returns the height at a given point
    */
   createHoleDepression(centerX, centerZ, surfaceHeight) {
+    // Read depth/radius from the canonical hole descriptor so the physics
+    // dimple always matches the visible cup mesh.
+    const holeRadius = this.hole ? this.hole.radius : 0.3;
+    const lipRadius = holeRadius * 2; // sloped edge is twice the hole radius
+    const depth = this.hole ? this.hole.depth : 0.2;
+
     return (x, z) => {
       const dx = x - centerX;
       const dz = z - centerZ;
       const distance = Math.sqrt(dx * dx + dz * dz);
-      
-      const holeRadius = 0.3; // Larger for visibility  
-      const lipRadius = 0.6; // Larger for the sloped edge
-      
+
       // Core hole area (below surface)
       if (distance < holeRadius) {
-        return surfaceHeight - 0.1; // Hole depth
+        return surfaceHeight - depth; // Hole floor
       }
-      
+
       // Sloped lip around hole
       if (distance < lipRadius) {
         const blendFactor = (distance - holeRadius) / (lipRadius - holeRadius);
-        const slopeHeight = THREE.MathUtils.lerp(surfaceHeight - 0.1, surfaceHeight, blendFactor);
+        const slopeHeight = THREE.MathUtils.lerp(surfaceHeight - depth, surfaceHeight, blendFactor);
         return slopeHeight;
       }
-      
+
       return null; // Outside hole influence
     };
   }
@@ -1188,10 +1191,26 @@ class TerrainGenerator {
     
     // Store the original surface height for flag positioning (before hole depression is applied)
     this.holeSurfaceHeight = holeY;
-    
+
     this.teePosition = new THREE.Vector3(teeX, teeY, teeZ);
     this.holePosition = new THREE.Vector3(holeX, holeY, holeZ);
-    
+
+    // --- Canonical hole descriptor: the single source of truth for the cup ---
+    // surfaceY = green height the ball rolls on; bottomY = cup floor;
+    // radius = hole opening radius (matches detection). Everything that needs
+    // the hole location/depth (flag base, cup mesh, getHeightAtPosition,
+    // checkBallInHole) reads from here instead of recomputing.
+    const HOLE_DEPTH = 0.2;
+    const HOLE_RADIUS = 0.3;
+    this.hole = {
+      x: holeX,
+      z: holeZ,
+      surfaceY: holeY,          // green surface at the hole
+      bottomY: holeY - HOLE_DEPTH,
+      radius: HOLE_RADIUS,
+      depth: HOLE_DEPTH,
+    };
+
     // Store green size for later use
     this.greenSize = 15; // Size of the kidney-shaped green
 
@@ -1205,113 +1224,88 @@ class TerrainGenerator {
    * @returns {THREE.Group} The flag object
    */
   createFlag(scene) {
-    // Create a group to hold all flag components
     const flagGroup = new THREE.Group();
     flagGroup.name = 'golfFlag';
-    
-    // Load the 3D model
-    const loader = new GLTFLoader();
-    const modelPath = 'src/Assets/golf hole flag.glb';
-    
-    // Get the actual terrain height at the hole position
-    loader.load(
-      modelPath,
-      (gltf) => {
-        if (window.DEBUG) console.log('Flag model loaded successfully');
-        // Remove all children (if fallback was added by error)
-        while (flagGroup.children.length > 0) {
-          const child = flagGroup.children[0];
-          if (child.geometry) child.geometry.dispose();
-          if (child.material) child.material.dispose();
-          flagGroup.remove(child);
-        }
-        // Add the model to the group
-        const model = gltf.scene;
-        model.scale.set(2.5, 2.5, 2.5); // Increased scale
-        
-        // Calculate the bounding box to position the flag correctly
-        const box = new THREE.Box3().setFromObject(model);
-        const modelHeight = box.max.y - box.min.y;
-        const modelBottom = box.min.y;
-        
-        // Position the model so its bottom sits at the group's origin (surface level)
-        model.position.y = -modelBottom;
-        
-        flagGroup.add(model);
-        model.traverse((child) => {
-          if (child.isMesh && child.name.toLowerCase().includes('flag')) {
-            flagGroup.userData.flagMesh = child;
-          }
-        });
-      },
-      undefined,
-      (error) => {
-        console.error('Error loading flag model:', error);
-        // Only add fallback if model fails
-        this.createFallbackFlag(flagGroup);
+
+    // Build the flag from primitive geometry so the pole base is
+    // DETERMINISTICALLY at the group origin (y=0 = ground). The GLB model's
+    // pole origin is unreliable (its bbox bottom is the flag cloth, not the
+    // pole), which is why the pole kept floating above the green.
+    const POLE_HEIGHT = 2.4;
+    const POLE_RADIUS = 0.04;
+
+    // Pole: cylinder whose base sits at y=0. CylinderGeometry is centered on
+    // its origin, so shift it up by half its height.
+    const poleGeo = new THREE.CylinderGeometry(POLE_RADIUS, POLE_RADIUS, POLE_HEIGHT, 10);
+    const poleMat = new THREE.MeshStandardMaterial({ color: 0xf0f0f0, metalness: 0.3, roughness: 0.4 });
+    const pole = new THREE.Mesh(poleGeo, poleMat);
+    pole.position.y = POLE_HEIGHT / 2;
+    pole.castShadow = true;
+    flagGroup.add(pole);
+
+    // Flag cloth near the top of the pole.
+    const FLAG_W = 0.5, FLAG_H = 0.32;
+    const flagGeo = new THREE.PlaneGeometry(FLAG_W, FLAG_H);
+    const flagMat = new THREE.MeshStandardMaterial({
+      color: 0xe53935, side: THREE.DoubleSide, roughness: 0.8
+    });
+    const flagCloth = new THREE.Mesh(flagGeo, flagMat);
+    flagCloth.position.set(FLAG_W / 2, POLE_HEIGHT - FLAG_H / 2 - 0.05, 0);
+    flagCloth.castShadow = true;
+    flagGroup.add(flagCloth);
+    flagGroup.userData.flagMesh = flagCloth;
+
+    // Position flagGroup at the canonical hole location: the green surface
+    // height at the hole, so the pole base meets the green.
+    if (this.hole) {
+      flagGroup.position.set(this.hole.x, this.hole.surfaceY, this.hole.z);
+      flagGroup.userData.surfaceLevel = this.hole.surfaceY;
+      flagGroup.userData.holeLevel = this.hole.bottomY;
+      if (window.DEBUG) {
+        console.log('[createFlag] group at', this.hole.x, this.hole.surfaceY, this.hole.z,
+          '| pole base world Y =', this.hole.surfaceY);
       }
-    );
-    
-    
-    // Position flagGroup at hole position
-    if (this.holePosition && this.holeSurfaceHeight !== undefined) {
-      // Use the stored original surface height instead of querying current terrain height
-      // This ensures flag base stays at surface level even with hole depression
-      const surfaceHeight = this.holeSurfaceHeight;
-      
-      flagGroup.position.set(
-        this.holePosition.x,
-        surfaceHeight, // Flag base at original ground surface level
-        this.holePosition.z
-      );
-      
-      // Store both surface level and hole level for collision detection
-      flagGroup.userData.surfaceLevel = surfaceHeight;
-      flagGroup.userData.holeLevel = surfaceHeight - 0.1; // Hole is 0.1 units below surface
     }
-    
-    // Add to scene if provided
+
+    // Add the visible hole cup at the base of the pole.
+    this.createHoleCup(flagGroup);
+
     if (scene) {
       scene.add(flagGroup);
     }
-    
-    // Store reference to flag
+
     this.flagObject = flagGroup;
-    
-    // Add collision detection properties
     flagGroup.userData.isFlag = true;
-    flagGroup.userData.holeRadius = 0.3;
-    
+    flagGroup.userData.holeRadius = this.hole ? this.hole.radius : 0.3;
+
     return flagGroup;
   }
-  
+
   /**
-   * Create a fallback flag for when the 3D model fails to load
-   * @param {THREE.Group} flagGroup - The group to add the fallback flag to
+   * Create the visible hole cup at the base of the pole. The cup is a dark
+   * cylinder sunk into the green. Because the terrain grid (8 units/cell)
+   * cannot resolve a 0.3-radius hole, the green surface mesh would otherwise
+   * cover the opening — so the cup rim is raised just above the surface to
+   * read clearly as a hole, with a dark floor disc inside.
    */
-  createFallbackFlag(flagGroup) {
-    // Create flag pole (cylinder)
-    const poleGeometry = new THREE.CylinderGeometry(0.05, 0.05, 3, 8);
-    const poleMaterial = new THREE.MeshStandardMaterial({ color: 0xDDDDDD });
-    const pole = new THREE.Mesh(poleGeometry, poleMaterial);
-    pole.position.y = 1.5; // Half height of pole
-    flagGroup.add(pole);
-    
-    // Create flag (simple rectangle)
-    const flagGeometry = new THREE.PlaneGeometry(1, 0.6);
-    const flagMaterial = new THREE.MeshStandardMaterial({ 
-      color: 0xFF0000, 
-      side: THREE.DoubleSide
-    });
-    const flag = new THREE.Mesh(flagGeometry, flagMaterial);
-    flag.position.set(0.5, 2.7, 0); // Position at top of pole
-    flag.rotation.y = Math.PI / 2; // Orient perpendicular to pole
-    flagGroup.add(flag);
-    
-    // Store reference for animations
-    flagGroup.userData.flagMesh = flag;
+  createHoleCup(parent) {
+    if (!this.hole) return null;
+    const { radius, depth } = this.hole;
+
+    // Cup walls: solid (not open-ended) so the dark interior is always visible
+    // and the green surface mesh can't z-fight/occlude it.
+    const cupHeight = depth + 0.06;       // rim pokes slightly above surface
+    const cupGeo = new THREE.CylinderGeometry(radius, radius, cupHeight, 20, 1, false);
+    const cupMat = new THREE.MeshBasicMaterial({ color: 0x070707 });
+    const cup = new THREE.Mesh(cupGeo, cupMat);
+    // Top of cup at +0.03 above the group origin (surface), bottom at -depth-0.03.
+    cup.position.set(0, -depth / 2, 0);
+    cup.name = 'holeCup';
+    parent.add(cup);
+
+    return cup;
   }
-  
+
   /**
    * Create and position the bridge over the water moat
    * @param {THREE.Scene} scene - The scene to add the bridge to
@@ -1484,44 +1478,32 @@ class TerrainGenerator {
    * @returns {boolean} Whether the ball is in the hole
    */
   checkBallInHole(ball) {
-    if (!ball || !this.flagObject || !this.holePosition) return false;
-    
-    // Get ball position
-    const ballPosition = ball.position.clone();
-    
-    // Calculate horizontal distance to hole
-    const holePosition = this.holePosition.clone();
-    const horizontalDist = new THREE.Vector2(
-      ballPosition.x - holePosition.x,
-      ballPosition.z - holePosition.z
-    ).length();
-    
-    // Check if ball is within hole radius
-    const isOverHole = horizontalDist < this.flagObject.userData.holeRadius;
-    
-    // Use the proper hole level (below surface) for collision detection
-    const surfaceLevel = this.flagObject.userData.surfaceLevel || this.holePosition.y;
-    const holeLevel = this.flagObject.userData.holeLevel || (surfaceLevel - 0.1);
-    
-    // Check if ball is at the right height - ball center should be at or below surface level
-    // but above the bottom of the hole
-    const isAtHoleLevel = (ballPosition.y <= surfaceLevel + 0.05) && 
-                         (ballPosition.y >= holeLevel - 0.05);
-    
-    // Check if ball velocity is low enough to be considered stopped
+    if (!ball || !this.hole) return false;
+
+    const ballPosition = ball.position;
+    const { x, z, surfaceY, bottomY, radius } = this.hole;
+
+    // Horizontal distance to hole center
+    const horizontalDist = Math.hypot(ballPosition.x - x, ballPosition.z - z);
+    const isOverHole = horizontalDist < radius;
+
+    // Ball center must be near the surface (rolling across the lip) or already
+    // dropping into the cup. Window widened slightly now that the cup is real,
+    // so a ball rolling over registers reliably.
+    const isAtHoleLevel = (ballPosition.y <= surfaceY + 0.08) &&
+                          (ballPosition.y >= bottomY - 0.08);
+
     const isStopped = ball.velocity ? ball.velocity.length() < 0.5 : true;
-    
-    // Ball is in hole if all conditions are met
+
     const isInHole = isOverHole && isAtHoleLevel && isStopped;
-    
-    // If ball is in hole, make it sink gradually
+
+    // Sink the ball into the cup once detected.
     if (isInHole && ball.velocity) {
-      // Apply downward force to make the ball sink into the hole
       ball.velocity.y = -0.5;
       ball.velocity.x *= 0.5;
       ball.velocity.z *= 0.5;
     }
-    
+
     return isInHole;
   }
 
@@ -1666,18 +1648,19 @@ class TerrainGenerator {
       const kidneyDistance = Math.max(ellipseDistance, 1 - circleDistance);
       
       if (kidneyDistance < 1) {
-        // Check for hole depression within green
-        const holeDistance = Math.sqrt((x - this.holePosition.x) ** 2 + (z - this.holePosition.z) ** 2);
-        if (holeDistance < 0.3) {
-          // Core hole area
-          return this.holePosition.y - 0.1;
-        } else if (holeDistance < 0.6) {
+        // Check for hole depression within green (reads canonical descriptor)
+        const holeDistance = Math.sqrt((x - this.hole.x) ** 2 + (z - this.hole.z) ** 2);
+        const r = this.hole.radius;
+        if (holeDistance < r) {
+          // Core hole area — cup floor
+          return this.hole.bottomY;
+        } else if (holeDistance < r * 2) {
           // Sloped lip around hole
-          const blendFactor = (holeDistance - 0.3) / (0.6 - 0.3);
-          return THREE.MathUtils.lerp(this.holePosition.y - 0.1, this.holePosition.y, blendFactor);
+          const blendFactor = (holeDistance - r) / r;
+          return THREE.MathUtils.lerp(this.hole.bottomY, this.hole.surfaceY, blendFactor);
         }
         // Regular green area
-        return this.holePosition.y;
+        return this.hole.surfaceY;
       }
     }
     
