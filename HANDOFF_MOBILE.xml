@@ -1,0 +1,221 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ThreeWood — Mobile &amp; Design/3D Handoff
+  ==========================================
+  The game is LIVE on Vercel and builds clean. This brief hands off to a
+  design/3D specialist whose mandate is: make it genuinely PLAYABLE on a
+  smartphone web browser, and elevate the 3D art direction to 10/10.
+
+  The live build has NEVER been playtested in a browser — assume runtime
+  rough edges exist. Confirm the baseline plays before redesigning anything.
+-->
+<Handoff>
+  <Meta>
+    <Project>ThreeWood — procedural 3D golf (Vite + Three.js, pure client-side)</Project>
+    <Repo>github.com/LeighAtkins/threeWood</Project>
+    <Branch>improve/looks-perf-gameplay-ps1-retro</Branch>
+    <LiveURL>https://threewood.vercel.app</LiveURL>
+    <LocalRun>npm install &amp;&amp; npm run dev  (opens http://localhost:3000)</LocalRun>
+    <Mandate priority="1">Make ThreeWood PLAYABLE on a smartphone web browser (touch).</Mandate>
+    <Mandate priority="2">Elevate the 3D art direction to a confident, cohesive 10/10.</Mandate>
+    <Aesthetic target="elevated stylized low-poly">A Short Hike / Everybody's Golf / Link's Awakening (Switch) flavor — chunky geometry, warm hand-tuned lighting, modern polish on a low-poly base.</Aesthetic>
+  </Meta>
+
+  <!-- ===================================================================== -->
+  <CurrentState mustRead="true">
+    <Headline>It loads and builds. It is NOT yet touch-playable — input is keyboard+mouse only.</Headline>
+
+    <WhatWorks>
+      <Item>Live on Vercel (verified 200s on index/JS/sfx). Build is clean on Linux runner.</Item>
+      <Item>Deterministic seeded course generator with archetype grammar + fairness fitness (src/course/holeDesigner.js).</Item>
+      <Item>3-click swing (power->accuracy->strike) with mishits (src/core/swing.js).</Item>
+      <Item>Club bag, lie penalties, instanced trees, multi-hole rounds, strict StateMachine.</Item>
+      <Item>White hole cup + sink animation, hole-facing camera, 2D minimap with shot-arc preview.</Item>
+      <Item>Title-screen rebrand to elevated low-poly (golden-hour gradient, low-poly ball emblem).</Item>
+    </WhatWorks>
+
+    <WhatBlocksMobile severity="critical">
+      <Block id="M1" severity="blocker">
+        <Symptom>NO touch input anywhere in the codebase. Phones cannot aim, swing, or adjust loft.</Symptom>
+        <Evidence>grep for touchstart/touchmove/touchend/pointerdown returns ZERO hits across main.js, src/*.js, src/core/, src/course/.</Evidence>
+        <CurrentInput>
+          - Aim: mouse-drag via window 'mousemove' delta -> game.js:570 cameraController.rotateAim().
+          - Swing: window 'mousedown'/'mouseup' -> game.js:591/596 -> the 3-click meter.
+          - Loft: window 'wheel' -> game.js:603.
+          - Club cycle / spin selector: keyboard (arrow keys, S).
+        </CurrentInput>
+        <Fix>See MobileInput plan below. Prefer Pointer Events (one path for mouse+touch+pen).</Fix>
+      </Block>
+      <Block id="M2" severity="perf">
+        <Symptom>Uncapped devicePixelRatio in main.js (title renderer) — retina phones render the title screen at full DPR, wasting fill-rate.</Symptom>
+        <Evidence>main.js:14 webGLRenderer.setPixelRatio(window.devicePixelRatio);  (game.js:183 is correctly capped at 2).</Evidence>
+        <Fix>Cap both renderers at ~2 (or 1.5 for the title). Tune for 60fps on mid Android.</Fix>
+      </Block>
+      <Block id="M3" severity="ux">
+        <Symptom>No mobile viewport meta consideration beyond the default; no orientation guidance; HUD uses fixed px sizes that crowd small screens.</Symptom>
+        <Evidence>index.html has only the standard viewport meta. HUD elements are position:absolute with px sizes (src/ui.js).</Evidence>
+        <Fix>Encourage landscape; scale HUD to viewport; ensure controls sit in thumb zones (see HUDLayout).</Fix>
+      </Block>
+      <Block id="M4" severity="untested">
+        <Symptom>The integrated overhaul has NEVER been playtested in a browser. Runtime bugs are likely and unknown.</Symptom>
+        <Fix>Before redesigning: open the LiveURL (or localhost), play one hole end-to-end, file real bugs. Don't polish a broken core.</Fix>
+      </Block>
+    </WhatBlocksMobile>
+  </CurrentState>
+
+  <!-- ===================================================================== -->
+  <Verification firstStep="do-this-before-anything-else">
+    <Goal>Establish that the current build actually plays, so your work starts from truth not assumption.</Goal>
+    <Step>1. npm run dev, open http://localhost:3000 on desktop. Set window.DEBUG=true in console.</Step>
+    <Step>2. Play one full hole: title -> aim (camera faces hole) -> 3-click swing -> watch flight -> land -> roll -> sink.</Step>
+    <Step>3. Open Chrome DevTools device toolbar (Ctrl+Shift+M) -> pick a phone -> reload. Note what breaks (this is your mobile baseline).</Step>
+    <Step>4. Check console for: embedded-ball warnings, NaN heights, off-screen camera, mesh-disposal leaks across holes.</Step>
+    <Step>5. ONLY after the desktop loop is confirmed solid, start the mobile work. Fix core bugs first, they compound on weak hardware.</Step>
+  </Verification>
+
+  <!-- ===================================================================== -->
+  <MobileInput design="this-is-the-core-mobile-task">
+    <Principle>Use Pointer Events (pointerdown/move/up/cancel), not separate mouse+touch handlers. One codepath, works for mouse, touch, and pen. Touch fires mouse events too but unreliably during drags — don't rely on the compatibility layer.</Principle>
+
+    <!-- The three interactions that must work on a phone: -->
+    <Interaction name="aim">
+      <Today>window 'mousemove' X-delta -> cameraController.rotateAim(delta * sensitivity) [game.js:570].</Today>
+      <Mobile>
+        - One-finger drag anywhere on the 3D view rotates aim (horizontal drag = yaw).
+        - Show an on-screen aim hint / directional cue so the player knows they're aiming.
+        - Keep camera facing the hole as the default (faceHole already does this).
+      </Mobile>
+    </Interaction>
+
+    <Interaction name="swing" critical="true">
+      <Today>window 'mousedown'/'mouseup' drive the 3-click meter: click1 start power, click2 lock power, click3 strike [game.js:591/596 -> startSwing/swingClick].</Today>
+      <Mobile>
+        - A dedicated SWING button (large, thumb-reachable, bottom-right) advances the 3-click phases.
+        - Tap 1: start power climb. Tap 2: lock power (marker sweeps back). Tap 3: strike at the line.
+        - The swing meter UI must be readable on a phone (src/ui.js updateSwingMeter) — widen it, make the strike line obvious.
+        - This is the heart of the game; get the timing feel right on touch latency.
+      </Mobile>
+    </Interaction>
+
+    <Interaction name="loft-and-club">
+      <Today>Wheel = loft trim [game.js:603]; arrow keys cycle club/variant.</Today>
+      <Mobile>
+        - Loft: a vertical slider OR +/- buttons near the swing button. (Clubs now own base loft; this is fine trim.)
+        - Club/variant: small cycle buttons (next/prev club) in a thumb zone, or a swipe gesture on a club chip.
+        - Show current club + estimated distance prominently (clubs.estimateDistance exists).
+      </Mobile>
+    </Interaction>
+
+    <LayoutPriorities>
+      <Item>Right thumb: SWING button (big) + loft +/-.</Item>
+      <Item>Left thumb: aim drag (whole left 3D area) + club cycle.</Item>
+      <Item>Top bar: hole #, par, strokes, distance-to-pin, lie.</Item>
+      <Item>Corner: minimap (existing src/minimap.js) — keep it, scale to viewport.</Item>
+      <Item>Encourage LANDSCAPE orientation (CSS + a rotate-device prompt in portrait). The 3D view needs width.</Item>
+    </LayoutPriorities>
+  </MobileInput>
+
+  <!-- ===================================================================== -->
+  <DesignAnd3D mandate="elevate-to-10/10">
+    <Direction>
+      The art direction is currently "elevated stylized low-poly" in INTENT but inconsistent in EXECUTION — some flat-shaded terrain, a gradient sky, fog, but mixed materials and no scene dressing beyond trees+bridge. Your job: make it look deliberate and beautiful at a glance, on a phone screen, at distance.
+    </Direction>
+
+    <Workstream name="Materials &amp; Lighting" goal="one cohesive look">
+      <Task>Audit every material for consistency: flat shading everywhere, a single warm palette, fog color matched to horizon (already started in styles.css/game.js initSky).</Task>
+      <Task>Tune the sun: harder key light, soft fill, contact shadows that read on a small screen. Avoid high-frequency shadow aliasing on mobile.</Task>
+      <Task>Consider a baked-style ambient look (hemisphere light + low-cost specular) instead of heavy PBR — mobile fill-rate is precious.</Task>
+    </Workstream>
+
+    <Workstream name="Scene Dressing" goal="a world, not a math plane">
+      <Task>Beyond trees: tall fescue rough, wildflowers/ground clutter near fairways, reeds at water edges, distant low-poly hills/skyline for depth (cheap, far-LOD billboards or low-geo).</Task>
+      <Task>Make hazards read instantly: water sparkle/animation, sand color contrast, bunker lips.</Task>
+      <Task>The flag + cup are the focal point of every hole — make them pop (the white cup is a good start; ensure it's visible from the tee at distance).</Task>
+    </Workstream>
+
+    <Workstream name="Camera &amp; Framing" goal="golf-broadcast feel on a small screen">
+      <Task>The hole-facing aim cam exists — refine framing so the line, landing zone, and hazard are all visible from the tee (readability is a design pillar).</Task>
+      <Task>Add a dedicated PUTT cam (top-down or low angle on the green) — putting is half the feel and currently shares the full-swing camera.</Task>
+      <Task>Ball-flight chase cam with optional slow-mo at apex for satisfying shots.</Task>
+      <Task>Keep camera transitions smooth and brief; long transitions feel bad on mobile.</Task>
+    </Workstream>
+
+    <Workstream name="Juice" goal="every shot feels great">
+      <Task>Ball compression on strike, motion trail on long shots, divot/splash particles, satisfying cup-drop.</Task>
+      <Task>Audio is rich (public/sfx/) — wire strike grade -> sound choice (the AudioManager already maps by power).</Task>
+      <Task>Haptic feedback (navigator.vibrate) on strike/cup on supported phones — a small touch that sells mobile.</Task>
+    </Workstream>
+
+    <MobilePerformanceBudget>
+      <Item>Target 60fps on a mid Android phone in landscape. Profile early, profile often.</Item>
+      <Item>Cap pixel ratio ~2, minimize draw calls (trees already use InstancedMesh — extend that pattern to clutter).</Item>
+      <Item>Frustum + distance culling; the current "render everything always" won't scale to 18 holes.</Item>
+      <Item>Shadows are the usual mobile killer — consider a single low-res directional shadow map, or fake contact shadows under the ball.</Item>
+    </MobilePerformanceBudget>
+  </DesignAnd3D>
+
+  <!-- ===================================================================== -->
+  <Architecture preserve="true">
+    <Principle>Keep src/core/ and src/course/ PURE (no THREE, no DOM, no timers). They are testable data+functions. Touch/DOM code belongs in game.js/ui.js or a new src/input.js / src/mobileUI.js.</Principle>
+    <Principle>The seeded rng (src/core/rng.js) is the source of truth. No Math.random() in generation/physics.</Principle>
+    <Principle>Use the StateMachine (src/core/states.js), not ad-hoc string states.</Principle>
+    <Principle>The 3-click swing model (src/core/swing.js) is sound — don't rewrite it, wire touch input TO it (startSwing/swingClick/swingStep).</Principle>
+    <GodObjectWarning>game.js is large. As you add mobile/input code, extract an InputController and a MobileHUD controller rather than growing game.js further.</GodObjectWarning>
+  </Architecture>
+
+  <!-- ===================================================================== -->
+  <Execution order="recommended">
+    <Phase id="P0" name="Confirm baseline plays" depends="nothing">
+      Run Verification. Fix any core runtime bugs found. A broken desktop loop will be a broken mobile loop.
+    </Phase>
+    <Phase id="P1" name="Mobile input layer" depends="P0">
+      New src/input.js (Pointer Events) wrapping aim-drag, swing-tap, loft, club-cycle. Wire to existing cameraController.rotateAim + startSwing/swingClick. Keep mouse working (Pointer Events cover both).
+    </Phase>
+    <Phase id="P2" name="Mobile HUD" depends="P1">
+      Thumb-zoned controls (src/mobileUI.js or extend ui.js): big SWING button, loft +-, club cycle, landscape prompt. Scale minimap to viewport.
+    </Phase>
+    <Phase id="P3" name="Perf pass for mobile" depends="P2">
+      Cap DPR, profile, cull, simplify shadows. Hit 60fps on a mid phone.
+    </Phase>
+    <Phase id="P4" name="Art direction &amp; 3D elevation" depends="P3">
+      Materials/lighting cohesion, scene dressing, camera framing, juice. This is where the 10/10 happens.
+    </Phase>
+    <Phase id="P5" name="Re-deploy &amp; verify on a real phone">
+      Redeploy (CLI or link repo for auto-deploy). Test on an actual phone browser (Safari iOS + Chrome Android) — emulators lie about input/perf.
+    </Phase>
+  </Execution>
+
+  <!-- ===================================================================== -->
+  <Deploy>
+    <Current>CLI-deployed snapshot of commit 8a09629. NOT git-linked, so pushes do NOT auto-deploy.</Current>
+    <ToRedeploy>npx vercel --prod --yes --name threewood   (already authenticated as leighatkins)</ToRedeploy>
+    <ToEnableAutoDeploy>Vercel dashboard -> Project Settings -> Git -> connect LeighAtkins/threeWood. Then main = production, every push deploys.</ToEnableAutoDeploy>
+  </Deploy>
+
+  <!-- ===================================================================== -->
+  <KeyFiles>
+    <File path="src/game.js" role="orchestrator; ALL current input listeners live here (lines ~560-603); swing/club/lie call sites"/>
+    <File path="src/ui.js" role="HUD; updateSwingMeter, club display — needs mobile layout pass"/>
+    <File path="src/camera.js" role="modes + faceHole(); rotateAim() is the aim entry point"/>
+    <File path="src/core/swing.js" role="3-click meter model — wire touch TO this, don't rewrite"/>
+    <File path="src/core/clubs.js|lies.js|rng.js|states.js" role="pure game logic (preserve)"/>
+    <File path="src/course/holeDesigner.js|trees.js" role="generator + instanced scenery"/>
+    <File path="src/terrain.js" role="mesh build from holeSpec; materials/lighting live here"/>
+    <File path="src/minimap.js" role="2D canvas yardage map"/>
+    <File path="main.js" role="title screen; uncapped DPR at line 14"/>
+    <File path="index.html|styles.css" role="title/markup; viewport meta + landscape prompt go here"/>
+    <File path="HANDOFF.xml" role="the EARLIER handoff — full architecture/systems context (read it too)"/>
+  </KeyFiles>
+
+  <!-- ===================================================================== -->
+  <AntiGoals>
+    <Item>Do NOT rewrite the swing model, course generator, rng, clubs, or states — they are complete. Wire input to them.</Item>
+    <Item>Do NOT add a second input system alongside the mouse one — use Pointer Events to UNIFY mouse+touch+pen in one path.</Item>
+    <Item>Do NOT pursue photorealism — the stylized identity is the whole point. Optimize for readability + feel + mobile perf.</Item>
+    <Item>Do NOT trust desktop or emulator for mobile correctness — test on a real phone before declaring done.</Item>
+    <Item>Do NOT ship shadows/materials that look great on desktop but drop a phone to 20fps.</Item>
+  </AntiGoals>
+
+  <FirstAction>Run Verification (P0). The live build is untested in-browser; establish what actually works before touching input or art. Report the bugs you find — they're the real starting point.</FirstAction>
+
+</Handoff>
