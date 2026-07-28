@@ -1,0 +1,200 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ThreeWood — Ambitious Path Handoff Guide
+  =========================================
+  Status: an ~85%-integrated game-of-the-year overhaul EXISTS and BUILDS.
+  This document hands it off to be finished, debugged, and shipped.
+
+  Read this ENTIRE <Context> section before touching anything. The biggest risk
+  is treating already-built modules as greenfield and rebuilding them.
+-->
+<Handoff>
+  <Meta>
+    <Project>ThreeWood — procedural 3D golf (Vite + Three.js)</Project>
+    <Path>C:\Users\Memory is RAM\Documents\projects\threeWood</Path>
+    <Branch>improve/looks-perf-gameplay-ps1-retro</Branch>
+    <Commit>HEAD = 3b388cd (plus large UNCOMMITTED working tree)</Commit>
+    <Goal>Finish, harden, and ship the ambitious overhaul that is already mostly wired in.</Goal>
+    <Aesthetic target="elevated stylized low-poly">chunky geometry + modern lighting; A Short Hike / Everybody's Golf flavor</Aesthetic>
+  </Meta>
+
+  <!-- ===================================================================== -->
+  <Context critical="true">
+    <Headline>The overhaul is real and compiles. Do NOT assume greenfield.</Headline>
+
+    <WhatExists>
+      <System name="Seeded course generator" file="src/course/holeDesigner.js" lines="392" state="complete">
+        Archetype grammar (straight, doglegL/R, overWater, bottleneck, elevatedGreen),
+        tee->landing->green spline layout, hazard placement, and a FITNESS FUNCTION
+        (fairness/readability/interest) that REJECTS bad holes and re-rolls.
+        Deterministic from a round seed. Multi-hole ROUND_PLANS pacing (9-hole loop).
+      </System>
+      <System name="Seeded RNG" file="src/core/rng.js" lines="69" state="complete">
+        mulberry32 + namespaced forking. ?seed= URL support, shareable seed strings.
+        THE RULE: no Math.random() in generation/physics.
+      </System>
+      <System name="3-click swing" file="src/core/swing.js" lines="173" state="complete">
+        Power -> accuracy -> strike. Timing error -> mishits (pull/push, thin/fat),
+        graded pure/good/poor/terrible. Pure module (no THREE/DOM).
+      </System>
+      <System name="Club bag" file="src/core/clubs.js" lines="74" state="complete">
+        Driver..Lob+Putter, each with launch profile + variants (full/punch/flop/chip).
+        estimateDistance + autoSelectClub(dist, onGreen, lie). Loft slider is GONE.
+      </System>
+      <System name="Lie consequences" file="src/core/lies.js" lines="47" state="complete">
+        rough/bunker penalties (speed, spin, launch, dir noise). getLieAt(terrain,pos).
+      </System>
+      <System name="Strict state machine" file="src/core/states.js" lines="36" state="complete">
+        Replaces stringly-typed state bugs. Throws on unknown states.
+      </System>
+      <System name="Instanced trees" file="src/course/trees.js" lines="71" state="complete">
+        2 InstancedMeshes (trunk+canopy) = 2 draw calls for the whole forest.
+        Trunk colliders registered on terrain for ball physics.
+      </System>
+      <System name="Integration in game.js" state="SUBSTANTIAL">
+        imports all core/+course modules; has this.fsm (StateMachine), this.swing,
+        club selection (selectClub/autoSelectClub by lie), lie resolution feeding
+        ball.hit(power,dir,loft,sidespin,strike,shot), multi-hole loadHole(n),
+        designHole + createTrees per hole. SINKING state + sink tween present.
+      </System>
+      <System name="Integration in terrain.js" state="SUBSTANTIAL">
+        imports designHole/path helpers; consumes a holeSpec; seeded via gameRng;
+        terrain generation keyed off spec.path/green/bunkers/water/trees.
+      </System>
+      <System name="Integration in ball.js" state="PARTIAL-but-keyed">
+        hit(power,dir,loft,sidespin,strike=null,shot=null) ALREADY applies
+        strike.speedFactor/yaw/sidespinAdd AND lie.speedFactor/dirNoiseDeg.
+        The strike model is consumed; the call site must supply it correctly.
+      </System>
+    </WhatExists>
+
+    <WhatIsVerifiedWorking>
+      <Check pass="true">npm run build succeeds (rollup ignores _archive/).</Check>
+      <Check pass="true">Production bundle is self-contained (sfx in public/, served 200).</Check>
+      <Check pass="true">All modules transform and serve via Vite (HTTP 200).</Check>
+      <Check pass="false">npm run dev is BROKEN at runtime (see Blockers).</Check>
+      <Check pass="unknown">In-browser playtest NOT yet performed on the integrated build.</Check>
+    </WhatIsVerifiedWorking>
+  </Context>
+
+  <!-- ===================================================================== -->
+  <Blockers priority="1-do-these-first">
+    <Blocker id="B1" severity="runtime" effort="5min">
+      <Symptom>npm run dev fails: "cannon-es could not be resolved (imported by _archive/cannonDebug.html)".</Symptom>
+      <Cause>The _archive/ folder (dead cannon demo files) is inside the project root, so Vite's dep scanner walks it.</Cause>
+      <Fix>Move _archive/ OUT of the Vite project root (e.g. to a sibling dir), OR add it to vite.config.js server.watch.ignored / optimizeDeps.exclude, OR delete it if the cannon demos are truly unwanted. Verify dev boots clean afterward.</Fix>
+    </Blocker>
+    <Blocker id="B2" severity="uncommitted" effort="10min">
+      <Symptom>Large uncommitted working tree; the entire overhaul + deploy fixes are uncommitted.</Symptom>
+      <Cause>Work was done across sessions without committing.</Cause>
+      <Fix>Commit the working tree in logical chunks (see Execution/CommitPlan) BEFORE doing more. You need a clean rollback point.</Fix>
+    </Blocker>
+  </Blockers>
+
+  <!-- ===================================================================== -->
+  <Verification first="always-run-the-game">
+    <Step>1. Fix B1, then `npm run dev` and open http://localhost:3000.</Step>
+    <Step>2. Play one full hole: title -> aim (camera faces hole; club auto-selected) -> 3-click swing -> watch flight -> land -> roll -> next lie.</Step>
+    <Step>3. Sink a ball: confirm the white cup + sink animation fire.</Step>
+    <Step>4. Advance to hole 2: confirm loadHole(n) regenerates a DIFFERENT archetype and the old hole's meshes are disposed.</Step>
+    <Step>5. Set ?seed=TEST-1234, reload, play hole 1, reload again -> the SAME hole must regenerate (determinism check).</Step>
+    <Step>6. Open browser console; set window.DEBUG=true; reload; watch for warnings (embedded ball, off-screen, NaN heights).</Step>
+    <FailureMode>If dev works but build differs, suspect _archive or an import that bundler resolves differently.</FailureMode>
+  </Verification>
+
+  <!-- ===================================================================== -->
+  <Workstreams ordered="by-dependency">
+
+    <Workstream id="WS1" name="Stabilize the integrated build" depends="B1,B2" effort="0.5day">
+      <Goal>A playtestable, committed baseline before any new features.</Goal>
+      <Task>Resolve B1 (dev server boots clean).</Task>
+      <Task>Run the full Verification playtest; file every rough edge into WS2/WS3.</Task>
+      <Task>Commit the baseline (see CommitPlan).</Task>
+      <DoneWhen>Dev + build both clean; one full hole playable end-to-end; committed.</DoneWhen>
+    </Workstream>
+
+    <Workstream id="WS2" name="Round out the core loop" depends="WS1" effort="1-2days">
+      <Goal>Every shot type and lie is reachable and behaves; holes advance correctly for 9/18.</Goal>
+      <Task label="swing">Confirm the 3-click meter UI renders (ui.updateSwingMeter) and that power->accuracy->strike all register clicks. The old two-click power meter code path is DEAD and should be removed to avoid double-input.</Task>
+      <Task label="clubs">Confirm club cycling (selectClub/cycleVariant) and that effective loft/maxSpeed actually drive ball.hit's shot object. Verify autoSelectClub picks sensible clubs by distance+lie.</Task>
+      <Task label="lies">Confirm getLieAt returns rough/bunker when the ball is in those surfaces, and that ball speed/spin visibly change. Bunker should explode the ball higher with less spin.</Task>
+      <Task label="holes">Stress-test loadHole(n) for n=1..9: each must dispose prior terrain/trees/flag/water and rebuild without leaks or orphaned meshes. Watch instanceMesh disposal (trees.js already disposes; verify).</Task>
+      <Task label="putting">Putter exists but putting feel (green slope/break reading) is likely thin. At minimum confirm the putter launches a ground ball and the ball stays on the green.</Task>
+      <DoneWhen>A full 9-hole round completes with no crashes, no mesh leaks, sensible clubs, and visible lie effects.</DoneWhen>
+    </Workstream>
+
+    <Workstream id="WS3" name="Presentation &amp; juice" depends="WS2" effort="1-2days">
+      <Goal>Make it feel like a 10/10, not a tech demo.</Goal>
+      <Task label="cameras">Add a dedicated putt cam on the green and a ball-flight chase with optional slow-mo at apex. Keep hole-facing aim cam.</Task>
+      <Task label="hud">The yardage minimap exists (src/minimap.js) — extend it to a proper yardage book: carry-to-pin, carry-to-hazard, elevation delta, current lie, wind.</Task>
+      <Task label="wind">Implement wind (affects flight, shown on HUD, flag direction reflects it). Per-hole seeded magnitude/direction from the round rng.</Task>
+      <Task label="juice">Ball compression on strike, trail on long shots, divot/splash particles, satisfying cup-drop. Audio already has a rich sfx set in public/sfx/ — wire strike grade -> sound choice.</Task>
+      <Task label="aesthetic">Commit ONE look: elevated stylized low-poly. Audit all materials for consistency (flat shading, palette, fog, gradient sky already exist).</Task>
+      <DoneWhen>The game looks cohesive and every shot has tactile feedback.</DoneWhen>
+    </Workstream>
+
+    <Workstream id="WS4" name="Ship to Vercel" depends="WS2" effort="0.5day">
+      <Goal>A shareable live URL. (Deploy-readiness is already done; just needs the build green + a push.)</Goal>
+      <Task>vercel.json exists and is correct (framework=vite, SPA rewrite, output=dist).</Task>
+      <Task>sfx are in public/sfx/ (already done) and referenced via /sfx/ absolute paths.</Task>
+      <Task>Push to GitHub -> import on Vercel (auto-detects Vite), OR `npm i -g vercel && vercel --prod`.</Task>
+      <Task>Share seeded runs via ?seed= URLs (rng.getSeedFromUrl already supports it).</Task>
+      <DoneWhen>Live URL loads, plays a hole, and a ?seed= link reproduces the same course.</DoneWhen>
+    </Workstream>
+
+    <Workstream id="WS5" name="Polish &amp; depth (post-ship)" depends="WS3,WS4">
+      <Goal>Replayability and skill ceiling.</Goal>
+      <Task>Endless/daily seeded mode; leaderboards per seed; ghost balls.</Task>
+      <Task>Green-reading overlay (contour arrows / tilt).</Task>
+      <Task>Course biomes (links/parkland/desert/alpine) changing palette + hazards.</Task>
+      <Task>Accessibility: aim-assist, one-handed input, colorblind-safe palette.</Task>
+    </Workstream>
+
+  </Workstreams>
+
+  <!-- ===================================================================== -->
+  <Architecture intent="preserve-this">
+    <Principle>Keep core/ and course/ PURE: no THREE, no DOM, no timers. They are data + functions. This makes them testable and reusable.</Principle>
+    <Principle>The seeded rng is the source of truth. Never Math.random() in generation/physics. Cosmetic-only may fork a stream.</Principle>
+    <Principle>One hole per 400x400 tile. Tee west, green east. Play flows along spec.path.</Principle>
+    <Principle>The fitness function must never be bypassed. If designHole returns bestEffort, log it — that's a bug in the generator, not a feature.</Principle>
+    <Principle>Use the StateMachine (core/states.js), not ad-hoc string states. Adding a state means declaring it up front.</Principle>
+    <GodObjectWarning>game.js is still large. As features land, extract controllers (RoundController, InputController, CameraDirector). Do not let it grow further.</GodObjectWarning>
+  </Architecture>
+
+  <!-- ===================================================================== -->
+  <CommitPlan>
+    <Step order="1">Commit the deploy fixes + minimap/bridge/hole/sink work already done (the uncommitted tree minus the overhaul) — OR commit it all as one "integrate overhaul" commit if separating is impractical. Prefer logical chunks.</Step>
+    <Step order="2">After WS1 (stabilize), commit "stabilize integrated build".</Step>
+    <Step order="3">Commit per workstream thereafter. Keep the branch rebased/clean.</Step>
+    <Note>Do not commit .claude/ .zcode/ CLAUDE.md (tooling, not game code).</Note>
+    <Note>The _archive/ decision (move out vs delete) must be resolved before the first commit so it stops breaking dev.</Note>
+  </CommitPlan>
+
+  <!-- ===================================================================== -->
+  <KeyFiles>
+    <File path="src/game.js" role="orchestrator; integration hub; state machine; swing/club/lie call sites"/>
+    <File path="src/terrain.js" role="builds the mesh from a holeSpec; seeded; height queries; cup/flag/water/bridge"/>
+    <File path="src/ball.js" role="physics; hit() already consumes strike+shot+lie"/>
+    <File path="src/course/holeDesigner.js" role="THE generator; archetype grammar + fitness"/>
+    <File path="src/course/trees.js" role="instanced trees + colliders"/>
+    <File path="src/core/swing.js|clubs.js|lies.js|rng.js|states.js" role="pure game-logic modules"/>
+    <File path="src/minimap.js" role="2D canvas yardage map + predicted shot arc"/>
+    <File path="src/ui.js" role="HUD; has updateSwingMeter, club display"/>
+    <File path="src/camera.js" role="modes; faceHole() exists"/>
+    <File path="src/holeComplete.js" role="hole-complete celebration + reset (attached to Game.prototype)"/>
+    <File path="vercel.json" role="deploy config (done)"/>
+  </KeyFiles>
+
+  <!-- ===================================================================== -->
+  <AntiGoals>
+    <Item>Do NOT rebuild holeDesigner, swing, clubs, lies, rng, or states — they are complete. Read them first.</Item>
+    <Item>Do NOT reintroduce a manual loft slider — clubs own loft now.</Item>
+    <Item>Do NOT use Math.random() in generation/physics.</Item>
+    <Item>Do NOT add realism that dilutes the stylized identity.</Item>
+    <Item>Do NOT ship before determinism (?seed=) is verified — it's a core promise.</Item>
+  </AntiGoals>
+
+  <FirstAction>Fix Blocker B1 (move/delete _archive/), boot dev, run the Verification playtest, then commit the baseline. Everything else follows from a clean, running, committed state.</FirstAction>
+
+</Handoff>

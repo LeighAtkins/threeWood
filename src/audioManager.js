@@ -53,7 +53,10 @@ export class AudioManager {
    * Load all sound files
    */
   loadSounds() {
-    const basePath = 'src/sfx/';
+    // SFX live in /public/sfx so Vite copies them verbatim into the build
+    // output (string-referenced files under /src are NOT bundled). The leading
+    // slash makes the path resolve correctly in both dev and production.
+    const basePath = '/sfx/';
     
     // Load standard sound effects
     Object.entries(this.soundMap).forEach(([key, filename]) => {
