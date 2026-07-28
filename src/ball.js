@@ -8,6 +8,8 @@ class GolfBall {
   constructor(terrain, audioManager = null, options = {}) {
     this.terrain = terrain;
     this.audioManager = audioManager;
+    // Deterministic physics randomness — game wires in the seeded stream.
+    this.rng = Math.random;
     this.options = {
       radius: options.radius || 0.05,
       mass: options.mass || 0.045, // kg (golf ball mass)
@@ -16,27 +18,22 @@ class GolfBall {
       gravity: options.gravity || -9.81, // m/s²
       rollResistance: options.rollResistance || 0.05, // Drastically reduced from 0.4 to allow rolling
       spinDecay: options.spinDecay || 0.97, // How quickly spin decays
-      maxVelocity: options.maxVelocity || 35, // Maximum velocity cap
+      maxVelocity: options.maxVelocity || 80, // Maximum velocity cap (driver launches ~66)
       stopThreshold: options.stopThreshold || 0.1, // Reduced from 0.25 to allow slower rolling before stop
       // PS1-style limitations
       positionPrecision: options.positionPrecision || 0.01,
       // Collision detection options
       useSubstepping: true, // Enable physics sub-stepping for high velocities
-      maxSubsteps: 2, // Reduced from 3 for better performance
+      maxSubsteps: 4, // Enough steps that driver-speed shots never tunnel
       tunnelThreshold: 5, // Increased threshold to use substepping less often
       safeOffset: 0.005, // Safe offset from terrain - reduced for better ground contact
       // Phase 2: Enhanced bounce physics
       minBounceVelocity: options.minBounceVelocity || 0.3, // Minimum velocity to bounce
-      slopeEnergyLoss: options.slopeEnergyLoss || 0.2, // Additional energy loss on slopes
       spinTransfer: options.spinTransfer || 0.7, // How much impact transfers to spin
       randomBounceVariation: options.randomBounceVariation || 0.05, // Small random variation (5%)
-      velocityRestitutionFactor: options.velocityRestitutionFactor || 0.015, // How much velocity affects restitution
       maxSpinRate: options.maxSpinRate || 5, // Maximum spin rate
       // Phase 3: Natural rolling and stopping
-      frictionVariation: options.frictionVariation || 0.05, // Random friction variation
       slopeGravityFactor: options.slopeGravityFactor || 0.8, // How much slopes affect ball rolling (0.8 = 80%)
-      rollingFrictionMultiplier: options.rollingFrictionMultiplier || 0.5, // Rolling has less friction than sliding
-      rollingInertia: options.rollingInertia || 0.6, // Ball tendency to keep rolling in current direction
       minimumStopFrames: options.minimumStopFrames || 5, // Minimum frames below threshold before stopping
     };
     
@@ -72,6 +69,13 @@ class GolfBall {
     
     // For debug visualization
     this.debugRays = [];
+  }
+
+  /**
+   * Wire a seeded RNG stream (from game) so physics is reproducible per seed.
+   */
+  setRng(rngFn) {
+    this.rng = rngFn || Math.random;
   }
 
   /**
@@ -117,31 +121,58 @@ class GolfBall {
    * @param {THREE.Vector3} direction - Direction vector
    * @param {number} loft - Loft angle in degrees
    * @param {number} sidespin - Side spin value (-1 to 1, negative = hook/left, positive = slice/right)
+   * @param {Object} [strike] - Mishit outcome from core/swing.js (yaw/thin/fat).
+   *                            Omit for a perfectly clean strike (legacy callers).
+   * @param {Object} [shot] - Club launch profile from core/clubs.js:
+   *                          { maxSpeed, spinFactor, lie? }. Defaults to the legacy
+   *                          30 m/s flat profile. `lie` (core/lies.js) bleeds
+   *                          speed/spin and adds yaw noise from bad lies.
    */
-  hit(power, direction, loft, sidespin) {
+  hit(power, direction, loft, sidespin, strike = null, shot = null) {
     if (!this.isResting) return false;
-    
+
     // Debug - log if the ball is potentially embedded in terrain
     const terrainHeight = this.terrain.getHeightAtPosition(this.position.x, this.position.z);
     if (this.position.y - this.options.radius < terrainHeight) {
       console.warn("Ball may be embedded in terrain before hit. Fixing position...");
       this.position.y = terrainHeight + this.options.radius + 0.002;
     }
-    
+
     // Save current position as last safe position
-    this.lastSafePosition.copy(this.position);
+    this.updateLastSafePosition();
     this.previousPosition.copy(this.position);
-    
-    // Convert power (0-100) to actual velocity (m/s)
-    const maxSpeed = 30;
+
+    // Convert power (0-100) to actual velocity (m/s); the club sets the max,
+    // mishits bleed ball speed, and a bad lie bleeds more
+    const lie = shot && shot.lie ? shot.lie : null;
+    this.lastLie = lie;
+    const maxSpeed = shot && shot.maxSpeed ? shot.maxSpeed : 30;
     const speedFactor = power / 100;
-    const speed = maxSpeed * speedFactor;
-    
+    const speed = maxSpeed * speedFactor
+      * (strike ? strike.speedFactor : 1)
+      * (lie ? lie.speedFactor : 1);
+
+    // Mishit yaw rotates the aim at address (+ = pull left, - = push right);
+    // rough/sand twists the clubhead too (seeded noise from the ball stream)
+    const shotDirection = direction.clone();
+    const lieYawDeg = lie && lie.dirNoiseDeg
+      ? (this.rng() * 2 - 1) * lie.dirNoiseDeg
+      : 0;
+    const totalYawDeg = (strike ? strike.yawDeg : 0) + lieYawDeg;
+    if (totalYawDeg) {
+      shotDirection.applyAxisAngle(new THREE.Vector3(0, 1, 0), totalYawDeg * Math.PI / 180);
+    }
+
     // Normalize direction vector
-    const normalizedDir = direction.clone().normalize();
-    
-    // Apply loft (vertical angle) - Convert degrees to radians
-    const loftRadians = (loft || 10) * Math.PI / 180; // Use provided loft
+    const normalizedDir = shotDirection.normalize();
+
+    // Apply loft (vertical angle) - Convert degrees to radians.
+    // Thin strikes de-loft, fat strikes add loft (balloon ball); sand pops
+    // the ball up (launchBonus).
+    const effectiveLoft = Math.max(1, Math.min(64, (loft || 10)
+      + (strike ? strike.loftDelta : 0)
+      + (lie ? lie.launchBonus : 0)));
+    const loftRadians = effectiveLoft * Math.PI / 180;
     normalizedDir.y = Math.sin(loftRadians);
     // Adjust horizontal components based on loft
     const horizontalFactor = Math.cos(loftRadians);
@@ -158,17 +189,34 @@ class GolfBall {
     // Store backspin/topspin in this.spin (vertical spin)
     this.spin = -loftRadians * 6 * spinIntensity; // Increased backspin factor
     
-    // Add slight random variation to spin (±10%)
-    this.spin *= 0.9 + Math.random() * 0.2;
+    // Add slight seeded variation to spin (±10%)
+    this.spin *= 0.9 + this.rng() * 0.2;
     
     // Ensure vertical spin stays within reasonable limits
     this.spin = Math.max(-this.options.maxSpinRate, Math.min(0, this.spin));
-    
+
+    // Mishit contact changes the spin: thin = dead (little backspin), fat = balloon
+    if (strike) this.spin *= strike.spinFactor;
+
+    // Shot variant shapes the spin: punch knocks it down, flop jacks it up
+    if (shot && shot.spinFactor) this.spin *= shot.spinFactor;
+
+    // Bad lies strangle spin: grass/sand between face and ball = no grip
+    if (lie) this.spin *= lie.spinFactor;
+
     // Store sidespin in a new property
     this.sidespin = (sidespin || 0) * spinIntensity * this.options.maxSpinRate;
-    
-    // Apply slight random variation to sidespin (±5%)
-    this.sidespin *= 0.95 + Math.random() * 0.1;
+
+    // Mishits add free curve on top of the player's spin selection
+    if (strike && strike.sidespinAdd) {
+      this.sidespin += strike.sidespinAdd * this.options.maxSpinRate * 0.35;
+    }
+
+    // Apply slight seeded variation to sidespin (±5%)
+    this.sidespin *= 0.95 + this.rng() * 0.1;
+
+    // Clamp total sidespin
+    this.sidespin = Math.max(-this.options.maxSpinRate, Math.min(this.options.maxSpinRate, this.sidespin));
     
     // Log the spin values
     if (window.DEBUG) console.log(`Applied spin - Vertical: ${this.spin.toFixed(2)}, Side: ${this.sidespin.toFixed(2)}`);
@@ -185,7 +233,7 @@ class GolfBall {
     this.playHitSound(power);
     
     // Log the hit for debugging
-    if (window.DEBUG) console.log(`Ball hit with power: ${power.toFixed(1)}, speed: ${speed.toFixed(2)} m/s, loft: ${loft.toFixed(1)}°, spin: ${this.spin.toFixed(2)}, sidespin: ${this.sidespin.toFixed(2)}`);
+    if (window.DEBUG) console.log(`Ball hit with power: ${power.toFixed(1)}, speed: ${speed.toFixed(2)} m/s, loft: ${effectiveLoft.toFixed(1)}°, spin: ${this.spin.toFixed(2)}, sidespin: ${this.sidespin.toFixed(2)}, lie: ${lie ? lie.id : 'clean'}`);
     
     return true;
   }
@@ -213,15 +261,17 @@ class GolfBall {
         this.options.maxSubsteps
       );
       const subDt = dt / numSubsteps;
-      
+
       for (let i = 0; i < numSubsteps; i++) {
         this.performPhysicsStep(subDt);
+        this.checkTreeCollisions();
         // Exit early if ball has come to rest
         if (this.isResting) break;
       }
     } else {
       // Standard single step
       this.performPhysicsStep(dt);
+      this.checkTreeCollisions();
     }
     
     // Update mesh position
@@ -240,7 +290,75 @@ class GolfBall {
       this.mesh.rotateOnAxis(rotationAxis, rotationAmount * Math.PI * 2);
     }
   }
-  
+
+  /**
+   * Drive the ball into the cup during the SINKING state.
+   * This bypasses the normal physics loop (which early-returns when isResting)
+   * by writing position + mesh transform directly. Used by the Game's sink
+   * tween so the ball visibly drops into the hole.
+   * @param {THREE.Vector3} position - exact target position (mesh + physics)
+   */
+  sinkTo(position) {
+    this.position.copy(position);
+    this.velocity.set(0, 0, 0);
+    this.isResting = true;
+    this.inAir = false;
+    if (this.mesh) this.mesh.position.copy(position);
+  }
+
+  /**
+   * Update lastSafePosition — but never while in water, or a water-hazard
+   * reset would drop the ball back into the pond (penalty loop).
+   */
+  updateLastSafePosition() {
+    if (this.terrain) {
+      if (this.position.y < this.terrain.options.waterLevel) return;
+      const surface = this.terrain.getSurfaceTypeAtPosition?.(this.position.x, this.position.z);
+      if (surface === 'water') return;
+    }
+    this.lastSafePosition.copy(this.position);
+  }
+
+  /**
+   * Collide with tree trunks (course trees register cylinder colliders on the
+   * terrain). Canopy pass-through: only the trunk cylinder blocks the ball.
+   */
+  checkTreeCollisions() {
+    const colliders = this.terrain?.treeColliders;
+    if (!colliders || colliders.length === 0) return;
+
+    const p = this.position;
+    const r = this.options.radius;
+    for (const c of colliders) {
+      if (p.y > c.top) continue;
+      const dx = p.x - c.x;
+      const dz = p.z - c.z;
+      const rr = c.r + r;
+      const d2 = dx * dx + dz * dz;
+      if (d2 >= rr * rr || d2 < 1e-8) continue;
+
+      const d = Math.sqrt(d2);
+      const nx = dx / d;
+      const nz = dz / d;
+
+      // Push out of the trunk
+      p.x = c.x + nx * rr;
+      p.z = c.z + nz * rr;
+
+      // Reflect horizontal velocity with heavy energy loss (wood thud)
+      const vn = this.velocity.x * nx + this.velocity.z * nz;
+      if (vn < 0) {
+        this.velocity.x -= 2 * vn * nx;
+        this.velocity.z -= 2 * vn * nz;
+        this.velocity.x *= 0.35;
+        this.velocity.z *= 0.35;
+        this.velocity.y *= 0.5;
+        this.spin *= 0.5;
+        this.sidespin *= 0.5;
+      }
+    }
+  }
+
   /**
    * Perform a single physics step
    */
@@ -281,12 +399,7 @@ class GolfBall {
     } else {
       // No collision, update position
       this.position.copy(newPosition);
-      
-      // PS1-style position snapping (only for visual effect, not physics)
-      this.position.x = Math.round(this.position.x / this.options.positionPrecision) * this.options.positionPrecision;
-      this.position.y = Math.round(this.position.y / this.options.positionPrecision) * this.options.positionPrecision;
-      this.position.z = Math.round(this.position.z / this.options.positionPrecision) * this.options.positionPrecision;
-      
+
       // Check ground collision using traditional method as backup
       this.checkGroundCollision(dt);
     }
@@ -418,14 +531,17 @@ class GolfBall {
     if (embeddingDepth > 0.01) {
       // Ball is significantly embedded - fix position without bouncing
       this.position.y = startTerrainHeight + this.options.radius;
-      
+
       // Stop vertical velocity to prevent oscillation
       if (this.velocity.y < 0) {
         this.velocity.y = 0;
       }
-      
-      // Don't trigger a bounce unless ball is moving fast
-      if (this.velocity.length() > 2.0) {
+
+      // Only an AIRBORNE ball can bounce. A grounded ball that gravity just
+      // re-embedded this frame must not re-run bounce handling — the old code
+      // paid the bounce/roll-conversion penalty every frame, so a rolling
+      // ball lost ~15% speed per frame and putts died within a yard.
+      if (this.inAir && this.velocity.length() > 2.0) {
         const normal = this.terrain.getNormalAtPosition(startPos.x, startPos.z) || new THREE.Vector3(0, 1, 0);
         this.handleBounce(normal, dt);
       } else {
@@ -457,9 +573,16 @@ class GolfBall {
       // Position the ball at the intersection point plus radius offset in normal direction
       const positionOffset = normal.clone().multiplyScalar(this.options.radius + this.options.safeOffset);
       this.position.copy(intersectionPoint).add(positionOffset);
-      
-      // Handle bounce off the surface
-      this.handleBounce(normal, dt);
+
+      if (this.inAir) {
+        // Genuine impact — handle bounce off the surface
+        this.handleBounce(normal, dt);
+      } else if (this.velocity.dot(normal) < 0) {
+        // Rolling ball following terrain (e.g. rolling onto an upslope):
+        // settle onto the surface, don't bounce
+        const intoSurface = normal.clone().multiplyScalar(this.velocity.dot(normal));
+        this.velocity.sub(intoSurface);
+      }
       return true;
     }
     
@@ -514,50 +637,12 @@ class GolfBall {
     const impactAngle = Math.acos(impactDot);
     
     // Bounce logging disabled for performance
-    
-    // For very low angle impacts (skimming), enhance the ability to continue along the surface
-    // Less than 15 degrees impact angle is considered a skimming impact
-    const isLowAngleImpact = impactAngle < Math.PI / 12; // Less than 15 degrees
+
     const isDownwardShot = this.velocity.y < -0.1;
-    
+
     // Check if this is a surface that we can skim along (mostly flat)
     const surfaceFlatness = normal.y; // How upward-facing is the normal (0-1)
-    const isFlatSurface = surfaceFlatness > 0.8; // Mostly flat surface
-    
-    // Determine if we should apply special skimming physics
-    if (isLowAngleImpact && isFlatSurface) {
-      // This is a skimming impact - apply special physics to allow the ball to continue
-      
-      // Extract the normal component of velocity (perpendicular to surface)
-      const normalComponent = normal.clone().multiplyScalar(this.velocity.dot(normal));
-      
-      // Calculate the tangential component (parallel to surface)
-      const tangentialComponent = this.velocity.clone().sub(normalComponent);
-      
-      // For skimming, reduce the normal component but preserve more of the tangential speed
-      const adjustedNormalScale = -0.3; // Smaller rebound
-      normalComponent.multiplyScalar(adjustedNormalScale);
-    
-      // Apply a smaller friction penalty to the tangential component
-      tangentialComponent.multiplyScalar(0.85); // Only 15% energy loss on tangential motion
-      
-      // Combine the components back
-      this.velocity.copy(tangentialComponent).add(normalComponent);
-      
-      // Add a small upward component to help prevent immediate recollision
-      this.velocity.y = Math.max(this.velocity.y, 0.05);
-      
-      // If speed is very low after this adjustment, handle conversion to rolling
-      if (this.velocity.length() < 2.0) {
-        this.handleConversionToRolling(normal);
-      }
-      
-      // Play bounce sound with reduced volume for skimming
-      this.emitBounceEffects(speed * 0.3, normal);
-      
-      return;
-    }
-    
+
     // For shots almost directly into the terrain, convert more energy to spin
     if (isDownwardShot && surfaceFlatness > 0.7 && impactAngle > Math.PI / 4) {
       // Increase bounce effect for descending shots hitting flatter terrain
@@ -579,66 +664,51 @@ class GolfBall {
       return;
     }
     
-    // If we get here, proceed with normal bounce calculation
-    
-    // Velocity-dependent restitution (higher speed = more energy loss)
-    const velocityFactor = 1 - (speed * this.options.velocityRestitutionFactor);
-    
-    // Get surface type and its properties
+    // If we get here, proceed with the bounce: split velocity into
+    // surface-normal and tangential parts and scale each down. Energy only
+    // ever decreases — the old reflect()-based math had restitution climb
+    // toward 1.0 as impact speed rose (an inverted velocity factor), and a
+    // reflection across a tilted normal converted horizontal speed into
+    // 50+ m/s vertical launches (the "driver balloons to 130y" bug).
     const surfaceType = this.getSurfaceType();
-    const baseEnergyLoss = this.getEnergyLoss(surfaceType);
-    
-    // Apply energy loss based on surface properties and velocity
-    let energyLoss = baseEnergyLoss * velocityFactor;
-    
-    // Additional energy loss for angled collisions
-    const dotProduct = normal.dot(new THREE.Vector3(0, 1, 0));
-    const slopeFactor = 1 - Math.abs(dotProduct);
-    
-    // Steeper slopes cause more energy loss
-    energyLoss += slopeFactor * this.options.slopeEnergyLoss;
-    
-    // Calculate effective restitution (1 - energy loss)
-    const effectiveRestitution = Math.max(0.1, 1 - energyLoss);
-    
-    // Add small random variation to bounce for natural feel
-    const randomFactor = 1 + (Math.random() * 2 - 1) * this.options.randomBounceVariation;
-    
-    // Calculate reflection vector - better handling of glancing impacts
-    let reflection;
-    
-    if (impactAngle < Math.PI * 0.25) { // Less than 45 degrees - more glancing impact
-      // Preserve more horizontal momentum for glancing impacts
-      const normalComponent = normal.clone().multiplyScalar(this.velocity.dot(normal));
-      reflection = this.velocity.clone().sub(normalComponent.multiplyScalar(1.8));
-    } else {
-      // Standard reflection for direct impacts
-      reflection = this.velocity.clone().reflect(normal);
-    }
-    
-    // For very slow impacts, absorb more energy
-    if (speed < 2.0) {
-      reflection.multiplyScalar(effectiveRestitution * randomFactor * 0.7);
-    } else {
-      // Normal energy absorption for higher speed impacts
-      reflection.multiplyScalar(effectiveRestitution * randomFactor);
-    }
-    
+    const absorption = this.getBounceAbsorption(surfaceType);
+
+    const normalSpeed = this.velocity.dot(normal); // negative = into surface
+    const normalComponent = normal.clone().multiplyScalar(normalSpeed);
+    const tangentialComponent = this.velocity.clone().sub(normalComponent);
+
+    // Normal rebound is soft and dies as impacts get faster (ball digs in)
+    const impactIntoSurface = Math.abs(normalSpeed);
+    const normalRestitution =
+      Math.max(0.05, 0.32 - impactIntoSurface * 0.012) * absorption;
+
+    // Tangential retention: high-speed impacts skid and lose more
+    const tangentialRetention = Math.max(0.5, 0.9 - speed * 0.006) * absorption;
+
+    // Small seeded variation for a natural feel
+    const randomFactor = 1 + (this.rng() * 2 - 1) * this.options.randomBounceVariation;
+
+    normalComponent.multiplyScalar(-normalRestitution * randomFactor);
+    tangentialComponent.multiplyScalar(Math.min(0.95, tangentialRetention * randomFactor));
+
     // Calculate spin based on impact
     this.updateSpinFromImpact(preBounceVelocity, normal, impactAngle, surfaceType);
-    
+
     // Set new velocity
-    this.velocity.copy(reflection);
-    
+    this.velocity.copy(tangentialComponent).add(normalComponent);
+
     // Handle low bounces to prevent endless small bounces
     if (this.velocity.y > 0 && this.velocity.y < this.options.minBounceVelocity) {
+      this.handleConversionToRolling(normal);
+    } else if (this.velocity.y <= 0) {
+      // Bounce fully absorbed — stay on the ground
       this.velocity.y = 0;
       this.inAir = false;
     }
-    
+
     // Emit sound effects proportional to impact velocity
     this.emitBounceEffects(speed, normal);
-    
+
     // Apply post-bounce stabilization
     this.applyPostBounceStabilization();
   }
@@ -660,9 +730,6 @@ class GolfBall {
       // Ensure velocity follows the terrain surface by removing normal component
       const normalComponent = normal.clone().multiplyScalar(this.velocity.dot(normal));
       this.velocity.sub(normalComponent);
-      
-      // Apply additional friction when transitioning to rolling
-      this.velocity.multiplyScalar(0.85);
     }
     
     // Position exactly on the ground (ball center at terrain height + radius)
@@ -670,7 +737,7 @@ class GolfBall {
     this.position.y = terrainHeight + this.options.radius;
     
     // Update the last safe position
-    this.lastSafePosition.copy(this.position);
+    this.updateLastSafePosition();
   }
   
   /**
@@ -766,7 +833,7 @@ class GolfBall {
         this.isResting = true;
         
         // Save current position as safe position when coming to rest
-        this.lastSafePosition.copy(this.position);
+        this.updateLastSafePosition();
         if (window.DEBUG) console.log("Ball has come to rest");
         
         // Play stop sound
@@ -811,7 +878,14 @@ class GolfBall {
     if (ballBottomHeight <= terrainHeight) {
       // Position ball precisely on terrain surface (center at terrain + radius)
       this.position.y = terrainHeight + this.options.radius;
-      
+
+      // A ball already rolling on the ground just re-settles — no bounce and
+      // no per-frame friction penalty
+      if (!this.inAir) {
+        if (this.velocity.y < 0) this.velocity.y = 0;
+        return true;
+      }
+
       // Check if this is a high-speed impact or a gentle landing
       const impactSpeed = Math.abs(this.velocity.y);
       
@@ -829,7 +903,7 @@ class GolfBall {
         }
         
         // We're officially on the ground now
-        this.lastSafePosition.copy(this.position);
+        this.updateLastSafePosition();
       return true;
       }
       
@@ -1026,16 +1100,18 @@ class GolfBall {
    * @returns {Object} Friction factors for this surface
    */
   getSurfaceFrictionFactors(surfaceType) {
-    // Base friction values for different surfaces
+    // Roll-out model: exponential decay time constant tau (s) + a small
+    // constant deceleration aMin (m/s²). Runout from speed v is ~tau*v at
+    // high speed and ~v²/(2*aMin) at putt speeds — predictable per surface.
     const frictionMap = {
-      green: { base: 0.8, rolling: 0.10, lowSpeed: 1.3 },  // Slightly more roll on green
-      fairway: { base: 1.0, rolling: 0.15, lowSpeed: 1.6 }, // Standard fairway
-      rough: { base: 2.8, rolling: 0.35, lowSpeed: 2.2 },  // More stopping power in rough
-      bunker: { base: 5.0, rolling: 0.6, lowSpeed: 3.5 },  // Significantly more friction in sand
-      cart_path: { base: 0.5, rolling: 0.04, lowSpeed: 0.9 }, // Less friction on path
-      default: { base: 1.0, rolling: 0.15, lowSpeed: 1.5 }
+      green:     { tau: 5.0,  aMin: 0.5 }, // A 6 m/s putt rolls ~15y
+      fairway:   { tau: 1.3,  aMin: 0.8 }, // Driver runs out ~18-20y after the skips
+      rough:     { tau: 0.6,  aMin: 1.2 }, // Grass kills runout
+      bunker:    { tau: 0.35, aMin: 2.0 }, // Sand stops the ball
+      cart_path: { tau: 6.0,  aMin: 0.3 }, // Ball runs forever (fun)
+      default:   { tau: 1.3,  aMin: 0.8 }
     };
-    
+
     return frictionMap[surfaceType] || frictionMap.default;
   }
   
@@ -1046,80 +1122,27 @@ class GolfBall {
    * @param {Object} frictionFactors - Friction factors for current surface
    */
   applyGroundFriction(dt, speed, frictionFactors) {
-    // Add small random variations to friction for natural feel
-    const randomVariation = 1 + (Math.random() * 2 - 1) * this.options.frictionVariation;
-    
-    // Different friction model for rolling vs sliding
-    const isRolling = speed < 3.0 && !this.inAir;
-    
-    // Base friction value 
-    let frictionBase = frictionFactors.base;
-    
-    // Adjust friction for rolling/sliding state
-    if (isRolling) {
-      // Use rolling friction (lower)
-      frictionBase *= frictionFactors.rolling * this.options.rollingFrictionMultiplier;
-    }
-    
-    // Significantly increase friction for very low speeds to ensure stopping
-    let lowSpeedEffect;
-    if (speed < 0.5) {
-      // Extra friction when ball is almost stopped
-      lowSpeedEffect = frictionFactors.lowSpeed * 2.5 / Math.max(0.1, speed);
-    } else {
-      // Normal friction scaling at regular speeds
-      lowSpeedEffect = Math.max(1, frictionFactors.lowSpeed / Math.max(0.5, speed));
-    }
-    
-    // Calculate final friction force
-    const frictionMagnitude = frictionBase * lowSpeedEffect * randomVariation * dt;
-    
-    // Apply conservation of direction for rolling balls (inertia)
-    if (isRolling && speed > 0.2) {
-      // Get current direction
-      const currentDir = new THREE.Vector3(this.velocity.x, 0, this.velocity.z).normalize();
-      
-      // Apply directional inertia - ball tends to keep rolling in same direction
-      const inertiaFactor = this.options.rollingInertia;
-      
-      // Calculate new velocity with directional preference
-      const slowdownFactor = Math.max(0, 1 - frictionMagnitude);
-      
-      // Preserve more momentum in current direction
-      const directedSlowdown = 1 - ((1 - slowdownFactor) * (1 - inertiaFactor));
-      
-      // Apply friction while preserving direction
-      const newSpeed = speed * directedSlowdown;
-      
-      if (newSpeed > 0.01) {
-        this.velocity.x = currentDir.x * newSpeed;
-        this.velocity.z = currentDir.z * newSpeed;
-        
-        // Ensure we're staying on the ground
-        this.velocity.y = 0;
-      } else {
-        // Ball is stopping
-        this.velocity.set(0, 0, 0);
-      }
-    } else {
-      // Simple friction for non-rolling or fast-moving ball
-      // Check if friction would stop the ball in this frame
-      if (frictionMagnitude >= speed || speed < 0.05) {
-        this.velocity.set(0, 0, 0);
-      } else {
-        // Apply friction force opposing velocity
-        const frictionForce = this.velocity.clone().normalize().multiplyScalar(-frictionMagnitude);
-        this.velocity.add(frictionForce);
-
-        // Ensure no vertical movement when on ground
-        this.velocity.y = 0;
-      }
-    }
-    
-    // Final check - force full stop for very low velocity
-    if (this.velocity.lengthSq() < 0.001) {
+    // Roll-out = exponential decay (high-speed skid/runout) + a small constant
+    // deceleration (dominates at putt speeds and terminates the tail cleanly).
+    // Framerate-independent and direction-preserving.
+    if (speed < 0.01) {
       this.velocity.set(0, 0, 0);
+      return;
     }
+
+    const decay = Math.exp(-dt / frictionFactors.tau);
+    const newSpeed = speed * decay - frictionFactors.aMin * dt;
+
+    if (newSpeed <= 0.01) {
+      // Ball is stopping
+      this.velocity.set(0, 0, 0);
+      return;
+    }
+
+    const scale = newSpeed / speed;
+    this.velocity.x *= scale;
+    this.velocity.z *= scale;
+    this.velocity.y = 0; // No vertical drift while grounded
   }
   
   /**
@@ -1145,7 +1168,7 @@ class GolfBall {
     }
       
       // This is now our safe position
-      this.lastSafePosition.copy(this.position);
+      this.updateLastSafePosition();
     
     this.velocity.set(0, 0, 0);
     this.acceleration.set(0, 0, 0);
@@ -1256,22 +1279,21 @@ class GolfBall {
   }
   
   /**
-   * Get energy loss based on surface type
+   * Get bounce absorption based on surface type
    * @param {string} surfaceType - The type of surface
-   * @returns {number} Energy loss factor (0-1)
+   * @returns {number} Absorption factor (lower = deader bounce)
    */
-  getEnergyLoss(surfaceType) {
-    // Surface energy loss factors - tuned for better behavior
-    const surfaceEnergyLoss = {
-      green: 0.25,   // Less energy loss on green (more bounce)
-      fairway: 0.35, // Medium energy loss on fairway
-      rough: 0.65,   // More energy absorption in rough
-      bunker: 0.85,  // Maximum energy absorption in sand
-      cart_path: 0.08, // Minimal energy loss on cart paths
-      default: 0.5
+  getBounceAbsorption(surfaceType) {
+    const absorption = {
+      green: 0.85,     // Receptive — approaches sit
+      fairway: 1.0,    // Firm — full skip and runout
+      rough: 0.7,      // Grass kills the skip
+      bunker: 0.45,    // Sand plugs
+      cart_path: 1.05, // Hard — extra skip
+      default: 1.0
     };
-    
-    return surfaceEnergyLoss[surfaceType] || surfaceEnergyLoss.default;
+
+    return absorption[surfaceType] || absorption.default;
   }
   
   /**
@@ -1313,7 +1335,7 @@ class GolfBall {
     }
     
     // Update the last safe position whenever we have a successful collision
-    this.lastSafePosition.copy(this.position);
+    this.updateLastSafePosition();
   }
 }
 

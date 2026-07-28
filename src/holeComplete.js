@@ -45,39 +45,27 @@ function handleHoleComplete() {
     }
   }
   
-  // Automatically reset after a delay
+  // Automatically advance to the next hole after a delay
   setTimeout(() => {
     // Clear flag animation if it exists
     if (this.flagAnimation) {
       clearInterval(this.flagAnimation);
       this.flagAnimation = null;
     }
-    
-    // Reset for next hole
-    if (this.resetBall) {
-      // resetBall now handles game state transition internally
-      this.resetBall();
-      console.log('[handleHoleComplete] Ball reset complete, game state should be AIMING');
-    } else if (this.reset) {
-      this.reset(); // Alternative reset method
-      // Ensure game state is set properly if reset doesn't handle it
-      if (this.setGameState) {
-        this.setGameState('READY_TO_HIT');
-      }
+
+    if (this.advanceHole) {
+      this.advanceHole(); // handles camera via the AIMING state hook
     } else {
-      console.warn('No reset method found on game object');
-      // Fallback - try to reset ball position directly
+      console.warn('No advanceHole method found on game object');
       if (this.ball && this.terrain && this.terrain.teePosition) {
         this.ball.reset(this.terrain.teePosition);
         if (this.setGameState) {
           this.setGameState('READY_TO_HIT');
         }
       }
-    }
-    
-    // Force camera to follow mode
-    if (this.cameraController) {
-      this.cameraController.followBall();
+      if (this.cameraController) {
+        this.cameraController.followBall();
+      }
     }
   }, 3000);
 }

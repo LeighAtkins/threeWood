@@ -1,6 +1,8 @@
+import { SWING, markerToPercent } from './core/swing.js';
+
 /**
  * UI manager for ThreeWood
- * Handles game UI including power meter, score display, etc.
+ * Handles game UI including swing meter, score display, etc.
  */
 class UI {
   constructor(game) {
@@ -48,14 +50,15 @@ class UI {
     if (this.spinIndicatorElement) {
       this.spinIndicatorElement.style.display = 'none';
     }
-    
-    // Hide power meter initially
-    this.hidePowerMeter();
+
+    // Hide swing meter initially
+    this.hideSwingMeter();
     console.log("UI initialization completed");
   }
   
   /**
-   * Create power meter UI element
+   * Create the 3-click swing meter: power sweep, then accuracy return with a
+   * strike line + pure band + duff zone (see core/swing.js for the math).
    */
   createPowerMeter() {
     // Create container
@@ -65,21 +68,53 @@ class UI {
     powerMeterContainer.style.bottom = '20px';
     powerMeterContainer.style.left = '50%';
     powerMeterContainer.style.transform = 'translateX(-50%)';
-    powerMeterContainer.style.width = '300px';
+    powerMeterContainer.style.width = '340px';
     powerMeterContainer.style.height = '30px';
     powerMeterContainer.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
     powerMeterContainer.style.border = '3px solid #fff';
     powerMeterContainer.style.borderRadius = '5px';
     powerMeterContainer.style.zIndex = '100';
-    
-    // Create power fill
+
+    // Duff zone: past zero on the return sweep = blown timing (max late)
+    const duffZone = document.createElement('div');
+    duffZone.id = 'swing-duff-zone';
+    duffZone.style.position = 'absolute';
+    duffZone.style.left = '0%';
+    duffZone.style.width = `${markerToPercent(0)}%`;
+    duffZone.style.height = '100%';
+    duffZone.style.backgroundColor = 'rgba(255, 60, 60, 0.30)';
+
+    // Power/strike fill: right edge tracks the marker going up, left edge
+    // tracks it coming back down (anchored at the locked power).
     const powerFill = document.createElement('div');
     powerFill.id = 'power-fill';
+    powerFill.style.position = 'absolute';
+    powerFill.style.left = '0%';
     powerFill.style.width = '0%';
     powerFill.style.height = '100%';
     powerFill.style.backgroundColor = '#ffcc00';
-    powerFill.style.transition = 'background-color 0.2s';
-    
+    powerFill.style.transition = 'background-color 0.1s';
+
+    // Pure band: stop the return marker here for a flush strike
+    const pureBandHalf = SWING.PURE_MAX * SWING.WINDOW;
+    const targetBand = document.createElement('div');
+    targetBand.id = 'swing-target-band';
+    targetBand.style.position = 'absolute';
+    targetBand.style.left = `${markerToPercent(SWING.LINE - pureBandHalf)}%`;
+    targetBand.style.width = `${markerToPercent(SWING.LINE + pureBandHalf) - markerToPercent(SWING.LINE - pureBandHalf)}%`;
+    targetBand.style.height = '100%';
+    targetBand.style.backgroundColor = 'rgba(124, 252, 0, 0.45)';
+
+    // Strike line: dead center of the pure band (kept bold — it's the target)
+    const strikeLine = document.createElement('div');
+    strikeLine.id = 'swing-strike-line';
+    strikeLine.style.position = 'absolute';
+    strikeLine.style.left = `calc(${markerToPercent(SWING.LINE)}% - 1px)`;
+    strikeLine.style.width = '3px';
+    strikeLine.style.height = '100%';
+    strikeLine.style.backgroundColor = '#ffffff';
+    strikeLine.style.boxShadow = '0 0 4px rgba(0, 0, 0, 0.9)';
+
     // Create power label
     const powerLabel = document.createElement('div');
     powerLabel.id = 'power-label';
@@ -92,11 +127,11 @@ class UI {
     powerLabel.style.fontFamily = 'Lato, sans-serif';
     powerLabel.style.fontWeight = 'bold';
     powerLabel.style.textShadow = '1px 1px 2px rgba(0, 0, 0, 0.8)';
-    
+
     // Create instruction label
     const instructionLabel = document.createElement('div');
     instructionLabel.id = 'power-instruction';
-    instructionLabel.textContent = 'CLICK AGAIN TO HIT';
+    instructionLabel.textContent = 'CLICK TO SET POWER';
     instructionLabel.style.position = 'absolute';
     instructionLabel.style.top = '-25px';
     instructionLabel.style.left = '50%';
@@ -109,17 +144,39 @@ class UI {
     instructionLabel.style.padding = '4px 10px';
     instructionLabel.style.borderRadius = '4px';
     instructionLabel.style.whiteSpace = 'nowrap';
-    
-    // Assemble power meter
+
+    // Strike feedback label ("PURE!", "PULL · THIN", ...) above the meter
+    const strikeFeedback = document.createElement('div');
+    strikeFeedback.id = 'strike-feedback';
+    strikeFeedback.style.position = 'absolute';
+    strikeFeedback.style.top = '-55px';
+    strikeFeedback.style.left = '50%';
+    strikeFeedback.style.transform = 'translateX(-50%)';
+    strikeFeedback.style.color = '#7CFC00';
+    strikeFeedback.style.fontFamily = 'Lato, sans-serif';
+    strikeFeedback.style.fontSize = '20px';
+    strikeFeedback.style.fontWeight = 'bold';
+    strikeFeedback.style.textShadow = '1px 1px 3px rgba(0, 0, 0, 0.9)';
+    strikeFeedback.style.whiteSpace = 'nowrap';
+    strikeFeedback.style.display = 'none';
+
+    // Assemble power meter (fill below the translucent zones so the strike
+    // line stays visible while the marker closes on it)
     powerMeterContainer.appendChild(powerFill);
+    powerMeterContainer.appendChild(duffZone);
+    powerMeterContainer.appendChild(targetBand);
+    powerMeterContainer.appendChild(strikeLine);
     powerMeterContainer.appendChild(powerLabel);
     powerMeterContainer.appendChild(instructionLabel);
+    powerMeterContainer.appendChild(strikeFeedback);
     document.body.appendChild(powerMeterContainer);
-    
+
     // Store references
     this.powerMeterElement = powerMeterContainer;
     this.powerFillElement = powerFill;
     this.powerInstructionElement = instructionLabel;
+    this.strikeFeedbackElement = strikeFeedback;
+    this._strikeFeedbackTimer = null;
   }
   
   /**
@@ -192,28 +249,31 @@ class UI {
   }
   
   /**
-   * Create loft display element
+   * Create club display element (club · variant · loft · estimated distance —
+   * the seed of the yardage book)
    */
   createLoftDisplay() {
-    const loftDisplay = document.createElement('div');
-    loftDisplay.id = 'loft-display';
-    loftDisplay.style.position = 'absolute';
-    loftDisplay.style.bottom = '55px';
-    loftDisplay.style.left = '50%';
-    loftDisplay.style.transform = 'translateX(-50%)';
-    loftDisplay.style.padding = '5px 10px';
-    loftDisplay.style.backgroundColor = 'rgba(0, 0, 0, 0.6)';
-    loftDisplay.style.color = '#fff';
-    loftDisplay.style.fontFamily = 'Lato, sans-serif';
-    loftDisplay.style.fontSize = '14px';
-    loftDisplay.style.borderRadius = '4px';
-    loftDisplay.style.zIndex = '100';
-    loftDisplay.style.display = 'none';
-    loftDisplay.style.transition = 'opacity 0.3s ease-in-out';
-    loftDisplay.textContent = 'Loft: 10°';
+    const clubDisplay = document.createElement('div');
+    clubDisplay.id = 'club-display';
+    clubDisplay.style.position = 'absolute';
+    clubDisplay.style.bottom = '55px';
+    clubDisplay.style.left = '50%';
+    clubDisplay.style.transform = 'translateX(-50%)';
+    clubDisplay.style.padding = '5px 12px';
+    clubDisplay.style.backgroundColor = 'rgba(0, 0, 0, 0.6)';
+    clubDisplay.style.color = '#fff';
+    clubDisplay.style.fontFamily = 'Lato, sans-serif';
+    clubDisplay.style.fontSize = '14px';
+    clubDisplay.style.fontWeight = 'bold';
+    clubDisplay.style.letterSpacing = '0.5px';
+    clubDisplay.style.borderRadius = '4px';
+    clubDisplay.style.zIndex = '100';
+    clubDisplay.style.display = 'none';
+    clubDisplay.style.whiteSpace = 'nowrap';
+    clubDisplay.textContent = '—';
 
-    document.body.appendChild(loftDisplay);
-    this.loftDisplayElement = loftDisplay;
+    document.body.appendChild(clubDisplay);
+    this.loftDisplayElement = clubDisplay;
   }
   
   /**
@@ -539,42 +599,86 @@ class UI {
   }
   
   /**
-   * Show power meter
+   * Show swing meter
    */
-  showPowerMeter() {
+  showSwingMeter() {
     if (this.powerMeterElement) {
       this.powerMeterElement.style.display = 'block';
       this.isPowerMeterVisible = true;
     }
+    if (this.strikeFeedbackElement) {
+      this.strikeFeedbackElement.style.display = 'none';
+    }
   }
-  
+
   /**
-   * Hide power meter
+   * Hide swing meter
    */
-  hidePowerMeter() {
+  hideSwingMeter() {
     if (this.powerMeterElement) {
       this.powerMeterElement.style.display = 'none';
       this.isPowerMeterVisible = false;
     }
   }
-  
+
   /**
-   * Update power meter fill
+   * Update the swing meter from the swing state (core/swing.js).
+   * Power phase: fill grows from the zero mark with the marker.
+   * Accuracy phase: fill shrinks back from the locked power toward the line;
+   * it flashes green while the marker is inside the pure band.
    */
-  updatePowerMeter(power) {
-    if (this.powerFillElement) {
-      // Update fill width
-      this.powerFillElement.style.width = `${power}%`;
-      
-      // Update color based on power level
-      if (power < 30) {
-        this.powerFillElement.style.backgroundColor = '#33cc33'; // Low power (green)
-      } else if (power < 70) {
-        this.powerFillElement.style.backgroundColor = '#ffcc00'; // Medium power (yellow)
+  updateSwingMeter(swing) {
+    if (!this.powerFillElement) return;
+
+    const zeroPct = markerToPercent(0);
+    const markerPct = markerToPercent(swing.marker);
+
+    if (swing.phase === 'power') {
+      this.powerFillElement.style.left = `${zeroPct}%`;
+      this.powerFillElement.style.width = `${Math.max(0, markerPct - zeroPct)}%`;
+      // Color ramp by power level
+      if (swing.marker < 30) {
+        this.powerFillElement.style.backgroundColor = '#33cc33';
+      } else if (swing.marker < 70) {
+        this.powerFillElement.style.backgroundColor = '#ffcc00';
       } else {
-        this.powerFillElement.style.backgroundColor = '#ff3300'; // High power (red)
+        this.powerFillElement.style.backgroundColor = '#ff3300';
       }
+    } else if (swing.phase === 'accuracy') {
+      const powerPct = markerToPercent(swing.power);
+      this.powerFillElement.style.left = `${markerPct}%`;
+      this.powerFillElement.style.width = `${Math.max(0, powerPct - markerPct)}%`;
+      const inPureBand = Math.abs(swing.marker - SWING.LINE) <= SWING.PURE_MAX * SWING.WINDOW;
+      this.powerFillElement.style.backgroundColor = inPureBand ? '#7CFC00' : '#ffcc00';
     }
+  }
+
+  /**
+   * Set the meter's instruction text for the current swing phase.
+   */
+  setSwingPhase(phase) {
+    if (this.powerInstructionElement) {
+      this.powerInstructionElement.textContent =
+        phase === 'power' ? 'CLICK TO SET POWER' : 'CLICK AT THE LINE!';
+    }
+  }
+
+  /**
+   * Flash the strike result above the meter ("PURE!", "PULL · THIN", ...).
+   * @param {string} text label from describeStrike()
+   * @param {string} grade 'pure' | 'good' | 'poor' | 'terrible'
+   */
+  showStrikeFeedback(text, grade) {
+    if (!this.strikeFeedbackElement) return;
+    const colors = { pure: '#7CFC00', good: '#ffcc00', poor: '#ff8800', terrible: '#ff3300' };
+    this.strikeFeedbackElement.textContent = text;
+    this.strikeFeedbackElement.style.color = colors[grade] || '#fff';
+    this.strikeFeedbackElement.style.display = 'block';
+    if (this._strikeFeedbackTimer) clearTimeout(this._strikeFeedbackTimer);
+    this._strikeFeedbackTimer = setTimeout(() => {
+      if (this.strikeFeedbackElement) this.strikeFeedbackElement.style.display = 'none';
+      this._strikeFeedbackTimer = null;
+    }, 1600);
   }
   
   /**
@@ -595,6 +699,33 @@ class UI {
     }
   }
   
+  /**
+   * Generic centered message card (round summary, water hazard, etc.)
+   */
+  showMessage(title, subtitle = '', footer = '', durationMs = 3500) {
+    const el = document.createElement('div');
+    el.style.position = 'absolute';
+    el.style.top = '50%';
+    el.style.left = '50%';
+    el.style.transform = 'translate(-50%, -50%)';
+    el.style.padding = '20px 30px';
+    el.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+    el.style.color = '#fff';
+    el.style.fontFamily = 'Lato, sans-serif';
+    el.style.fontSize = '24px';
+    el.style.textAlign = 'center';
+    el.style.borderRadius = '10px';
+    el.style.zIndex = '200';
+    el.style.boxShadow = '0 0 20px rgba(255, 215, 0, 0.6)';
+    el.innerHTML = `
+      <div style="font-size: 32px; margin-bottom: 10px; color: #FFD700;">${title}</div>
+      ${subtitle ? `<div>${subtitle}</div>` : ''}
+      ${footer ? `<div style="font-size: 28px; margin-top: 12px;">${footer}</div>` : ''}
+    `;
+    document.body.appendChild(el);
+    setTimeout(() => { el.parentNode?.removeChild(el); }, durationMs);
+  }
+
   /**
    * Show hole completion message
    */
@@ -688,9 +819,13 @@ class UI {
       <h2 style="text-align: center; margin-bottom: 20px;">How to Play</h2>
       <ul style="list-style-type: none; padding: 0; line-height: 1.8;">
         <li><strong>Move Mouse</strong>: Aim the shot</li>
-        <li><strong>First Click</strong>: Start power meter</li>
-        <li><strong>Second Click</strong>: Hit ball with current power</li>
-        <li><strong>Up/Down Arrows</strong>: Adjust shot loft</li>
+        <li><strong>Click 1</strong>: Start the swing</li>
+        <li><strong>Click 2</strong>: Set power</li>
+        <li><strong>Click 3</strong>: Strike at the line — early pulls left, late pushes right</li>
+        <li><strong>Esc</strong>: Cancel the swing</li>
+        <li><strong>Up/Down Arrows</strong>: Change club</li>
+        <li><strong>Mouse Wheel</strong>: Fine-tune trajectory height</li>
+        <li><strong>V Key</strong>: Change shot type (full / punch / flop / chip)</li>
         <li><strong>S Key</strong>: Open spin selector</li>
         <li><strong>C Key</strong>: Toggle camera mode</li>
         <li><strong>R Key</strong>: Reset ball to tee</li>
@@ -815,38 +950,28 @@ class UI {
     if (this.readyIndicatorElement) {
       this.readyIndicatorElement.style.opacity = '0';
       setTimeout(() => {
-          if (this.readyIndicatorElement) { 
+          if (this.readyIndicatorElement) {
               this.readyIndicatorElement.style.display = 'none';
           }
-      }, 300); 
-    }
-    if (this.loftDisplayElement) {
-      this.loftDisplayElement.style.opacity = '0';
-      setTimeout(() => {
-          if (this.loftDisplayElement) { 
-              this.loftDisplayElement.style.display = 'none';
-          }
-      }, 300); 
+      }, 300);
     }
   }
   
   /**
-   * Update loft display
+   * Update the club display: "Driver · Full · 12° · ~205y", with a lie note
+   * when the ball sits badly ("7-Iron · Full · 30° · ~120y · Rough −15%").
+   * Persistent once set — it's the player's yardage book, useful while aiming,
+   * swinging, and watching the ball fly.
    */
-  updateLoftDisplay(loft) {
+  updateClubDisplay({ clubName, variantName, loft, loftTrim = 0, distance, lieText = null }) {
     if (this.loftDisplayElement) {
-      this.loftDisplayElement.textContent = `Loft: ${loft.toFixed(0)}°`;
-      if (this.game.gameState === 'AIMING') {
-        this.loftDisplayElement.style.display = 'block';
-        this.loftDisplayElement.style.opacity = '1';
-      } else {
-        this.loftDisplayElement.style.opacity = '0';
-        setTimeout(() => {
-          if (this.loftDisplayElement && this.game.gameState !== 'AIMING') { 
-            this.loftDisplayElement.style.display = 'none';
-          }
-        }, 300); 
-      }
+      const trim = loftTrim !== 0
+        ? ` (${loftTrim > 0 ? '+' : ''}${loftTrim.toFixed(1)}°)`
+        : '';
+      const lie = lieText ? ` · ${lieText}` : '';
+      this.loftDisplayElement.textContent =
+        `${clubName} · ${variantName} · ${loft.toFixed(0)}°${trim} · ~${distance}y${lie}`;
+      this.loftDisplayElement.style.display = 'block';
     }
   }
   

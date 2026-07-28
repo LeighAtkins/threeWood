@@ -8,11 +8,11 @@ const titleScene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
 camera.position.z = 5;
 
-// WebGL renderer for 3D elements
+// WebGL renderer for 3D elements (transparent — CSS sky gradient shows through)
 const webGLRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
 webGLRenderer.setSize(window.innerWidth, window.innerHeight);
 webGLRenderer.setPixelRatio(window.devicePixelRatio);
-webGLRenderer.setClearColor(0x000000, 1);
+webGLRenderer.setClearColor(0x000000, 0);
 webGLRenderer.domElement.style.position = 'absolute';
 webGLRenderer.domElement.style.top = 0;
 webGLRenderer.domElement.style.zIndex = '1'; // Ensure proper z-index
@@ -27,23 +27,28 @@ cssRenderer.domElement.style.pointerEvents = 'none';
 cssRenderer.domElement.style.zIndex = '2'; // Ensure proper z-index
 document.getElementById('container').appendChild(cssRenderer.domElement);
 
-// Create a rotating cube for the title screen
-const geometry = new THREE.BoxGeometry(1, 1, 1);
-const material = new THREE.MeshBasicMaterial({ 
-  color: 0xFFD700, // Gold color
-  wireframe: true // PS1-style wireframe look
+// Faceted low-poly golf ball as the title emblem
+const geometry = new THREE.IcosahedronGeometry(1, 1);
+const material = new THREE.MeshStandardMaterial({
+  color: 0xfff8ec,
+  flatShading: true,
+  roughness: 0.6,
+  metalness: 0.0,
 });
 const cube = new THREE.Mesh(geometry, material);
 titleScene.add(cube);
 
-// Add ambient lighting
-const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+// Warm key light + cool fill, matching the in-game golden-hour setup
+const ambientLight = new THREE.AmbientLight(0xfff0dd, 0.4);
 titleScene.add(ambientLight);
 
-// Add directional lighting 
-const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+const directionalLight = new THREE.DirectionalLight(0xffdfb0, 2.2);
 directionalLight.position.set(5, 5, 5);
 titleScene.add(directionalLight);
+
+const fillLight = new THREE.DirectionalLight(0xa8ccff, 0.8);
+fillLight.position.set(-4, -2, -3);
+titleScene.add(fillLight);
 
 // Variables to track state
 let isGameStarted = false;

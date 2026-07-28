@@ -2,7 +2,8 @@ body {
   margin: 0;
   overflow: hidden;
   font-family: 'Lato', 'Trebuchet MS', sans-serif;
-  background-color: #000;
+  /* Golden-hour sky: matches the in-game zenith→horizon gradient */
+  background: linear-gradient(180deg, #4f9fe0 0%, #9ecdf0 45%, #ffe3b8 100%);
   color: #fff;
 }
 
@@ -15,18 +16,16 @@ body {
   font-size: 4rem;
   font-weight: bold;
   letter-spacing: 0.15em;
-  text-shadow: 4px 4px 8px rgba(0, 0, 0, 0.8);
-  color: #FFD700; /* Gold color */
+  text-shadow: 3px 4px 0 rgba(60, 90, 60, 0.35);
+  color: #fff8ec; /* warm cream */
   text-transform: uppercase;
-  /* PS1-style text effect */
-  transform: perspective(400px) rotateX(5deg);
   animation: titlePulse 3s infinite;
 }
 
 @keyframes titlePulse {
-  0% { transform: perspective(400px) rotateX(5deg) scale(1); }
-  50% { transform: perspective(400px) rotateX(5deg) scale(1.05); }
-  100% { transform: perspective(400px) rotateX(5deg) scale(1); }
+  0% { transform: scale(1); }
+  50% { transform: scale(1.04); }
+  100% { transform: scale(1); }
 }
 
 #container {
@@ -41,9 +40,9 @@ body {
   width: 100%;
   text-align: center;
   z-index: 100;
-  color: white;
+  color: #fff8ec;
   font-size: 1.2rem;
-  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.8);
+  text-shadow: 2px 2px 4px rgba(60, 90, 60, 0.45);
   animation: fadeInOut 2s infinite;
 }
 

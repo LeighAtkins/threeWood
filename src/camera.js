@@ -438,6 +438,37 @@ class CameraController {
     }
   }
   
+  rotateAim(angleDelta) {
+    this.aimingAngle += angleDelta;
+
+    // Keep angle between 0 and 2π
+    this.aimingAngle = this.aimingAngle % (Math.PI * 2);
+    if (this.aimingAngle < 0) this.aimingAngle += Math.PI * 2;
+
+    // Update targets if in aiming mode
+    if (this.currentMode === this.MODES.AIMING) {
+      this.updateCameraTargets();
+    }
+  }
+
+  /**
+   * Point the aiming direction from the ball toward the hole. The aim vector
+   * is (cos θ, 0, sin θ), so θ = atan2(deltaZ, deltaX). This makes the default
+   * shot point at the hole while still letting the player rotate manually.
+   * Call on every entry to AIMING so the camera always faces the hole.
+   */
+  faceHole(holePosition, ballPosition) {
+    if (!holePosition || !ballPosition) return;
+    const dx = holePosition.x - ballPosition.x;
+    const dz = holePosition.z - ballPosition.z;
+    if (dx === 0 && dz === 0) return;
+    this.aimingAngle = Math.atan2(dz, dx);
+    if (this.aimingAngle < 0) this.aimingAngle += Math.PI * 2;
+    if (this.currentMode === this.MODES.AIMING) {
+      this.updateCameraTargets();
+    }
+  }
+
   /**
    * Get current aiming direction (for hitting the ball)
    */

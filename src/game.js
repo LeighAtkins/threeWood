@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import * as TWEEN from '@tweenjs/tween.js';
 import TerrainGenerator from './terrain.js';
 import GolfBall from './ball.js';
 import CameraController from './camera.js';
@@ -7,6 +8,14 @@ import UI from './ui.js';
 import handleHoleComplete from './holeComplete.js';
 import { DirectionArrow } from './directionArrow.js';
 import { AudioManager } from './audioManager.js';
+import { Minimap } from './minimap.js';
+import { createGameRng, getSeedFromUrl, generateSeed } from './core/rng.js';
+import { StateMachine } from './core/states.js';
+import { createSwing, startSwing, swingClick, swingStep, strikeFromTiming, describeStrike } from './core/swing.js';
+import { CLUBS, VARIANTS, effectiveLoft, launchSpeed, estimateDistance, autoSelectClub } from './core/clubs.js';
+import { getLieAt, describeLie } from './core/lies.js';
+import { designHole, ARCHETYPES } from './course/holeDesigner.js';
+import { createTrees } from './course/trees.js';
 
 /**
  * Main game controller for ThreeWood
@@ -29,21 +38,34 @@ class Game {
     this.ball = null;
     this.shotArrow = null;
     this.directionArrow = null;
+    this.minimap = null;
     
     // UI
     this.ui = null;
     
-    // Loft constants and state
-    this.MIN_LOFT = 5;  // Minimum loft angle in degrees
-    this.MAX_LOFT = 45; // Maximum loft angle in degrees
-    this.LOFT_INCREMENT = 1; // Degrees to change loft per input
-    this.currentLoft = 10; // Initial loft angle in degrees
+    // Club bag state (see core/clubs.js). The effective loft/maxSpeed of the
+    // current club + shot variant drive aiming, the strike model, and launch.
+    this.clubIndex = 0;
+    this.variantIndex = 0;
+    // Fine trajectory trim on the mouse wheel (degrees, ±8). Resets whenever
+    // the club or variant changes — it's a per-shot adjustment, not a setting.
+    this.loftTrim = 0;
     
+    // Deterministic seed — everything in the round derives from this.
+    this.seed = getSeedFromUrl() || generateSeed();
+    this.gameRng = createGameRng(this.seed);
+    this.fxRng = this.gameRng.fork('fx').rng; // cosmetic/secondary effects
+
+    // Round state
+    this.holeNumber = 1;
+    this.roundLength = 3; // 3-hole rounds for now; 18 when biomes land
+    this.roundScores = []; // { hole, par, strokes }
+
     // Game state
     this.score = 0;
     this.strokes = 0;
     this.par = 3; // Default par for the hole
-    this.gameState = 'TITLE'; // TITLE, AIMING, HITTING, WATCHING, CAMERA_TRANSITION, READY_TO_HIT
+    this.fsm = this.createStateMachine();
     
     // Camera transition timing
     this.cameraTransitionTime = 0;
@@ -62,12 +84,10 @@ class Game {
     this.isMouseDown = false;
     this.lastMousePosition = new THREE.Vector2();
     this.mouseSensitivity = 0.003; // Mouse sensitivity for aiming
-    this.powerMeter = {
-      active: false,
-      power: 0,
-      direction: 1, // 1 for increasing, -1 for decreasing
-      speed: 50 // Power change per second
-    };
+
+    // 3-click swing (power -> accuracy -> strike); see core/swing.js
+    this.swing = createSwing();
+    this.lastStrike = null; // last strike outcome, for tuning/replay debug
     
     // Pause state
     this.isPaused = false;
@@ -105,6 +125,9 @@ class Game {
       
       // Initialize UI
       this.ui = new UI(this);
+
+      // Seed badge (shareable round identity)
+      this.initSeedBadge();
       
       // Initialize input handlers
       this.initInputHandlers();
@@ -139,6 +162,9 @@ class Game {
       this.renderer.render(this.scene, this.camera);
       this.renderDirty = true;
       if (window.DEBUG) console.log("Initial render forced");
+
+      // Debug/replay scaffolding: scripted access for tuning, tests, replays
+      window.THREEWOOD = this;
       
       if (window.DEBUG) console.log("Game initialized successfully");
     } catch (error) {
@@ -151,15 +177,15 @@ class Game {
    */
   initRenderer() {
     if (window.DEBUG) console.log("Initializing renderer");
-    this.renderer = new THREE.WebGLRenderer({ antialias: false }); // Disabled for performance + PS1 aesthetic
+    // Elevated stylized low-poly: clean edges, soft shadows, filmic tonemap.
+    this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5)); // Cap lower for PS1-style crispness + perf
-    // No tone mapping: PS1 hardware had none, keeps colors flat and saturated
-    this.renderer.toneMapping = THREE.NoToneMapping;
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.15;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.shadowMap.enabled = true;
-    // Hard-edged PS1-style shadows (PCFSoftShadowMap is modern/soft)
-    this.renderer.shadowMap.type = THREE.BasicShadowMap;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
     // Add to DOM
     const container = document.getElementById('container');
@@ -206,50 +232,50 @@ class Game {
    * Initialize scene lighting
    */
   initLighting() {
-    // Lower ambient so the sun reads harder — flatter, harsher PS1 look
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.35);
-    this.scene.add(ambientLight);
-
-    // Directional light (sun)
-    const sun = new THREE.DirectionalLight(0xfff2d8, 1.1);
-    sun.position.set(60, 90, 40);
+    // Golden-hour key light: warm, low, long soft shadows. Hemisphere provides
+    // the cool sky fill — the warm/cool contrast is what makes low-poly read
+    // as art direction instead of "no textures".
+    const sun = new THREE.DirectionalLight(0xffdfb0, 2.4);
+    sun.position.set(90, 70, 45);
     sun.castShadow = true;
 
-    // Tighter shadow frustum centered on the play area + crisper 1024 map
-    sun.shadow.mapSize.width = 1024;
-    sun.shadow.mapSize.height = 1024;
+    sun.shadow.mapSize.width = 2048;
+    sun.shadow.mapSize.height = 2048;
     sun.shadow.camera.near = 10;
     sun.shadow.camera.far = 400;
     sun.shadow.camera.left = -120;
     sun.shadow.camera.right = 120;
     sun.shadow.camera.top = 120;
     sun.shadow.camera.bottom = -120;
-    sun.shadow.bias = -0.0005;
+    sun.shadow.bias = -0.0004;
+    sun.shadow.normalBias = 0.02;
     this.sun = sun;
     this.scene.add(sun);
     this.scene.add(sun.target);
 
-    // Hemisphere light for sky/ground bounce, tuned to the sky gradient
-    const hemisphereLight = new THREE.HemisphereLight(0x88bbff, 0x4a6b3a, 0.5);
+    // Sky bounce (cool blue) over ground bounce (warm green)
+    const hemisphereLight = new THREE.HemisphereLight(0xa8ccff, 0x7a9455, 1.1);
     this.scene.add(hemisphereLight);
+
+    // Faint warm ambient lift so shadowed faces never go muddy
+    const ambientLight = new THREE.AmbientLight(0xfff0dd, 0.15);
+    this.scene.add(ambientLight);
   }
 
   /**
-   * Build a vertical gradient sky as the scene background and add matching
-   * distance fog. Both are authentic to the PS1 aesthetic (fog masked the
-   * short draw distance) and hide terrain edge pop-in.
+   * Vertical gradient sky + matching distance fog. Horizon and fog share one
+   * warm haze color so terrain melts into the sky at the draw distance.
    */
   initSky() {
-    // --- Gradient sky via canvas texture ---
-    const skyTop = new THREE.Color(0x2a6cc4);     // deep blue zenith
-    const skyHorizon = new THREE.Color(0xbfe0ff); // pale horizon
+    const skyZenith = new THREE.Color(0x63b4f2);   // clear cerulean (punchy: ACES desaturates)
+    const skyHorizon = new THREE.Color(0xffd493);  // warm golden haze
     const canvas = document.createElement('canvas');
     canvas.width = 16;
     canvas.height = 256;
     const ctx = canvas.getContext('2d');
     const grad = ctx.createLinearGradient(0, 0, 0, 256);
-    grad.addColorStop(0, `rgb(${skyTop.r * 255 | 0},${skyTop.g * 255 | 0},${skyTop.b * 255 | 0})`);
-    grad.addColorStop(0.6, `rgb(${skyHorizon.r * 255 | 0},${skyHorizon.g * 255 | 0},${skyHorizon.b * 255 | 0})`);
+    grad.addColorStop(0, `rgb(${skyZenith.r * 255 | 0},${skyZenith.g * 255 | 0},${skyZenith.b * 255 | 0})`);
+    grad.addColorStop(0.55, `rgb(${skyHorizon.r * 255 | 0},${skyHorizon.g * 255 | 0},${skyHorizon.b * 255 | 0})`);
     grad.addColorStop(1, `rgb(${skyHorizon.r * 255 | 0},${skyHorizon.g * 255 | 0},${skyHorizon.b * 255 | 0})`);
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, 16, 256);
@@ -257,54 +283,62 @@ class Game {
     skyTexture.colorSpace = THREE.SRGBColorSpace;
     this.scene.background = skyTexture;
 
-    // --- Distance fog (color matches the horizon) ---
-    this.scene.fog = new THREE.Fog(0xbfe0ff, 120, 340);
+    // Distance fog melts terrain into the horizon haze (hides the far edge)
+    this.scene.fog = new THREE.Fog(0xffd493, 120, 320);
   }
 
   /**
-   * Initialize game objects (terrain, ball, etc.)
+   * Small HUD badge showing the round seed. Click to copy a shareable URL.
+   */
+  initSeedBadge() {
+    const badge = document.createElement('div');
+    badge.textContent = `SEED ${this.seed}`;
+    badge.title = 'Click to copy a shareable link to this exact round';
+    Object.assign(badge.style, {
+      position: 'absolute',
+      bottom: '8px',
+      left: '8px',
+      padding: '4px 8px',
+      fontFamily: 'monospace',
+      fontSize: '11px',
+      letterSpacing: '0.5px',
+      color: '#fff',
+      background: 'rgba(20, 30, 20, 0.55)',
+      borderRadius: '4px',
+      cursor: 'pointer',
+      zIndex: '30',
+      userSelect: 'none',
+    });
+    badge.addEventListener('click', async () => {
+      const url = `${location.origin}${location.pathname}?seed=${encodeURIComponent(this.seed)}`;
+      try {
+        await navigator.clipboard.writeText(url);
+        badge.textContent = 'LINK COPIED';
+        setTimeout(() => { badge.textContent = `SEED ${this.seed}`; }, 1200);
+      } catch {
+        window.prompt('Copy this link:', url);
+      }
+    });
+    const container = document.getElementById('game-container') || document.body;
+    container.appendChild(badge);
+    this.seedBadge = badge;
+  }
+
+  /**
+   * Initialize game objects: load hole 1, then create the one-time objects
+   * (ball, arrows, camera rig, minimap) that persist across holes.
    */
   initGameObjects() {
     if (window.DEBUG) console.log("Initializing game objects");
-    
-    // Create terrain
-    this.terrain = new TerrainGenerator({
-      width: 400, 
-      length: 400,
-      maxHeight: 5,
-      minHeight: -1,
-      segmentsW: 50,  // Reduced from 100 for 4x performance gain
-      segmentsL: 50,  // Reduced from 100 for 4x performance gain
-      waterLevel: -0.8,
-      waterColor: 0x4466aa,
-      waterOpacity: 0.8
-    });
-    
-    // Generate terrain mesh
-    this.terrainMesh = this.terrain.generateTerrain();
-    this.terrainMesh.receiveShadow = true;
-    this.scene.add(this.terrainMesh);
-    
-    // Create water surface
-    this.terrain.createWaterSurface(this.scene);
-    
-    // Create golf hole flag
-    this.flag = this.terrain.createFlag(this.scene);
-    
-    // Create bridge over water moat
-    this.bridge = this.terrain.createBridge(this.scene);
-    
-    if (window.DEBUG) console.log('[Game.init] Tee Position:', this.terrain.teePosition.toArray());
 
-    // Create golf ball
+    this.loadHole(1);
+
+    // Create golf ball — physics randomness comes from the round seed
     this.ball = new GolfBall(this.terrain, this.audioManager);
+    this.ball.setRng(this.gameRng.fork('ball').rng);
     this.scene.add(this.ball.getMesh());
-    if (window.DEBUG) console.log('[Game.init] GolfBall created at Pos:', this.ball.position.toArray());
-    
-    // Reset golf ball to tee position
     this.ball.reset(this.terrain.teePosition);
-    if (window.DEBUG) console.log('[Game.init] Ball reset to Pos:', this.ball.position.toArray());
-    
+
     // Create ArrowHelper for shot direction
     const arrowDir = new THREE.Vector3(0, 0.2, -1).normalize();
     const arrowLength = 1.2;
@@ -312,30 +346,178 @@ class Game {
     this.shotArrow = new THREE.ArrowHelper(arrowDir, new THREE.Vector3(0, 0, 0), arrowLength, arrowColor, 0.25, 0.15);
     this.shotArrow.visible = false;
     this.scene.add(this.shotArrow);
-    
+
     // Initialize camera controller with ball as target
     this.cameraController = new CameraController(this.camera, this.ball, { terrain: this.terrain });
-    // Set a reference to the game instance in the camera controller
     this.cameraController.game = this;
-    if (window.DEBUG) console.log('[Game.init] CameraController created. Initial Cam Pos:', this.camera.position.toArray());
 
-    // Calculate initial aiming angle towards the hole after terrain is ready
-    if (this.terrain && this.terrain.teePosition && this.terrain.holePosition) {
-      const teeToHole = new THREE.Vector2(
-        this.terrain.holePosition.x - this.terrain.teePosition.x,
-        this.terrain.holePosition.z - this.terrain.teePosition.z
-      );
-      this.cameraController.aimingAngle = 0; // Set to 0 to point along positive X-axis (towards hole)
-      if (window.DEBUG) console.log('[Game.init] Initial aiming angle set to:', this.cameraController.aimingAngle);
-    }
-    
-    // Add a hole flag
-    // this.addHoleFlag(); // Removed as flag is created in TerrainGenerator
-    
+    // Face the camera toward the opening shot's intended line.
+    this.cameraController.faceHole(this.getAimTarget(this.terrain.teePosition), this.terrain.teePosition);
+
     // Create direction arrow UI
     this.createDirectionArrow();
-    
+
+    // Create the overhead minimap (canvas HUD)
+    const mmContainer = document.getElementById('game-container') || document.body;
+    this.minimap = new Minimap(mmContainer, this);
+
     if (window.DEBUG) console.log("Game objects initialized successfully");
+  }
+
+  /**
+   * Design and load hole N of the round: dispose the old hole's meshes,
+   * generate terrain/water/flag/trees from the seed, rewire dependents.
+   */
+  loadHole(n) {
+    this.holeNumber = n;
+
+    // --- Dispose previous hole ---
+    if (this.terrainMesh) {
+      this.scene.remove(this.terrainMesh);
+      this.terrainMesh.geometry.dispose();
+      if (this.terrain.surfaceMaterials) {
+        Object.values(this.terrain.surfaceMaterials).forEach(m => m.dispose());
+      }
+    }
+    if (this.terrain?.waterMesh) {
+      this.scene.remove(this.terrain.waterMesh);
+      this.terrain.waterMesh.geometry.dispose();
+      this.terrain.waterMesh.material.dispose();
+    }
+    if (this.flag) {
+      this.scene.remove(this.flag);
+      this.flag.traverse(o => { o.geometry?.dispose?.(); o.material?.dispose?.(); });
+    }
+    if (this.treesGroup) {
+      this.scene.remove(this.treesGroup);
+      this.treesGroup.traverse(o => { o.geometry?.dispose?.(); o.material?.dispose?.(); });
+    }
+
+    // --- Design + build the new hole (deterministic from round seed) ---
+    const spec = designHole(this.seed, n);
+    this.holeSpec = spec;
+    if (window.DEBUG) console.log(`[loadHole] #${n}: ${spec.archetype} par ${spec.par}, fitness`, spec.fitness);
+
+    this.terrain = new TerrainGenerator({
+      width: 400,
+      length: 400,
+      maxHeight: 5,
+      minHeight: -1,
+      segmentsW: 64,
+      segmentsL: 64,
+      waterLevel: -0.8,
+      seed: `${this.seed}:hole-${n}`,
+      holeNumber: n,
+      holeSpec: spec,
+    });
+
+    this.terrainMesh = this.terrain.generateTerrain();
+    this.terrainMesh.receiveShadow = true;
+    this.scene.add(this.terrainMesh);
+
+    this.terrain.createWaterSurface(this.scene);
+    this.flag = this.terrain.createFlag(this.scene);
+
+    // Parkland trees (2 instanced draw calls) + trunk colliders for physics
+    const treeResult = createTrees(spec, this.terrain, this.scene);
+    this.treesGroup = treeResult.group;
+    this.terrain.treeColliders = treeResult.colliders;
+
+    this.par = spec.par;
+    this.strokes = 0;
+
+    // --- Rewire dependents to the new terrain ---
+    if (this.ball) {
+      this.ball.terrain = this.terrain;
+      this.ball.reset(this.terrain.teePosition);
+    }
+    if (this.cameraController) {
+      this.cameraController.terrain = this.terrain;
+      this.cameraController.faceHole(this.getAimTarget(this.terrain.teePosition), this.terrain.teePosition);
+    }
+    this.updateHoleBadge();
+    this.renderDirty = true;
+  }
+
+  /**
+   * Where the player should aim from ballPos: the next path waypoint ahead,
+   * so doglegs aim at the corner instead of through the trees.
+   */
+  getAimTarget(ballPos) {
+    const path = this.terrain?.spec?.path;
+    if (!path || path.length < 2) return this.terrain?.holePosition;
+    const info = this.terrain.fairwayInfo(ballPos.x, ballPos.z);
+    let walked = 0;
+    for (let i = 1; i < path.length; i++) {
+      walked += Math.hypot(path[i].x - path[i - 1].x, path[i].z - path[i - 1].z);
+      if (walked > info.along + 15) {
+        const y = this.terrain.getHeightAtPosition(path[i].x, path[i].z);
+        return new THREE.Vector3(path[i].x, y, path[i].z);
+      }
+    }
+    return this.terrain.holePosition;
+  }
+
+  /**
+   * Advance after a hole is sunk: next hole, or a fresh round on a new seed.
+   */
+  advanceHole() {
+    this.roundScores.push({ hole: this.holeNumber, par: this.par, strokes: this.strokes });
+
+    if (this.holeNumber < this.roundLength) {
+      this.loadHole(this.holeNumber + 1);
+      this.setGameState('READY_TO_HIT');
+    } else {
+      // Round complete — show the card, then start a fresh round on a new seed
+      const total = this.roundScores.reduce((s, h) => s + (h.strokes - h.par), 0);
+      const scoreText = total === 0 ? 'E' : (total > 0 ? `+${total}` : `${total}`);
+      const card = this.roundScores.map(h => `#${h.hole}: ${h.strokes} (par ${h.par})`).join(' · ');
+      this.ui?.showMessage(`ROUND COMPLETE — ${scoreText}`, card, 'A new course is being grown for you…', 5000);
+      setTimeout(() => {
+        this.seed = generateSeed();
+        this.gameRng = createGameRng(this.seed);
+        this.fxRng = this.gameRng.fork('fx').rng;
+        this.ball?.setRng(this.gameRng.fork('ball').rng);
+        this.roundScores = [];
+        this.score = 0;
+        this.ui?.updateScore(0);
+        if (this.seedBadge) this.seedBadge.textContent = `SEED ${this.seed}`;
+        this.loadHole(1);
+        this.setGameState('READY_TO_HIT');
+      }, 5000);
+    }
+  }
+
+  /**
+   * Top-center badge: hole number, par, archetype (the hole's identity).
+   */
+  updateHoleBadge() {
+    if (!this.holeBadge) {
+      const badge = document.createElement('div');
+      Object.assign(badge.style, {
+        position: 'absolute',
+        top: '8px',
+        left: '50%',
+        transform: 'translateX(-50%)',
+        padding: '6px 14px',
+        fontFamily: 'Lato, sans-serif',
+        fontSize: '15px',
+        fontWeight: 'bold',
+        letterSpacing: '1px',
+        color: '#fff8ec',
+        background: 'rgba(20, 30, 20, 0.55)',
+        borderRadius: '6px',
+        zIndex: '30',
+        userSelect: 'none',
+        pointerEvents: 'none',
+        textShadow: '1px 1px 2px rgba(0,0,0,0.4)',
+      });
+      (document.getElementById('game-container') || document.body).appendChild(badge);
+      this.holeBadge = badge;
+    }
+    const spec = this.holeSpec;
+    const arch = ARCHETYPES[spec.archetype]?.label || spec.archetype;
+    this.holeBadge.textContent = `HOLE ${spec.number}/${this.roundLength} · PAR ${spec.par} · ${arch}`;
   }
   
   /**
@@ -416,12 +598,13 @@ class Game {
       this.handleMouseUp();
     });
 
-    // Mouse Wheel for Loft Adjustment
+    // Mouse Wheel for fine trajectory height (loft trim). Clubs stay on the
+    // arrow keys so scroll does one thing: higher/lower flight.
     window.addEventListener('wheel', (e) => {
       if (this.gameState === 'AIMING') {
         // Determine scroll direction (normalize across browsers)
-        const delta = Math.sign(e.deltaY); 
-        this.adjustLoft(-delta); // Invert delta: scroll down = increase loft, scroll up = decrease
+        const delta = Math.sign(e.deltaY);
+        this.adjustLoftTrim(-delta); // Scroll up = higher flight, down = lower
         e.preventDefault(); // Prevent page scrolling
       }
     }, { passive: false }); // Need passive: false to preventDefault
@@ -435,16 +618,23 @@ class Game {
     this.renderDirty = true;
     
     switch (key.toLowerCase()) {
-      case ' ': // Space bar
+      case ' ': // Space bar — 3-click swing: start, set power, strike
         if (this.gameState === 'AIMING') {
-          // Start power meter (if not already active)
-          if (!this.powerMeter.active) {
-            this.startPowerMeter();
-            this.setGameState('HITTING');
-          }
+          if (this.swing.phase === 'idle') this.startSwing();
         } else if (this.gameState === 'HITTING') {
-          // Execute hit with current power
-          this.hitBall();
+          this.advanceSwing();
+        }
+        break;
+      case 'escape': // Cancel an in-progress swing
+        this.cancelSwing();
+        break;
+      case 'h': // Help overlay (re-open; initial show is handled in init)
+        if (this.ui && !this.ui.isInstructionsVisible) {
+          this.ui.showInstructions();
+          this.isPaused = true;
+          document.addEventListener('instructionsDismissed', () => {
+            this.isPaused = false;
+          }, { once: true });
         }
         break;
       case 'r': // Reset ball
@@ -454,11 +644,14 @@ class Game {
       case 'c': // Toggle camera mode
         this.toggleCameraMode();
         break;
-      case 'arrowup': // Increase loft
-        this.adjustLoft(1);
+      case 'arrowup': // Longer club
+        this.cycleClub(-1);
         break;
-      case 'arrowdown': // Decrease loft
-        this.adjustLoft(-1);
+      case 'arrowdown': // Shorter club
+        this.cycleClub(1);
+        break;
+      case 'v': // Cycle shot variant (full / punch / flop / chip)
+        this.cycleVariant();
         break;
       case 's': // Toggle spin selector
         if (this.gameState === 'AIMING') {
@@ -487,13 +680,9 @@ class Game {
     
     if (this.gameState === 'AIMING') {
       this.ui.hideReadyIndicator(); // Hide indicator when starting swing
-      
-      // Start power meter
-      this.startPowerMeter();
-      this.setGameState('HITTING');
+      this.startSwing();
     } else if (this.gameState === 'HITTING') {
-      // Execute hit with current power
-      this.hitBall();
+      this.advanceSwing();
     } else if (this.gameState === 'TITLE') {
       this.setGameState('READY_TO_HIT');
     }
@@ -532,11 +721,16 @@ class Game {
         this.renderDirty = true;
       }
       
-      // Check if ball has entered the hole
+      // Check if ball has entered the hole -> begin the sink animation
       if (this.terrain && this.terrain.checkBallInHole && this.terrain.checkBallInHole(this.ball)) {
-        // Ball has entered the hole!
-        this.handleHoleComplete();
+        this.startSink();
       }
+    }
+
+    // Drive the sink animation: move the ball into the cup, then complete.
+    if (this.gameState === 'SINKING') {
+      TWEEN.update();
+      this.renderDirty = true;
     }
     
     // Update water animation and check for ball-water collisions
@@ -574,8 +768,8 @@ class Game {
           // Ensure the ball keeps moving if it's in water
           if (this.ball.velocity.length() < 0.1) {
             // Add a small random movement to prevent complete stopping in water
-            this.ball.velocity.x += (Math.random() - 0.5) * 0.02;
-            this.ball.velocity.z += (Math.random() - 0.5) * 0.02;
+            this.ball.velocity.x += (this.fxRng() - 0.5) * 0.02;
+            this.ball.velocity.z += (this.fxRng() - 0.5) * 0.02;
             this.ball.velocity.y -= 0.1; // Ensure it sinks
           }
         }
@@ -598,6 +792,9 @@ class Game {
     
     // Update direction arrow to point to hole
     this.updateDirectionArrow();
+
+    // Update the overhead minimap (course layout + live shot prediction)
+    this.updateMinimap();
     
     // Log state AFTER camera update
     if (window.DEBUG_CAMERA) {
@@ -666,12 +863,30 @@ class Game {
       this.renderDirty = true;
     }
     
-    // Check if ball has stopped after being hit
+    // Check if ball has stopped after being hit.
+    // Don't transition away if the ball is resting over the hole — let
+    // checkBallInHole (in the WATCHING branch above) claim it and start the
+    // sink instead. This prevents a slow roller from resting on the lip and
+    // skipping the hole completion.
     if (this.gameState === 'WATCHING' && this.ball.isResting) {
-      if (window.DEBUG) console.log("Ball has come to rest");
-      this.cameraController.followBall();
-      this.setGameState('CAMERA_TRANSITION');
-      this.cameraTransitionTime = 0;
+      const overHole = this.terrain && this.terrain.hole &&
+        Math.hypot(this.ball.position.x - this.terrain.hole.x,
+                    this.ball.position.z - this.terrain.hole.z) < this.terrain.hole.radius + 0.05;
+      if (!overHole) {
+        // Water hazard rule: ball at rest in water = +1 penalty, replay the shot
+        const surface = this.terrain?.getSurfaceTypeAtPosition?.(this.ball.position.x, this.ball.position.z);
+        const inWater = surface === 'water' || this.ball.position.y < this.terrain.options.waterLevel;
+        if (inWater) {
+          this.strokes += 1;
+          this.ui?.updateStrokes(this.strokes);
+          this.ui?.showMessage('WATER HAZARD', '+1 penalty stroke', '', 2500);
+          this.ball.reset(this.ball.lastSafePosition);
+        }
+        if (window.DEBUG) console.log("Ball has come to rest");
+        this.cameraController.followBall();
+        this.setGameState('CAMERA_TRANSITION');
+        this.cameraTransitionTime = 0;
+      }
     }
     
     // If in camera transition phase
@@ -712,8 +927,8 @@ class Game {
     // Handle input based on game state
     this.handleInput();
 
-    // Update power meter
-    this.updatePowerMeter();
+    // Update the 3-click swing meter
+    this.updateSwingMeter();
     // NOTE: hole-in detection is handled in the WATCHING branch above via
     // terrain.checkBallInHole() -> handleHoleComplete(), which is guarded to
     // fire once. Do not add a second detection path here.
@@ -738,74 +953,100 @@ class Game {
   }
   
   /**
-   * Update power meter when active
+   * Advance the 3-click swing meter (power up-sweep, accuracy down-sweep).
+   * Auto-locks power at 100 and auto-hits (max late) at the strike floor.
    */
-  updatePowerMeter() {
-    if (!this.powerMeter.active) return;
-    
-    // Store previous power to check if it changed
-    const prevPower = this.powerMeter.power;
-    
-    // Update power based on direction
-    this.powerMeter.power += this.powerMeter.direction * this.powerMeter.speed * this.deltaTime;
-    
-    // Reverse direction at limits
-    if (this.powerMeter.power >= 100) {
-      this.powerMeter.power = 100;
-      this.powerMeter.direction = -1;
-    } else if (this.powerMeter.power <= 0) {
-      this.powerMeter.power = 0;
-      this.powerMeter.direction = 1;
-    }
-    
-    // Only update UI and mark dirty if power actually changed
-    if (Math.abs(prevPower - this.powerMeter.power) > 0.1) {
-      this.ui.updatePowerMeter(this.powerMeter.power);
-      this.renderDirty = true;
+  updateSwingMeter() {
+    if (this.swing.phase === 'idle') return;
+
+    // Clamp the step: a frame hitch (tab switch, slow frame) must slow the
+    // marker, never jump it — big dt could otherwise skip past the strike
+    // line or even auto-fire the hit.
+    const dt = Math.min(this.deltaTime, 0.05);
+    const event = swingStep(this.swing, dt);
+    this.ui.updateSwingMeter(this.swing);
+    this.renderDirty = true;
+
+    if (!event) return;
+    if (event.type === 'powerLocked') {
+      this.ui.setSwingPhase('accuracy');
+    } else if (event.type === 'strike') {
+      this.executeSwingHit(event.timing);
     }
   }
-  
+
   /**
-   * Start the power meter
+   * Begin the swing (click 1): the marker sweeps up for power.
    */
-  startPowerMeter() {
-    // Don't start if already active
-    if (this.powerMeter.active) {
-      if (window.DEBUG) console.log("Power meter already active");
-      return;
-    }
-    
-    // Initialize power meter
-    this.powerMeter.active = true;
-    this.powerMeter.power = 0;
-    this.powerMeter.direction = 1;
-    
-    // Change game state
+  startSwing() {
+    if (this.swing.phase !== 'idle') return;
+
+    startSwing(this.swing);
     this.setGameState('HITTING');
-    
-    // Show UI power meter
-    this.ui.showPowerMeter();
-    
-    if (window.DEBUG) console.log("Power meter started - Click again to hit ball");
+    this.ui.showSwingMeter();
+    this.ui.setSwingPhase('power');
+
+    if (window.DEBUG) console.log("Swing started - click to set power");
   }
-  
+
   /**
-   * Hit the ball with current power and direction
+   * A swing click: click 2 locks power, click 3 strikes the ball.
    */
-  hitBall() {
-    // Ensure the power meter is active
-    if (!this.powerMeter.active) {
-      console.warn("Attempted to hit ball without active power meter");
-      return;
+  advanceSwing() {
+    const event = swingClick(this.swing);
+    if (!event) return;
+
+    if (event.type === 'powerLocked') {
+      this.ui.setSwingPhase('accuracy');
+      this.ui.updateSwingMeter(this.swing);
+      this.renderDirty = true;
+    } else if (event.type === 'strike') {
+      this.executeSwingHit(event.timing);
     }
-    
+  }
+
+  /**
+   * Cancel an in-progress swing (Escape) and return to aiming.
+   */
+  cancelSwing() {
+    if (this.gameState !== 'HITTING' || this.swing.phase === 'idle') return;
+    this.swing.phase = 'idle';
+    this.ui.hideSwingMeter();
+    this.setGameState('AIMING');
+    if (this.ui.showReadyIndicator) this.ui.showReadyIndicator();
+    if (window.DEBUG) console.log("Swing cancelled");
+  }
+
+  /**
+   * Debug/replay hook (window.THREEWOOD.debugSwing): execute a full swing
+   * with exact inputs from AIMING. timing: + = early/pull, - = late/push.
+   */
+  debugSwing(power, timing = 0) {
+    if (this.gameState !== 'AIMING' || !this.ball || !this.ball.isResting) return false;
+    this.swing.power = Math.max(2, Math.min(100, power));
+    this.executeSwingHit(timing);
+    return true;
+  }
+
+  /**
+   * Strike the ball with the locked power and a signed timing error.
+   * @param {number} timing -1..1 (+ early/pull, - late/push) from the meter
+   */
+  executeSwingHit(timing) {
     // Play swing sound before hitting
     this.audioManager.playSwingSound();
-    
-    if (window.DEBUG) console.log("Hitting ball with power: " + this.powerMeter.power.toFixed(1));
-    
+
+    // Compute the strike outcome (mishit model) from the seeded ball stream
+    const strike = strikeFromTiming(timing, this.currentLoft, this.ball.rng);
+    this.lastStrike = strike;
+
+    if (window.DEBUG) {
+      console.log(`Strike: power ${this.swing.power.toFixed(1)}, timing ${timing.toFixed(3)} ->`,
+        describeStrike(strike), strike);
+    }
+
     // Get current power and direction
-    let power = this.powerMeter.power;
+    let power = this.swing.power;
     
     // Use the stored shot direction if available, otherwise fall back to camera direction
     let direction;
@@ -854,8 +1095,19 @@ class Game {
     // Negative x = left spin (hook), Positive x = right spin (slice)
     let sidespin = (spinValues.x || 0); // Use raw value from spin selector
     
-    // Hit the ball using the horizontal direction, loft angle, and sidespin
-    this.ball.hit(power, direction, loft, sidespin);
+    // Hit the ball using the horizontal direction, loft angle, sidespin, the
+    // strike outcome (mishit yaw / thin-fat launch changes), and the club's
+    // launch profile (max ball speed + spin shaping) — plus the lie, which
+    // bleeds speed/spin and twists the club in rough and sand
+    const shot = {
+      maxSpeed: this.currentMaxSpeed,
+      spinFactor: VARIANTS[this.currentVariant].spinFactor,
+      lie: getLieAt(this.terrain, this.ball.position),
+    };
+    this.ball.hit(power, direction, loft, sidespin, strike, shot);
+
+    // Strike feedback on the meter ("PURE!", "PULL · THIN", ...)
+    this.ui.showStrikeFeedback(describeStrike(strike), strike.grade);
     
     // Hide the spin selector and indicator after hitting
     try {
@@ -869,10 +1121,10 @@ class Game {
     
     // Increment stroke count
     this.strokes++;
-    
-    // Reset power meter
-    this.powerMeter.active = false;
-    this.ui.hidePowerMeter();
+
+    // Reset the swing
+    this.swing.phase = 'idle';
+    this.ui.hideSwingMeter();
     
     // Change camera mode to watch the ball
     this.cameraController.watchBallInFlight();
@@ -883,7 +1135,51 @@ class Game {
     // Update UI
     this.ui.updateStrokes(this.strokes);
   }
-  
+
+  /**
+   * Begin the sink animation: tween the ball from its current position down
+   * into the cup, then fire hole-complete. The ball physics loop can't do this
+   * (it early-returns when isResting and the state would stop calling it), so
+   * the Game drives the sink directly via ball.sinkTo().
+   */
+  startSink() {
+    if (!this.terrain || !this.terrain.hole) return;
+    const hole = this.terrain.hole;
+    const ballRadius = this.ball.options.radius;
+
+    // Capture the ball's current position and snap horizontally to hole center.
+    const start = {
+      x: this.ball.position.x,
+      y: this.ball.position.y,
+      z: this.ball.position.z,
+    };
+    // End: centered in the cup, resting on the cup floor.
+    const end = {
+      x: hole.x,
+      y: hole.bottomY + ballRadius, // ball sits on the cup floor
+      z: hole.z,
+    };
+
+    this.setGameState('SINKING');
+
+    // Keep existing tweens from piling up if startSink fires twice.
+    if (this._sinkTween) this._sinkTween.stop();
+
+    // NOTE: second arg `true` adds the tween to the mainGroup — without it
+    // TWEEN.update() never advances this tween (sink would hang in SINKING).
+    this._sinkTween = new TWEEN.Tween(start, true)
+      .to(end, 600)
+      .easing(TWEEN.Easing.Quadratic.In)
+      .onUpdate(() => {
+        this.ball.sinkTo(new THREE.Vector3(start.x, start.y, start.z));
+      })
+      .onComplete(() => {
+        this._sinkTween = null;
+        this.handleHoleComplete();
+      })
+      .start();
+  }
+
   /**
    * Show the spin selector UI
    */
@@ -924,16 +1220,10 @@ class Game {
       // Calculate direction from ball to hole
       const ballPos = this.ball.position;
       const holePos = this.terrain.holePosition;
-      
-      // Calculate angle to hole in the XZ plane
-      const angleToHole = Math.atan2(
-        holePos.x - ballPos.x,
-        holePos.z - ballPos.z
-      );
-      
-      // Reset the camera controller's aiming angle to point at the hole
-      this.cameraController.aimingAngle = angleToHole;
-      if (window.DEBUG) console.log('[Game.resetBall] Camera aimed toward hole at angle:', angleToHole);
+
+      // Aim the camera at the hole (faceHole uses the correct atan2 convention
+      // for the aim vector (cos θ, 0, sin θ)).
+      this.cameraController.faceHole(holePos, ballPos);
     }
     
     // Ensure the game state is set to allow hitting
@@ -947,9 +1237,9 @@ class Game {
     }
     
     // Reset any other game state variables that might prevent hitting
-    this.powerMeter.active = false;
+    this.swing.phase = 'idle';
     if (this.ui) {
-      this.ui.hidePowerMeter();
+      this.ui.hideSwingMeter();
       this.ui.showReadyIndicator();
     }
   }
@@ -961,82 +1251,110 @@ class Game {
   /**
    * Set the game state
    */
+  /** Current game state name (delegates to the state machine). */
+  get gameState() {
+    return this.fsm.state;
+  }
+
+  /**
+   * Declare every legal state and its enter hook. Replaces the old
+   * string-switch; unknown states now throw instead of silently no-op'ing.
+   */
+  createStateMachine() {
+    return new StateMachine({
+      TITLE: {},
+      READY_TO_HIT: {
+        enter: (previousState) => {
+          // Reset any lingering state from previous gameplay
+          if (previousState === 'HOLE_COMPLETE') {
+            if (window.DEBUG) console.log('Transitioning from HOLE_COMPLETE to READY_TO_HIT');
+            if (this.ball && this.ball.velocity) {
+              this.ball.velocity.set(0, 0, 0);
+              this.ball.isResting = true;
+            }
+          }
+          // Immediately transition to aiming
+          this.setGameState('AIMING');
+        }
+      },
+      AIMING: {
+        enter: (previousState) => {
+          // Aim at the next path waypoint ahead (dogleg corner, not through
+          // the trees) so the intended line is readable from every lie.
+          if (this.cameraController && this.terrain && this.ball) {
+            this.cameraController.faceHole(this.getAimTarget(this.ball.position), this.ball.position);
+          }
+          this.cameraController?.setMode(this.cameraController.MODES.AIMING);
+          if (window.DEBUG) console.log("Player can now aim/adjust club");
+
+          // Auto club selection on a new lie (skipped when we arrived here by
+          // cancelling a swing — keep the player's manual choice then).
+          // Lie-aware: rough/sand penalties call for more club.
+          if (previousState !== 'HITTING' && this.terrain?.holePosition && this.ball) {
+            const distToPin = Math.hypot(
+              this.ball.position.x - this.terrain.holePosition.x,
+              this.ball.position.z - this.terrain.holePosition.z
+            );
+            const lie = getLieAt(this.terrain, this.ball.position);
+            this.selectClub(autoSelectClub(distToPin, lie.id === 'green', lie));
+          }
+
+          // Reset spin values for a new shot
+          this.resetSpinValues();
+
+          // Show spin indicator if there's spin applied
+          try {
+            if (this.ui && this.ui.spinValues &&
+                (Math.abs(this.ui.spinValues.x) > 0.05 || Math.abs(this.ui.spinValues.y) > 0.05)) {
+              this.ui.updateSpinIndicator();
+            }
+          } catch (e) {
+            console.warn("Could not update spin indicator:", e);
+          }
+        }
+      },
+      HITTING: {
+        enter: () => {
+          if (window.DEBUG) console.log("Power meter active");
+          if (this.shotArrow) this.shotArrow.visible = false;
+        }
+      },
+      WATCHING: {
+        enter: () => {
+          if (window.DEBUG) console.log("Ball in motion");
+          if (this.shotArrow) this.shotArrow.visible = false;
+          try {
+            if (this.ui && this.ui.hideSpinIndicator) {
+              this.ui.hideSpinIndicator();
+            }
+          } catch (e) {
+            console.warn("Could not hide spin indicator:", e);
+          }
+        }
+      },
+      CAMERA_TRANSITION: {
+        enter: () => {
+          if (window.DEBUG) console.log("Camera transitioning to aiming position");
+          if (this.ui && this.ui.showTransitionIndicator) {
+            this.ui.showTransitionIndicator();
+          }
+        }
+      },
+      SINKING: {},
+      HOLE_COMPLETE: {},
+    }, {
+      onTransition: (prev, next) => {
+        if (window.DEBUG) console.log(`Game state changing from ${prev} to ${next}`);
+        this.renderDirty = true;
+      }
+    });
+  }
+
+  /**
+   * Change the current game state (delegates to the state machine).
+   */
   setGameState(state) {
-    if (window.DEBUG) console.log(`Game state changing from ${this.gameState} to ${state}`);
-    
-    // Store previous state for reference
-    const previousState = this.gameState;
-    this.gameState = state;
-    this.renderDirty = true;
-    
-    // Handle state transitions
-    switch (state) {
-      case 'READY_TO_HIT':
-        // Prepare for the next shot (e.g., enable aiming)
-        
-        // Reset any lingering state from previous gameplay
-        if (previousState === 'HOLE_COMPLETE') {
-          if (window.DEBUG) console.log('Transitioning from HOLE_COMPLETE to READY_TO_HIT');
-          // Make sure ball is not moving
-          if (this.ball && this.ball.velocity) {
-            this.ball.velocity.set(0, 0, 0);
-            this.ball.isResting = true;
-          }
-        }
-        
-        // Immediately transition to aiming
-        this.setGameState('AIMING');
-        break;
-      case 'AIMING':
-        // Reset aiming angle when entering aiming state after a shot
-        if (this.cameraController) { // Ensure controller exists
-          this.cameraController.aimingAngle = 0; // Reset aim to forward
-        }
-        // Set camera to aiming mode
-        this.cameraController?.setMode(this.cameraController.MODES.AIMING);
-        if (window.DEBUG) console.log("Player can now aim/adjust loft");
-        
-        // Reset spin values for a new shot
-        this.resetSpinValues();
-        
-        // Show spin indicator if there's spin applied
-        try {
-          if (this.ui && this.ui.spinValues && 
-              (Math.abs(this.ui.spinValues.x) > 0.05 || Math.abs(this.ui.spinValues.y) > 0.05)) {
-            this.ui.updateSpinIndicator();
-          }
-        } catch (e) {
-          console.warn("Could not update spin indicator:", e);
-        }
-        break;
-      case 'HITTING':
-        // Start power meter
-        if (window.DEBUG) console.log("Power meter active");
-        if (this.shotArrow) this.shotArrow.visible = false; // Hide visual indicator
-        break;
-      case 'WATCHING':
-        // Ball is in motion
-        if (window.DEBUG) console.log("Ball in motion");
-        if (this.shotArrow) this.shotArrow.visible = false; // Hide visual indicator
-        
-        // Hide spin indicator while ball is in motion
-        try {
-          if (this.ui && this.ui.hideSpinIndicator) {
-            this.ui.hideSpinIndicator();
-          }
-        } catch (e) {
-          console.warn("Could not hide spin indicator:", e);
-        }
-        break;
-      case 'CAMERA_TRANSITION':
-        // Camera is smoothly moving to aiming position
-        if (window.DEBUG) console.log("Camera transitioning to aiming position");
-        // Notify UI to show transition indicator if needed
-        if (this.ui && this.ui.showTransitionIndicator) {
-          this.ui.showTransitionIndicator();
-        }
-        break;
-    }
+    this.fsm.set(state);
   }
   
   /**
@@ -1083,10 +1401,11 @@ class Game {
       this.update();
       
       // Render the scene only when necessary
-      const shouldRender = this.renderDirty || 
-                          this.gameState === 'WATCHING' || 
+      const shouldRender = this.renderDirty ||
+                          this.gameState === 'WATCHING' ||
+                          this.gameState === 'SINKING' ||
                           this.gameState === 'CAMERA_TRANSITION' ||
-                          (this.gameState === 'HITTING' && this.powerMeter.active);
+                          (this.gameState === 'HITTING' && this.swing.phase !== 'idle');
                           
       if (shouldRender) {
         this.renderer.render(this.scene, this.camera);
@@ -1102,43 +1421,117 @@ class Game {
     }
   }
 
-  /**
-   * Adjust the loft angle
-   */
-  adjustLoft(direction) { // Parameter is now direction (+1 or -1)
-    if (this.gameState !== 'AIMING') return;
-    this.renderDirty = true;
+  /** Current club object from the bag. */
+  get currentClub() {
+    return CLUBS[this.clubIndex];
+  }
 
-    this.currentLoft += direction * this.LOFT_INCREMENT; // Use this.LOFT_INCREMENT
-    // Clamp loft angle
-    this.currentLoft = Math.max(this.MIN_LOFT, Math.min(this.MAX_LOFT, this.currentLoft)); // Use this.MIN_LOFT, this.MAX_LOFT
-    
-    // Loft logging removed for performance
-    // Update UI display
-    if (this.ui) {
-      this.ui.updateLoftDisplay(this.currentLoft);
-    }
-    // No need to update indicator geometry here, 'update' loop handles rotation
+  /** Current shot variant id ('full' | 'punch' | 'flop' | 'chip'). */
+  get currentVariant() {
+    const club = this.currentClub;
+    return club.variants[this.variantIndex] || 'full';
+  }
+
+  /** Effective launch loft in degrees (club + variant + wheel trim). */
+  get currentLoft() {
+    const base = effectiveLoft(this.currentClub, this.currentVariant);
+    return Math.max(1, Math.min(64, base + this.loftTrim));
+  }
+
+  /** Ball speed at 100% power for the current club + variant. */
+  get currentMaxSpeed() {
+    return launchSpeed(this.currentClub, this.currentVariant);
   }
 
   /**
-   * Reset power meter state
+   * Cycle the club selection (up-down arrows). +1 = shorter club.
+   */
+  cycleClub(direction) {
+    if (this.gameState !== 'AIMING') return;
+    this.renderDirty = true;
+
+    const n = CLUBS.length;
+    this.clubIndex = ((this.clubIndex + direction) % n + n) % n;
+    // Keep the variant valid for the new club
+    if (this.variantIndex >= this.currentClub.variants.length) {
+      this.variantIndex = 0;
+    }
+    this.loftTrim = 0; // New club, fresh trajectory
+    this.updateClubDisplay();
+  }
+
+  /**
+   * Cycle the shot variant for the current club (V key).
+   */
+  cycleVariant() {
+    if (this.gameState !== 'AIMING') return;
+    this.renderDirty = true;
+
+    const variants = this.currentClub.variants;
+    this.variantIndex = (this.variantIndex + 1) % variants.length;
+    this.loftTrim = 0; // New shot type, fresh trajectory
+    this.updateClubDisplay();
+  }
+
+  /**
+   * Fine trajectory height on the mouse wheel: ±0.5° per notch, clamped to
+   * ±8° around the club + variant loft. Scroll up = higher, down = lower.
+   */
+  adjustLoftTrim(direction) {
+    if (this.gameState !== 'AIMING') return;
+    this.renderDirty = true;
+
+    const next = this.loftTrim + direction * 0.5;
+    this.loftTrim = Math.max(-8, Math.min(8, next));
+    this.updateClubDisplay();
+  }
+
+  /**
+   * Select a club by id (auto club selection on a new lie).
+   */
+  selectClub(clubId) {
+    const index = CLUBS.findIndex(c => c.id === clubId);
+    if (index === -1) return;
+    this.clubIndex = index;
+    this.variantIndex = 0;
+    this.loftTrim = 0;
+    this.updateClubDisplay();
+  }
+
+  /** Lie under the ball right now (fairway fallback when terrain is gone). */
+  get currentLie() {
+    return this.terrain && this.ball
+      ? getLieAt(this.terrain, this.ball.position)
+      : null;
+  }
+
+  /**
+   * Push the current club/variant/distance estimate to the HUD. The yardage
+   * is lie-adjusted — from the rough the book honestly says you get less.
+   */
+  updateClubDisplay() {
+    if (!this.ui) return;
+    const club = this.currentClub;
+    const variant = this.currentVariant;
+    const lie = this.currentLie;
+    this.ui.updateClubDisplay({
+      clubName: club.name,
+      variantName: VARIANTS[variant].name,
+      loft: this.currentLoft,
+      loftTrim: this.loftTrim,
+      distance: estimateDistance(club, variant, lie),
+      lieText: lie ? describeLie(lie) : null,
+    });
+  }
+
+  /**
+   * Reset an in-progress swing
    * Called when closing spin selector or other cases where we need
-   * to cancel any accidental power meter activation
+   * to cancel any accidental swing activation
    */
   resetPowerMeterState() {
     if (this.gameState === 'HITTING' && !this.ball.isMoving) {
-      // Only reset if we're in HITTING state but the ball isn't moving yet
-      this.powerMeter.active = false;
-      this.ui.hidePowerMeter();
-      this.setGameState('AIMING');
-      
-      // Show ready indicator again
-      if (this.ui && this.ui.showReadyIndicator) {
-        this.ui.showReadyIndicator();
-      }
-      
-      if (window.DEBUG) console.log("Power meter state reset");
+      this.cancelSwing();
     }
   }
 
@@ -1192,6 +1585,41 @@ class Game {
         this.camera.position
       );
     }
+  }
+
+  /**
+   * Update the overhead minimap. Visible whenever the player can act or is
+   * watching a shot; draws the live predicted arc only while aiming.
+   */
+  updateMinimap() {
+    if (!this.minimap || !this.ball || !this.terrain) return;
+
+    const aimable = ['READY_TO_HIT', 'AIMING', 'HITTING'].includes(this.gameState);
+    const showMap = aimable || this.gameState === 'WATCHING' || this.gameState === 'SINKING';
+    this.minimap.setVisible(showMap);
+
+    if (!showMap) return;
+
+    // Aim direction: prefer the camera->ball shot direction computed during
+    // AIMING; fall back to the camera controller's aim vector.
+    let aimDir = null;
+    if (this.currentShotDirection && this.currentShotDirection.horizontal) {
+      aimDir = this.currentShotDirection.horizontal;
+    } else if (this.cameraController) {
+      aimDir = this.cameraController.getAimDirection();
+    }
+
+    // The predicted arc respects the lie: a flyer from the rough flies shorter
+    const lieFactor = this.currentLie ? this.currentLie.speedFactor : 1;
+    this.minimap.update({
+      ball: this.ball.position,
+      aimDir,
+      loft: this.currentLoft,
+      maxSpeed: this.currentMaxSpeed * lieFactor,
+      power: this.swing.phase === 'power' ? this.swing.marker
+        : this.swing.phase === 'accuracy' ? this.swing.power : 60,
+      showShot: this.gameState === 'AIMING' || this.gameState === 'HITTING',
+    });
   }
 }
 
