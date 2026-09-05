@@ -2,11 +2,11 @@
 
 A PS1-style procedurally generated golf game for the browser, built with Three.js.
 
-Every round is a hand-paced 9-hole course generated from a shareable seed string — same seed, same course, so you can dare a friend to beat your score on identical terrain.
+Every round is a 3-hole course generated from a shareable seed string — same seed, same course, so you can dare a friend to beat your score on identical terrain. Hole pacing is hand-authored (a warm-up, a signature, a test) from a 9-hole plan, with 18-hole biomes on the roadmap.
 
 ## Features
 
-- **Seeded procedural courses** — one seed string drives every gameplay-affecting roll (terrain shape, hole layout, tree placement) via an xmur3 hash + mulberry32 PRNG. Holes are planned, not random noise: a warm-up par 4, a signature over-water par 3, doglegs, bottlenecks, elevated greens, and a par-5 stretch, with per-par carry bands tuned against the physics so every hole is playable.
+- **Seeded procedural courses** — one seed string drives every gameplay-affecting roll (terrain shape, hole layout, tree placement) via an xmur3 hash + mulberry32 PRNG. Holes are planned, not random noise: warm-up par 4, signature over-water par 3, doglegs, bottlenecks, elevated greens — with per-par carry bands tuned against the physics so every hole is playable.
 - **A real golf swing** — 3-click swing meter (start → power → strike) where the meter decides how well the shot comes off. Pick a club and a strike style — full, punch, flop, chip — each a launch profile layered on top of the club's loft and speed. Mishits bite.
 - **Physics that respects the ground** — projectile ball flight with terrain interaction, plus a deflection-warning system: the aim arrow turns red when your shot is about to launch into a wall or steep slope.
 - **Atmosphere** — custom GLSL water shader, simplex-noise terrain, pre-rendered minimap per hole, procedural Web Audio sound effects, and a low-poly PS1-era look.
@@ -16,9 +16,16 @@ Every round is a hand-paced 9-hole course generated from a shareable seed string
 | Input | Action |
 | --- | --- |
 | Click / Space / Enter | Start round |
-| ← / → | Aim |
-| Space | 3-click swing: start meter → set power → strike |
-| Esc / H | Toggle help |
+| Mouse | Aim the shot |
+| Click ×3 | Swing: start → set power → strike at the line (early pulls left, late pushes right) |
+| Up / Down | Change club |
+| Mouse wheel | Fine-tune trajectory height |
+| V | Shot type: full / punch / flop / chip |
+| S | Spin selector (hook, slice, backspin, topspin) |
+| C | Toggle camera mode |
+| R | Reset ball to tee |
+| Esc | Cancel the swing |
+| H | Help |
 
 ## Getting started
 
