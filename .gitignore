@@ -37,3 +37,8 @@ dev-debug.log
 # Task files
 tasks.json
 tasks/ 
+.vercel
+
+.claude/
+.zcode/
+CLAUDE.md
