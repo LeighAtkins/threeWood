@@ -40,9 +40,18 @@ await page.locator('.club .prev').tap();
 // Three taps on the button
 await page.locator('.swing-btn').tap({ force: true });
 check('tap 1 starts swing', await g(`g.state === 'swing' && g.swing.phase === 'power'`));
-await waitG(`g.swing.marker > 40`, 10);
-await page.locator('.swing-btn').tap({ force: true });
-check('tap 2 locks power', await g(`g.swing.phase === 'accuracy' && g.swing.power > 5`), `power ${await g('g.swing.power.toFixed(0)')}`);
+if (await g('g.idealPower == null')) {
+  // Out of range: an early tap must be ignored and the bar must lock itself
+  await waitG(`g.swing.marker > 40`, 10);
+  await page.locator('.swing-btn').tap({ force: true });
+  check('full power ignores an early tap', await g(`g.swing.phase === 'power'`));
+  await waitG(`g.swing.phase === 'accuracy'`, 10);
+  await page.locator('.swing-btn').tap({ force: true }); // lands inside the grace window
+} else {
+  await waitG(`g.swing.marker > 40`, 10);
+  await page.locator('.swing-btn').tap({ force: true });
+}
+check('power locked', await g(`g.swing.phase === 'accuracy' && g.swing.power > 5`), `power ${await g('g.swing.power.toFixed(0)')}`);
 await page.touchscreen.tap(vp.width / 2, vp.height / 2); // tap 3 anywhere on the course
 check('tap 3 (on course) strikes', await g(`g.state === 'flight' && g.strokes === 1`));
 for (let i = 0; i < 60 && (await g('g.state')) !== 'aim'; i++) { await page.touchscreen.tap(vp.width / 2, 200); await page.waitForTimeout(500); }
@@ -66,6 +75,16 @@ await waitG(`g.puttPower > 25`, 10);
 const charging = await g('g.charging && g.puttPower > 5');
 await page.locator('.swing-btn').dispatchEvent('pointerup', { pointerId: 7, bubbles: true });
 check('hold charges, release putts', charging && (await g(`g.state === 'flight' || g.state === 'holed' || g.state === 'settle'`)));
+
+// Tap-tap putting: a quick tap latches the bar, the next tap plays the stroke
+for (let i = 0; i < 60 && !['aim', 'result'].includes(await g('g.state')); i++) await page.waitForTimeout(500);
+await page.evaluate(() => { window.THREEWOOD.hud.clearLayer(); window.THREEWOOD.debugPlace(5, 2); });
+await page.waitForTimeout(400);
+await page.locator('.swing-btn').tap({ force: true });
+check('quick tap latches the putt bar', await g(`g.state === 'swing' && g.puttLatched && g.charging`));
+await waitG(`g.puttPower > 30`, 10);
+await page.locator('.swing-btn').tap({ force: true });
+check('second tap putts', await g(`g.state !== 'swing' && g.putts >= 1`));
 
 // Menu
 for (let i = 0; i < 40 && !['aim', 'result'].includes(await g('g.state')); i++) await page.waitForTimeout(500);

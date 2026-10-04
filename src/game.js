@@ -4,7 +4,9 @@ import {
   createBall, copyBall, placeBall, launchBall, puttBall, stepBall, SIM_DT, BALL_R,
 } from './core/ballSim.js';
 import { CLUBS, PUTTER, autoSelectClub, clubAllowed, distanceAt, lieFor, powerFor } from './core/clubs.js';
-import { createSwing, startSwing, swingClick, swingStep, strikeFromTiming, describeStrike } from './core/swing.js';
+import {
+  createSwing, startSwing, swingClick, swingStep, strikeFromTiming, describeStrike, markerToPercent, SWING,
+} from './core/swing.js';
 import {
   buildLaunch, previewShot, previewPutt, puttSpeedFor, puttMeterMax, puttSpeedAt, slopeAlong,
 } from './core/shotPlanner.js';
@@ -15,6 +17,7 @@ import { buildTerrainMesh } from './render/terrainMesh.js';
 import { buildScenery, updateScenery, updateFlag, disposeGroup } from './render/scenery.js';
 import { Effects } from './render/effects.js';
 import { CameraRig } from './render/cameraRig.js';
+import { ClubRig } from './render/club.js';
 import { Hud, scoreName } from './ui/hud.js';
 import { Audio } from './audio.js';
 
@@ -59,6 +62,8 @@ export class Game {
     this.initLights();
 
     this.effects = new Effects(this.scene);
+    this.clubRig = new ClubRig(this.scene);
+    this.follow = null; // follow-through animation after a strike
     this.audio = new Audio();
     this.hud = new Hud({
       onSwingDown: () => this.swingDown(),
@@ -78,7 +83,7 @@ export class Game {
     this.simAccumulator = 0;
     this.events = [];
     this.swing = createSwing();
-    this.hints = store.get(HINT_KEY) || { swing: 0, putt: 0 };
+    this.hints = { swing: 0, putt: 0, spin: 0, ...(store.get(HINT_KEY) || {}) };
 
     this.seedPinned = !!getSeedFromUrl();
     this.seed = getSeedFromUrl() || store.get(SAVE_KEY)?.seed || generateSeed();
@@ -190,6 +195,7 @@ export class Game {
     c.addEventListener('pointermove', (e) => {
       if (!drag || drag.id !== e.pointerId) return;
       const dx = e.clientX - drag.x;
+      const prevY = drag.y;
       drag.moved = Math.max(drag.moved, Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy));
       drag.x = e.clientX; drag.y = e.clientY;
       if (this.state === 'aim' && !this.paused) {
@@ -197,6 +203,8 @@ export class Game {
         const base = this.putting ? 0.0011 : 0.003;
         this.aimAngle += dx * base * (420 / Math.max(320, Math.min(window.innerWidth, 900)));
         this.planDirty = true;
+      } else if (this.state === 'flight' && !this.paused) {
+        this.afterTouch(dx, e.clientY - prevY);
       }
     });
     const end = (e) => {
@@ -397,6 +405,55 @@ export class Game {
 
   get putting() { return this.club === PUTTER; }
 
+  clubKind() {
+    if (this.putting) return 'putter';
+    return this.club.id === 'driver' || this.club.id === 'wood3' ? 'wood' : 'iron';
+  }
+
+  /** Swing angle for the club model, read straight off the meter. */
+  updateClub(dt) {
+    const { ball } = this;
+    // Drawn large enough to read from the tee camera
+    const camDist = Math.hypot(this.camera.position.x - ball.x, this.camera.position.y - ball.y, this.camera.position.z - ball.z);
+    const size = Math.max(1.15, Math.min(2.3, camDist / 4.6));
+    if (this.follow) {
+      // Through the ball and up, then fade away
+      const f = this.follow;
+      f.t += dt;
+      const k = Math.min(1, f.t / 0.26);
+      const ease = 1 - (1 - k) * (1 - k);
+      const theta = (f.putt ? 0.55 : 2.5) * ease;
+      const fade = Math.max(0, 1 - Math.max(0, f.t - 0.45) / 0.3);
+      this.clubRig.pose(f, f.dirX, f.dirZ, theta, f.kind, f.size, fade);
+      if (fade <= 0) this.follow = null;
+      return;
+    }
+    if (!this.round || (this.state !== 'aim' && this.state !== 'swing')) { this.clubRig.hide(); return; }
+    const dirX = Math.cos(this.aimAngle), dirZ = Math.sin(this.aimAngle);
+    let theta = Math.sin(this.time * 2.2) * 0.035; // waggle at address
+    if (this.state === 'swing') {
+      if (this.putting) {
+        theta = -0.6 * (this.puttPower / 100);
+      } else {
+        const sw = this.swing;
+        const reach = this.club.carry < 40 ? 1.3 : 2.7;
+        const top = (p) => -reach * (0.3 + 0.7 * p / 100);
+        if (sw.phase === 'power') {
+          const p = sw.marker / 100;
+          theta = -reach * (0.3 * Math.min(1, p * 4) + 0.7 * p);
+        } else if (sw.phase === 'accuracy') {
+          // Down from the top: the head reaches the ball as the marker
+          // reaches the line (and swings past it if you are late)
+          const span = Math.max(1, sw.power - SWING.LINE);
+          const k = (sw.marker - SWING.LINE) / span;
+          theta = top(sw.power) * (k >= 0 ? k * k : k * 0.6);
+        }
+      }
+    }
+    this.clubSize = size;
+    this.clubRig.pose(ball, dirX, dirZ, theta, this.clubKind(), size, 1);
+  }
+
   beginAim() {
     const { ball, world } = this;
     placeBall(ball, world, ball.x, ball.z);
@@ -425,6 +482,7 @@ export class Game {
     this.swing.phase = 'idle';
     this.charging = false;
     this.hud.setControlsVisible(true);
+    this.hud.setSwinging(false);
     this.hud.setCarry(null);
     this.updateScoreHud();
     this.rig.cut();
@@ -470,7 +528,7 @@ export class Game {
     const lieText = this.onTee ? 'TEE' : penalty ? `${lie.name.toUpperCase()} −${penalty}%` : lie.name.toUpperCase();
     if (this.putting) {
       this.hud.setClub({ name: 'Putter', yards: `${feet(this.targetDist)} ft to hole`, lie: lieText, canChange: this.availableClubs().length > 1 });
-      this.hud.setSwingButton('PUTT', 'hold', 'ready');
+      this.hud.setSwingButton('HOLD', 'to putt', 'ready');
     } else {
       const max = Math.round(distanceAt(this.club, 100, lie.speedFactor));
       this.hud.setClub({ name: this.club.name, yards: `${max}y max`, lie: lieText, lieBad: penalty > 0, canChange: true });
@@ -495,7 +553,9 @@ export class Game {
       this.effects.showPutt(preview.points, preview.holed);
       this.landing = null;
       this.hud.showPuttMeter(this.idealPct);
-      this.hud.setMeterCaption(preview.holed ? 'GOOD LINE — HIT THE PACE' : 'DRAG TO MOVE THE LINE');
+      this.hud.setMeterCaption(preview.holed ? 'GOOD LINE! HOLD THE BUTTON, LET GO ON THE MARK' : 'DRAG ON THE GREEN TO MOVE THE LINE');
+      this.hud.setMeterFlag(this.idealPct, 'LET GO HERE');
+      this.hud.setMeterSteps(null);
     } else {
       const reach = distanceAt(this.club, 100, this.lie.speedFactor);
       this.idealPower = reach >= this.targetDist ? powerFor(this.club, this.targetDist, this.lie.speedFactor) : null;
@@ -523,9 +583,9 @@ export class Game {
 
   showHint() {
     if (this.putting) {
-      this.hud.hint(this.hints.putt < 3 ? 'Drag to line it up · hold PUTT, release on the dashed mark' : null, true);
+      this.hud.hint(this.hints.putt < 3 ? 'Drag to line it up. Then HOLD the button and let go on the dashed mark' : null, true);
     } else {
-      this.hud.hint(this.hints.swing < 3 ? 'Drag to aim · tap SWING to start' : null);
+      this.hud.hint(this.hints.swing < 3 ? 'Drag to aim · then 3 taps: start, power, strike' : null);
     }
   }
 
@@ -538,6 +598,7 @@ export class Game {
     if (this.paused) return;
     if (this.state === 'intro' && this.stateTime > 0.5) this.endIntro();
     else if (this.state === 'swing' && !this.putting) this.advanceSwing();
+    else if (this.state === 'swing' && this.putting && this.puttLatched) this.releasePutt();
     else if (this.state === 'flight') this.fastForward = true;
     else if (this.state === 'result') this.nextHole?.();
   }
@@ -550,52 +611,101 @@ export class Game {
       if (this.planDirty) this.updatePlan();
       if (this.putting) {
         this.charging = true;
+        this.puttLatched = false;
         this.puttPower = 0;
         this.puttDir = 1;
         this.setState('swing');
-        this.hud.setSwingButton('RELEASE', 'on the mark', 'go');
-        this.hud.hint(this.hints.putt < 3 ? 'Let go when the bar reaches the dashed mark' : null, true);
+        this.hud.setSwingButton('LET GO', 'on the mark', 'go');
+        this.hud.setMeterFlag(this.idealPct, 'LET GO HERE');
+        this.hud.setMeterSteps(null);
+        this.hud.hint(null);
       } else {
         startSwing(this.swing);
+        this.lockGrace = 0;
         this.setState('swing');
+        this.hud.setSwinging(true);
         this.hud.showSwingMeter(this.idealPower);
-        this.hud.setMeterCaption(this.idealPower ? 'TAP IN THE DASHED BOX' : 'FULL POWER!');
-        this.hud.setSwingButton('POWER', 'tap', 'go');
-        this.hud.hint(this.hints.swing < 3 ? 'Tap again to set your power' : null);
+        this.hud.setMeterSteps(2);
+        if (this.idealPower) {
+          this.hud.setMeterCaption('TAP TO SET POWER');
+          this.hud.setMeterFlag(markerToPercent(this.idealPower), 'TAP HERE');
+          this.hud.setSwingButton('POWER', 'tap', 'go');
+        } else {
+          // Out of range: the bar fills itself, no second tap needed
+          this.hud.setMeterCaption('FULL POWER — WAIT FOR IT…');
+          this.hud.setMeterFlag(null);
+          this.hud.setSwingButton('WAIT', 'filling', 'disabled');
+        }
+        this.hud.hint(null);
         this.audio.tap();
       }
-    } else if (this.state === 'swing' && !this.putting) {
-      this.advanceSwing();
+    } else if (this.state === 'swing') {
+      if (this.putting) { if (this.puttLatched) this.releasePutt(); } else this.advanceSwing();
     }
   }
 
   swingUp() {
-    if (this.state !== 'swing' || !this.putting || !this.charging) return;
-    this.charging = false;
-    if (this.puttPower < 5) {
-      // A stray tap, not a stroke
-      this.setState('aim');
-      this.refreshClubHud();
-      this.hud.updatePuttMeter(0);
-      this.showHint();
+    if (this.state !== 'swing' || !this.putting || !this.charging || this.puttLatched) return;
+    if (this.stateTime < 0.22 || this.puttPower < 12) {
+      // A quick tap rather than a hold: keep the bar running and let the
+      // next tap play the stroke, so both habits work.
+      this.puttLatched = true;
+      this.hud.setSwingButton('TAP', 'on the mark', 'go');
+      this.hud.setMeterFlag(this.idealPct, 'TAP HERE');
       return;
     }
-    this.hitPutt(this.puttPower);
+    this.releasePutt();
+  }
+
+  releasePutt() {
+    this.charging = false;
+    this.puttLatched = false;
+    this.hitPutt(Math.max(4, this.puttPower));
   }
 
   advanceSwing() {
+    // Swallow the over-eager tap right after power locks (a double tap, or a
+    // tap that arrives as the bar tops out) so it cannot ruin the strike.
+    if (this.lockGrace > 0) return;
+    // Full-power shots lock themselves: taps on the way up are ignored
+    if (this.swing.phase === 'power' && !this.idealPower) return;
     const event = swingClick(this.swing);
     if (event) this.handleSwingEvent(event);
   }
 
   handleSwingEvent(event) {
     if (event.type === 'powerLocked') {
+      this.lockGrace = 0.2;
       this.audio.powerLock(event.power);
       this.hud.setSwingButton('HIT!', 'on the line', 'go');
-      this.hud.setMeterCaption('TAP ON THE WHITE LINE');
-      this.hud.hint(this.hints.swing < 3 ? 'Now tap as the marker crosses the white line' : null);
+      this.hud.setMeterCaption(event.auto ? 'MAX POWER! NOW TAP THE WHITE LINE' : 'NOW TAP THE WHITE LINE');
+      this.hud.setMeterFlag(markerToPercent(SWING.LINE), 'TAP HERE');
+      this.hud.setMeterSteps(3);
     } else if (event.type === 'strike') {
       this.hitShot(event.timing);
+    }
+  }
+
+  /**
+   * Swiping during a well-struck shot works the ball in the air: sideways
+   * bends it, up/down takes spin off or puts it on. Something to do with your
+   * thumb while the ball is flying.
+   */
+  afterTouch(dx, dy) {
+    const { ball, shot } = this;
+    if (!shot || shot.putt || !shot.shapeable || ball.mode !== 'air' || ball.landed) return;
+    const k = 420 / Math.max(320, Math.min(window.innerWidth, 900));
+    const side = Math.max(-1.3, Math.min(1.3, shot.bend + dx * 0.0045 * k));
+    ball.side += side - shot.bend;
+    shot.bend = side;
+    const back = Math.max(-0.6, Math.min(0.9, shot.bite + dy * 0.004 * k));
+    ball.back = Math.max(0, ball.back + (back - shot.bite));
+    shot.bite = back;
+    shot.replan = true;
+    if (!shot.shaped) {
+      shot.shaped = true;
+      this.hud.hint(null);
+      if (this.hints.spin < 4) { this.hints.spin += 1; store.set(HINT_KEY, this.hints); }
     }
   }
 
@@ -611,7 +721,12 @@ export class Game {
       fromSurface: this.onTee ? 'tee' : ball.surface,
       toPin: this.toPin,
       treeCalled: false,
+      shapeable: false, bend: 0, bite: 0, replan: false, shaped: false,
     };
+    this.follow = { t: 0, putt: wasPutt, dirX: this.dirX, dirZ: this.dirZ, x: ball.x, y: ball.y, z: ball.z, kind: this.clubKind(), size: this.clubSize || 1.3 };
+    this.hud.setMeterFlag(null);
+    this.hud.setMeterSteps(null);
+    this.hud.setSwinging(false);
     this.strokes += 1;
     this.round.stats.swings += 1;
     this.updateScoreHud(`SHOT ${this.strokes}`);
@@ -628,14 +743,14 @@ export class Game {
   planShot() {
     const b = copyBall(this.ball);
     const events = [];
-    let t = 0, landTime = null;
+    let t = 0, landTime = b.landed ? b.time : null;
     while ((b.mode === 'air' || b.mode === 'roll') && t < 40) {
       stepBall(b, this.world, this.env, SIM_DT, events);
       t += SIM_DT;
-      if (landTime === null && b.landed) landTime = t;
+      if (landTime === null && b.landed) landTime = b.time;
     }
     return {
-      landTime: landTime ?? t,
+      landTime: landTime ?? b.time,
       time: t,
       restX: b.x, restZ: b.z,
       holed: b.mode === 'holed',
@@ -654,6 +769,11 @@ export class Game {
     launchBall(ball, launch);
     this.plan = this.planShot();
     this.shot.chase = this.plan.landTime > 2.1;
+    // A decent strike can be worked in the air
+    this.shot.shapeable = strike.grade === 'pure' || strike.grade === 'good';
+    if (this.shot.shapeable && this.shot.chase && this.hints.spin < 4) {
+      this.hud.hint('Swipe ↔ to bend it · ↕ for spin');
+    }
 
     const pure = strike.grade === 'pure';
     this.audio.strike(this.swing.power, strike.grade);
@@ -722,9 +842,23 @@ export class Game {
     }
     if (ball.mode === 'air' && !ball.landed) this.effects.addTrailPoint(ball.x, ball.y, ball.z);
 
+    if (shot.replan && ball.mode === 'air') {
+      shot.replan = false;
+      this.plan = this.planShot();
+    }
     if (!shot.putt) {
       // Live yardage: the number climbing is half the fun of a good drive
-      this.hud.setCarry(`${Math.round(Math.hypot(ball.x - shot.fromX, ball.z - shot.fromZ))}y`);
+      let sub = '';
+      if (shot.shaped) {
+        const b = Math.round(Math.abs(shot.bend) / 1.3 * 100);
+        const parts = [];
+        if (b >= 5) parts.push(shot.bend < 0 ? `↶ DRAW ${b}%` : `FADE ${b}% ↷`);
+        if (Math.abs(shot.bite) > 0.08) parts.push(shot.bite > 0 ? 'BACKSPIN' : 'RUN');
+        sub = parts.join(' · ');
+      } else if (shot.shapeable && ball.mode === 'air' && !ball.landed) {
+        sub = 'SWIPE TO SHAPE';
+      }
+      this.hud.setCarry(`${Math.round(Math.hypot(ball.x - shot.fromX, ball.z - shot.fromZ))}y`, sub);
     }
 
     for (const e of this.events) this.handleBallEvent(e);
@@ -752,6 +886,7 @@ export class Game {
     const fx = this.effects;
     switch (e.type) {
       case 'land':
+        if (this.hints.spin < 4) this.hud.hint(null);
         fx.puff(e.x, e.y, e.z, e.surface, Math.min(1.6, e.speed / 18));
         this.audio.bounce(e.speed * 0.5, e.surface);
         break;
@@ -1097,6 +1232,7 @@ export class Game {
             this.hud.updatePuttMeter(this.puttPower);
           }
         } else {
+          this.lockGrace = Math.max(0, (this.lockGrace || 0) - dt);
           const event = swingStep(this.swing, dt);
           this.hud.updateSwingMeter(this.swing);
           if (event) this.handleSwingEvent(event);
@@ -1183,6 +1319,7 @@ export class Game {
     this.sun.target.position.set(fx, 0, fz);
     this.sun.position.set(fx + this.sunDir.x * 260, this.sunDir.y * 260, fz + this.sunDir.z * 260);
 
+    this.updateClub(dt);
     updateScenery(this.scenery, this.time, dt);
     const onGreen = this.round && (this.putting || ball.surface === 'green') && this.state !== 'intro' && this.state !== 'title';
     updateFlag(this.scenery.flag, this.time, onGreen && this.state !== 'holed' && this.state !== 'result');

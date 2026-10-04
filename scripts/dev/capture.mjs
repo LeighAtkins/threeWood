@@ -47,11 +47,13 @@ const waitFor = async (expr, act, max = 30) => {
 // A swing with human-looking taps: power at the dashed box, strike on the line
 const SWING = `
   if (g.state === 'swing' && !g.putting) {
-    if (g.swing.phase === 'power' && g.swing.marker >= (g.idealPower ?? 100) - 0.7) g.advanceSwing();
+    if (g.swing.phase === 'power' && g.idealPower && g.swing.marker >= g.idealPower - 0.7) g.advanceSwing();
     else if (g.swing.phase === 'accuracy' && g.swing.marker <= 9.2) g.advanceSwing();
-  }`;
+  }
+  // A thumb-swipe in the air: work a little draw onto it
+  if (g.state === 'flight' && g.shot.shapeable && g.ball.mode === 'air' && g.ball.time > 0.6 && g.ball.time < 1.7) g.afterTouch(-1.1, 0.25);`;
 const PUTT = `
-  if (g.state === 'swing' && g.putting && g.charging && g.puttPower >= g.idealPct - 1) g.swingUp();`;
+  if (g.state === 'swing' && g.putting && g.charging && g.puttPower >= g.idealPct - 1) g.releasePutt();`;
 
 async function start(seed, hole = 0) {
   await page.goto(`${URL}?seed=${seed}`, { waitUntil: 'load' });

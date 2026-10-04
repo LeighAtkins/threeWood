@@ -23,8 +23,9 @@ Every round is a fresh 18-hole, par-72 course grown from a shareable seed — sa
 | Touch | Keyboard / mouse | Action |
 | --- | --- | --- |
 | Drag on the course | Drag, or ← → | Aim |
-| Tap SWING ×3 | Space ×3 | Start, set power (dashed box = distance to target), strike on the white line |
-| Hold PUTT, release | Hold Space, release | Putt: let go on the dashed pace mark |
+| Tap SWING ×3 | Space ×3 | Start, set power (dashed box = distance to target; fills itself when out of range), strike on the white line as the club meets the ball |
+| Swipe while the ball flies | Drag | After a good strike: bend it left/right, add or take off spin |
+| Hold the button, release (or tap, then tap) | Hold Space, release | Putt: let go on the dashed pace mark |
 | ‹ › on the club | ↑ ↓ | Change club |
 | Tap while the ball rolls | Space | Fast-forward |
 | ☰ | Esc | Pause, scorecard, sound, help |

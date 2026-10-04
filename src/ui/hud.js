@@ -57,7 +57,9 @@ export class Hud {
       <div class="callouts"></div>
       <div class="pill hint hidden"></div>
       <div class="meter hidden">
+        <div class="steps hidden"><i>1 START</i><i>2 POWER</i><i>3 STRIKE</i></div>
         <div class="caption"></div>
+        <div class="flag-rail"><div class="flag hidden"></div></div>
         <div class="track">
           <div class="fill"></div>
           <div class="zone good"></div><div class="zone pure"></div>
@@ -98,6 +100,8 @@ export class Hud {
     this.hintEl = q('.hint');
     this.meter = q('.meter');
     this.meterCaption = q('.meter .caption');
+    this.meterFlag = q('.meter .flag');
+    this.meterSteps = q('.meter .steps');
     this.fill = q('.meter .fill');
     this.zoneGood = q('.meter .zone.good');
     this.zonePure = q('.meter .zone.pure');
@@ -147,6 +151,9 @@ export class Hud {
   }
 
   setControlsVisible(v) { this.bottom.classList.toggle('hidden', !v); }
+
+  /** Mid-swing layout: the club picker gives its space to the meter. */
+  setSwinging(v) { this.root.classList.toggle('swinging', v); }
 
   // --- Top / side readouts ------------------------------------------------------
 
@@ -256,6 +263,23 @@ export class Hud {
 
   setMeterCaption(text) { this.meterCaption.textContent = text || ''; }
 
+  /** A "TAP HERE" pointer sitting on the bar at pct (null hides it). */
+  setMeterFlag(pct, text) {
+    this.meterFlag.classList.toggle('hidden', pct == null);
+    if (pct == null) return;
+    this.meterFlag.textContent = text;
+    this.meterFlag.style.left = `${pct}%`;
+  }
+
+  /** Highlight which of the three swing taps comes next (null hides). */
+  setMeterSteps(current) {
+    this.meterSteps.classList.toggle('hidden', current == null);
+    [...this.meterSteps.children].forEach((node, i) => {
+      node.classList.toggle('done', current != null && i + 1 < current);
+      node.classList.toggle('now', i + 1 === current);
+    });
+  }
+
   hideMeter() { this.meter.classList.add('hidden'); }
 
   // --- Callouts / hints ---------------------------------------------------------
@@ -269,9 +293,11 @@ export class Hud {
   }
 
   /** Big live distance readout while a shot is in the air. */
-  setCarry(text) {
+  setCarry(text, sub = '') {
     this.carry.classList.toggle('hidden', !text);
-    if (text && this.carry.textContent !== text) this.carry.textContent = text;
+    if (!text) return;
+    const html = sub ? `${text}<small>${sub}</small>` : text;
+    if (this.carryHtml !== html) { this.carryHtml = html; this.carry.innerHTML = html; }
   }
 
   hint(text, high = false) {
@@ -384,9 +410,10 @@ export class Hud {
       <div class="card" style="text-align:left">
         <h2 style="text-align:center">HOW TO PLAY</h2>
         <p><b class="gold">Aim</b> — drag left or right anywhere on the course.</p>
-        <p><b class="gold">Swing</b> — tap SWING to start, tap again to set power (the dashed box is the distance to your target), then tap as the marker crosses the white line. Early pulls it left, late pushes it right.</p>
+        <p><b class="gold">Swing</b> — three taps. <b>1</b> starts the club back. <b>2</b> sets power: tap in the dashed box (when the target is out of range the bar fills itself — just wait). <b>3</b> strikes: tap as the marker crosses the white line, the moment the club meets the ball. Early pulls it left, late pushes it right.</p>
+        <p><b class="gold">Shape it</b> — after a good strike, swipe while the ball is in the air: sideways bends it, down adds backspin, up lets it run.</p>
         <p><b class="gold">Club</b> — the caddie picks one. Use ‹ › to change it.</p>
-        <p><b class="gold">Putt</b> — the white dots show which way the green falls. Drag to move the line, then hold PUTT and let go on the dashed pace mark.</p>
+        <p><b class="gold">Putt</b> — the white dots show which way the green falls. Drag to move the line, then hold the button and let go on the dashed mark (or tap once to start the bar and again to putt).</p>
         <p><b class="gold">Wind</b> — the arrow shows where it blows. The aim line does not allow for it. You must.</p>
         <p style="opacity:.7;font-size:13px">Keyboard: ←/→ aim · ↑/↓ club · Space swing</p>
         <button class="btn" data-a="close">GOT IT</button>

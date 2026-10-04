@@ -194,7 +194,7 @@ button { font: inherit; color: inherit; border: 0; background: none; padding: 0;
   position: absolute; top: -3px; bottom: -3px; width: 8px; margin-left: -4px;
   background: #fff; border-radius: 4px; box-shadow: 0 0 8px rgba(255, 255, 255, 0.9);
 }
-.meter .caption { text-align: center; font-size: 14px; font-weight: 700; margin-bottom: 6px; text-shadow: 0 2px 0 rgba(0, 0, 0, 0.35); }
+.meter .caption { text-align: center; font-size: 14px; font-weight: 700; margin-bottom: 2px; text-shadow: 0 2px 0 rgba(0, 0, 0, 0.35); }
 .meter .ideal-flag {
   position: absolute; top: -20px; transform: translateX(-50%);
   font-size: 11px; font-weight: 700; background: var(--cream); color: var(--ink);
@@ -210,6 +210,39 @@ button { font: inherit; color: inherit; border: 0; background: none; padding: 0;
   text-shadow: 0 4px 0 rgba(0, 0, 0, 0.35), 0 0 22px rgba(0, 0, 0, 0.3);
   font-variant-numeric: tabular-nums;
 }
+
+.carry small { display: block; font-size: 14px; letter-spacing: 2px; color: var(--gold); margin-top: -2px; }
+
+.meter .steps { display: flex; justify-content: center; gap: 6px; margin-bottom: 6px; }
+.meter .steps i {
+  font-style: normal; font-size: 11px; font-weight: 700; letter-spacing: 0.5px;
+  padding: 3px 9px; border-radius: 10px;
+  background: rgba(10, 26, 18, 0.6); color: rgba(255, 248, 236, 0.55);
+}
+.meter .steps i.done { color: var(--grass); }
+.meter .steps i.now { background: var(--gold); color: #4a3200; transform: scale(1.12); }
+.meter .flag-rail { position: relative; height: 24px; }
+.meter .flag {
+  position: absolute; bottom: 2px; transform: translateX(-50%);
+  background: var(--cream); color: var(--ink);
+  font-size: 11px; font-weight: 700; letter-spacing: 0.5px; white-space: nowrap;
+  padding: 2px 8px; border-radius: 8px;
+  animation: flagBob 0.7s infinite;
+  transition: left 0.12s;
+}
+.meter .flag::after {
+  content: ''; position: absolute; left: 50%; bottom: -5px; margin-left: -5px;
+  border: 5px solid transparent; border-top-color: var(--cream); border-bottom: 0;
+}
+@keyframes flagBob { 50% { transform: translate(-50%, -3px); } }
+
+/* Mid-swing: the meter drops into the club picker's slot, clear of the ball */
+#hud.swinging .club-wrap { visibility: hidden; }
+#hud.swinging .meter {
+  left: calc(var(--sal) + 12px); right: calc(var(--sar) + 126px);
+  bottom: calc(var(--sab) + 26px); margin: 0;
+}
+#hud.swinging .meter .steps i { padding: 3px 6px; font-size: 10px; }
 
 /* ---- Callouts ----------------------------------------------------------------- */
 .callouts {

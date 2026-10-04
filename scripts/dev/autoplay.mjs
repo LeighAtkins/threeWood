@@ -24,7 +24,7 @@ for (const seed of process.argv.slice(2)) {
       else if (g.state === 'aim') {
         g.updatePlan();
         if (g.putting) {
-          g.swingDown(); g.puttPower = Math.min(100, g.idealPct * (0.9 + rnd() * 0.22)); g.swingUp();
+          g.swingDown(); g.puttPower = Math.min(100, g.idealPct * (0.9 + rnd() * 0.22)); g.releasePutt();
         } else {
           g.swingDown(); g.swing.power = Math.min(100, (g.idealPower ?? 100) * (0.95 + rnd() * 0.1)); g.swing.phase = 'idle';
           g.hitShot((rnd() - 0.5) * 0.6);
