@@ -4,6 +4,10 @@ A procedurally generated 3D golf game for the browser — mobile first — built
 
 Every round is a fresh 18-hole, par-72 course grown from a shareable seed — same seed, same course, so you can dare a friend to beat your score. It is built for a phone held in one hand (portrait or landscape) and plays just as well with a mouse or keyboard.
 
+| Drive | Approach | Birdie putt | The island green |
+| --- | --- | --- | --- |
+| ![Drive](docs/media/1-drive.gif) | ![Approach](docs/media/2-approach.gif) | ![Birdie putt](docs/media/3-birdie-putt.gif) | ![Island green](docs/media/4-island-green.gif) |
+
 ## Features
 
 - **18 authored-then-generated holes** — the routing (par, archetype, pacing) is hand-planned; the layout of every hole is generated and then checked for fairness. Thirteen archetypes including doglegs, a tree chute, a cape hole, pot bunkers and an island green at 17. Quick 9 is available too.
@@ -11,6 +15,7 @@ Every round is a fresh 18-hole, par-72 course grown from a shareable seed — sa
 - **One physics model for everything** — `src/core/ballSim.js` is a pure, deterministic integrator (drag, backspin lift, wind, per-surface bounce and roll, trees, water, a cup with real lip-outs). The live shot, the aim preview, the putt line and the headless test bot all run the same code.
 - **Greens that break** — contoured putting surfaces sampled at half-yard resolution, animated slope beads to read them, and a previewed putt line.
 - **A 9-club bag** with lie penalties, auto-caddie, and a three-tap swing (start, power, strike) where timing decides pull/push and thin/fat.
+- **Built for the commute** — progress is saved after every shot (close the tab on the 14th fairway, come back to the same lie), it works offline once loaded, and there is a daily course everyone shares.
 - **Rewards on every shot** — points and callouts for pure strikes, fairways, greens, close approaches, long putts and chip-ins, plus a full scorecard and round stats. Progress is saved after each hole.
 
 ## Controls

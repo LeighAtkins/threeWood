@@ -40,7 +40,7 @@ export class CameraRig {
     // picture up so the ball sits clear of them.
     const w = window.innerWidth, h = window.innerHeight;
     if (this.portrait) this.camera.setViewOffset(w, h, 0, h * 0.15, w, h);
-    else this.camera.clearViewOffset();
+    else this.camera.setViewOffset(w, h, 0, h * 0.1, w, h);
     this.camera.updateProjectionMatrix();
   }
 

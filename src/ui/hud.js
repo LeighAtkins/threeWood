@@ -323,7 +323,7 @@ export class Hud {
   showResult({ title, kind, strokes, par, bonuses, holePoints, card, last, onNext }) {
     this.clearLayer();
     const node = el('div', 'overlay', `
-      <div class="card">
+      <div class="card result">
         <h2>HOLE ${card.currentLabel}</h2>
         <h1 class="${kind}">${title}</h1>
         <div class="result-score">${strokes} ${strokes === 1 ? 'stroke' : 'strokes'} · par ${par}</div>

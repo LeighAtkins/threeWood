@@ -285,6 +285,8 @@ button { font: inherit; color: inherit; border: 0; background: none; padding: 0;
 .btn.ghost { background: rgba(255, 255, 255, 0.12); color: var(--cream); box-shadow: 0 5px 0 rgba(0, 0, 0, 0.25); }
 .btn .auto { position: absolute; left: 0; bottom: 0; height: 5px; background: rgba(74, 50, 0, 0.45); width: 0; }
 .btn-row { display: flex; gap: 10px; }
+/* The way forward is always on screen, however long the card gets */
+.card.result .btn { position: sticky; bottom: 0; }
 
 .intro {
   position: absolute; left: 0; right: 0; bottom: calc(var(--sab) + 12%);
@@ -358,6 +360,9 @@ button { font: inherit; color: inherit; border: 0; background: none; padding: 0;
   #minimap { width: 84px; height: 84px; }
   .callouts { top: 18%; }
   .card { padding: 14px; }
+  .card.result .sc { display: none; }
+  .card.result .bonus { font-size: 13px; padding: 2px 4px; }
+  .card .btn { margin-top: 8px; padding: 10px 16px; }
   .card h1 { font-size: 30px; }
   .title { padding-top: calc(var(--sat) + 4vh); }
   .logo h1 { font-size: 52px; }
