@@ -2,7 +2,7 @@ import { defineConfig } from 'vite';
 
 export default defineConfig({
   server: {
-    open: true, // Open browser on server start
+    open: false,
     port: 3000, // Set a specific port
     watch: {
       // Required on Windows-mounted drives (Drvfs/9P): inotify events don't

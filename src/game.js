@@ -1,1629 +1,1162 @@
 import * as THREE from 'three';
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import * as TWEEN from '@tweenjs/tween.js';
-import TerrainGenerator from './terrain.js';
-import GolfBall from './ball.js';
-import CameraController from './camera.js';
-import UI from './ui.js';
-import handleHoleComplete from './holeComplete.js';
-import { DirectionArrow } from './directionArrow.js';
-import { AudioManager } from './audioManager.js';
-import { Minimap } from './minimap.js';
 import { createGameRng, getSeedFromUrl, generateSeed } from './core/rng.js';
-import { StateMachine } from './core/states.js';
+import {
+  createBall, copyBall, placeBall, launchBall, puttBall, stepBall, SIM_DT, BALL_R,
+} from './core/ballSim.js';
+import { CLUBS, PUTTER, autoSelectClub, clubAllowed, distanceAt, lieFor, powerFor } from './core/clubs.js';
 import { createSwing, startSwing, swingClick, swingStep, strikeFromTiming, describeStrike } from './core/swing.js';
-import { CLUBS, VARIANTS, effectiveLoft, launchSpeed, estimateDistance, autoSelectClub } from './core/clubs.js';
-import { getLieAt, describeLie } from './core/lies.js';
-import { designHole, ARCHETYPES } from './course/holeDesigner.js';
-import { createTrees } from './course/trees.js';
+import {
+  buildLaunch, previewShot, previewPutt, puttSpeedFor, puttMeterMax, puttSpeedAt, slopeAlong,
+} from './core/shotPlanner.js';
+import { designHole, roundHoles, ARCHETYPES, ROUND_PLAN } from './course/holeDesigner.js';
+import { buildWorld, aimTarget } from './course/courseWorld.js';
+import { BIOMES } from './course/biomes.js';
+import { buildTerrainMesh } from './render/terrainMesh.js';
+import { buildScenery, updateScenery, updateFlag, disposeGroup } from './render/scenery.js';
+import { Effects } from './render/effects.js';
+import { CameraRig } from './render/cameraRig.js';
+import { Hud, scoreName } from './ui/hud.js';
+import { Audio } from './audio.js';
+
+const SAVE_KEY = 'threewood.save.v2';
+const BEST_KEY = 'threewood.best.v2';
+const HINT_KEY = 'threewood.hints.v2';
+
+const GIMME = 0.5;            // yards: closer than this is conceded as a tap-in
+const PUTT_METER_RATE = 82;   // meter units per second while holding PUTT
+const INTRO_TIME = 4.6;
+
+const store = {
+  get(key) { try { return JSON.parse(localStorage.getItem(key)); } catch { return null; } },
+  set(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* private mode */ } },
+  del(key) { try { localStorage.removeItem(key); } catch { /* ignore */ } },
+};
+
+const feet = (yards) => Math.max(1, Math.round(yards * 3));
 
 /**
- * Main game controller for ThreeWood
- * Integrates all components and handles game loop
+ * The game: owns the scene, the round, and the per-shot state machine.
+ *
+ *   title -> intro -> aim -> swing -> flight -> (settle -> aim)* -> holed -> result -> intro ...
  */
-class Game {
-  constructor(fpsCounter) {
-    this.fpsCounter = fpsCounter;
-    // Scene and renderer
+export class Game {
+  constructor(container) {
+    this.container = container;
+    this.coarse = window.matchMedia?.('(pointer: coarse)').matches ?? false;
+
     this.scene = new THREE.Scene();
-    this.renderer = null;
-    
-    // Camera
-    this.camera = null;
-    this.cameraController = null;
-    
-    // Game objects
-    this.terrain = null;
-    this.terrainMesh = null;
-    this.ball = null;
-    this.shotArrow = null;
-    this.directionArrow = null;
-    this.minimap = null;
-    
-    // UI
-    this.ui = null;
-    
-    // Club bag state (see core/clubs.js). The effective loft/maxSpeed of the
-    // current club + shot variant drive aiming, the strike model, and launch.
-    this.clubIndex = 0;
-    this.variantIndex = 0;
-    // Fine trajectory trim on the mouse wheel (degrees, ±8). Resets whenever
-    // the club or variant changes — it's a per-shot adjustment, not a setting.
-    this.loftTrim = 0;
-    
-    // Deterministic seed — everything in the round derives from this.
-    this.seed = getSeedFromUrl() || generateSeed();
-    this.gameRng = createGameRng(this.seed);
-    this.fxRng = this.gameRng.fork('fx').rng; // cosmetic/secondary effects
+    this.camera = new THREE.PerspectiveCamera(60, 1, 0.3, 1600);
+    this.rig = new CameraRig(this.camera);
+    this.initRenderer();
+    this.initLights();
 
-    // Round state
-    this.holeNumber = 1;
-    this.roundLength = 3; // 3-hole rounds for now; 18 when biomes land
-    this.roundScores = []; // { hole, par, strokes }
-
-    // Game state
-    this.score = 0;
-    this.strokes = 0;
-    this.par = 3; // Default par for the hole
-    this.fsm = this.createStateMachine();
-    
-    // Camera transition timing
-    this.cameraTransitionTime = 0;
-    this.CAMERA_TRANSITION_DURATION = 1.5; // Time in seconds for camera transition
-    
-    // Time tracking
-    this.clock = new THREE.Clock();
-    this.deltaTime = 0;
-    
-    // Audio system
-    this.audioManager = new AudioManager();
-    
-    // Input state
-    this.keys = {};
-    this.mousePosition = new THREE.Vector2();
-    this.isMouseDown = false;
-    this.lastMousePosition = new THREE.Vector2();
-    this.mouseSensitivity = 0.003; // Mouse sensitivity for aiming
-
-    // 3-click swing (power -> accuracy -> strike); see core/swing.js
-    this.swing = createSwing();
-    this.lastStrike = null; // last strike outcome, for tuning/replay debug
-    
-    // Pause state
-    this.isPaused = false;
-
-    // Spin selector state
-    this.isSpinSelectorOpen = false;
-    
-    this.renderDirty = true;
-    
-    // Initialize the game
-    this.init();
-  }
-  
-  /**
-   * Initialize the game
-   */
-  init() {
-    try {
-      if (window.DEBUG) console.log("Game initialization started");
-      
-      // Initialize renderer
-      this.initRenderer();
-      
-      // Initialize camera
-      this.initCamera();
-      
-      // Initialize lighting
-      this.initLighting();
-
-      // Initialize gradient sky + fog
-      this.initSky();
-
-      // Initialize game objects
-      this.initGameObjects();
-      
-      // Initialize UI
-      this.ui = new UI(this);
-
-      // Seed badge (shareable round identity)
-      this.initSeedBadge();
-      
-      // Initialize input handlers
-      this.initInputHandlers();
-      
-      // Initialize mouse position tracking
-      this.lastMousePosition.set(window.innerWidth / 2, window.innerHeight / 2);
-      
-      // Set starting game state - we'll be ready to aim after instructions are dismissed
-      this.setGameState('READY_TO_HIT');
-      
-      // Start the game loop
-      this.animate();
-      
-      // Show instructions after a brief delay
-      setTimeout(() => {
-        if (window.DEBUG) console.log("Showing initial game instructions");
-        this.ui.showInstructions();
-        
-        // Pause ability to hit ball until instructions are dismissed
-        this.isPaused = true;
-        if (window.DEBUG) console.log("Game interaction paused until instructions dismissed");
-        
-        // Add listener for the instructions dismissal
-        document.addEventListener('instructionsDismissed', () => {
-          if (window.DEBUG) console.log("Instructions dismissed event received");
-          this.isPaused = false;
-          if (window.DEBUG) console.log("Game interaction resumed");
-        }, { once: true });
-      }, 800);
-      
-      // Force initial render to ensure the scene is visible
-      this.renderer.render(this.scene, this.camera);
-      this.renderDirty = true;
-      if (window.DEBUG) console.log("Initial render forced");
-
-      // Debug/replay scaffolding: scripted access for tuning, tests, replays
-      window.THREEWOOD = this;
-      
-      if (window.DEBUG) console.log("Game initialized successfully");
-    } catch (error) {
-      console.error("Error initializing game:", error);
-    }
-  }
-  
-  /**
-   * Initialize the WebGL renderer
-   */
-  initRenderer() {
-    if (window.DEBUG) console.log("Initializing renderer");
-    // Elevated stylized low-poly: clean edges, soft shadows, filmic tonemap.
-    this.renderer = new THREE.WebGLRenderer({ antialias: true });
-    this.renderer.setSize(window.innerWidth, window.innerHeight);
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.15;
-    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
-    this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-
-    // Add to DOM
-    const container = document.getElementById('container');
-    if (container) {
-      container.appendChild(this.renderer.domElement);
-    } else {
-      console.error("Container element not found");
-      document.body.appendChild(this.renderer.domElement);
-    }
-    
-    // Ensure renderer is visible with explicit styling
-    this.renderer.domElement.style.position = 'absolute';
-    this.renderer.domElement.style.top = '0';
-    this.renderer.domElement.style.left = '0';
-    this.renderer.domElement.style.width = '100%';
-    this.renderer.domElement.style.height = '100%';
-    this.renderer.domElement.style.zIndex = '5';
-    
-    // Handle window resize
-    window.addEventListener('resize', () => {
-      if (window.DEBUG) console.log("Window resize event detected");
-      this.camera.aspect = window.innerWidth / window.innerHeight;
-      this.camera.updateProjectionMatrix();
-      this.renderer.setSize(window.innerWidth, window.innerHeight);
-      
-      // Force a render after resize
-      if (this.scene && this.camera) {
-        this.renderer.render(this.scene, this.camera);
-        if (window.DEBUG) console.log("Forced render after resize");
-      }
+    this.effects = new Effects(this.scene);
+    this.audio = new Audio();
+    this.hud = new Hud({
+      onSwingDown: () => this.swingDown(),
+      onSwingUp: () => this.swingUp(),
+      onClub: (dir) => this.cycleClub(dir),
+      onMenu: () => this.openMenu(),
+      onStart: (choice) => this.startFromTitle(choice),
     });
-  }
-  
-  /**
-   * Initialize the camera
-   */
-  initCamera() {
-    this.camera = new THREE.PerspectiveCamera(
-      75, window.innerWidth / window.innerHeight, 0.1, 1000
-    );
-  }
-  
-  /**
-   * Initialize scene lighting
-   */
-  initLighting() {
-    // Golden-hour key light: warm, low, long soft shadows. Hemisphere provides
-    // the cool sky fill — the warm/cool contrast is what makes low-poly read
-    // as art direction instead of "no textures".
-    const sun = new THREE.DirectionalLight(0xffdfb0, 2.4);
-    sun.position.set(90, 70, 45);
-    sun.castShadow = true;
+    this.initBall();
+    this.initInput();
 
-    sun.shadow.mapSize.width = 2048;
-    sun.shadow.mapSize.height = 2048;
-    sun.shadow.camera.near = 10;
-    sun.shadow.camera.far = 400;
-    sun.shadow.camera.left = -120;
-    sun.shadow.camera.right = 120;
-    sun.shadow.camera.top = 120;
-    sun.shadow.camera.bottom = -120;
-    sun.shadow.bias = -0.0004;
-    sun.shadow.normalBias = 0.02;
-    this.sun = sun;
-    this.scene.add(sun);
-    this.scene.add(sun.target);
+    this.state = 'title';
+    this.paused = false;
+    this.time = 0;
+    this.stateTime = 0;
+    this.timeScale = 1;
+    this.simAccumulator = 0;
+    this.events = [];
+    this.swing = createSwing();
+    this.hints = store.get(HINT_KEY) || { swing: 0, putt: 0 };
 
-    // Sky bounce (cool blue) over ground bounce (warm green)
-    const hemisphereLight = new THREE.HemisphereLight(0xa8ccff, 0x7a9455, 1.1);
-    this.scene.add(hemisphereLight);
+    this.seed = getSeedFromUrl() || store.get(SAVE_KEY)?.seed || generateSeed();
+    this.round = null;
 
-    // Faint warm ambient lift so shadowed faces never go muddy
-    const ambientLight = new THREE.AmbientLight(0xfff0dd, 0.15);
-    this.scene.add(ambientLight);
+    this.resize();
+    window.addEventListener('resize', () => this.resize());
+    window.addEventListener('orientationchange', () => setTimeout(() => this.resize(), 200));
+    document.addEventListener('visibilitychange', () => { this.clock.getDelta(); });
+
+    this.showTitle();
+    this.clock = new THREE.Clock();
+    this.frameTimes = [];
+    this.loop = this.loop.bind(this);
+    requestAnimationFrame(this.loop);
+
+    window.THREEWOOD = this; // debug + automated play-testing hook
   }
 
-  /**
-   * Vertical gradient sky + matching distance fog. Horizon and fog share one
-   * warm haze color so terrain melts into the sky at the draw distance.
-   */
-  initSky() {
-    const skyZenith = new THREE.Color(0x63b4f2);   // clear cerulean (punchy: ACES desaturates)
-    const skyHorizon = new THREE.Color(0xffd493);  // warm golden haze
+  // ===========================================================================
+  // Setup
+  // ===========================================================================
+
+  initRenderer() {
+    const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+    this.pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+    renderer.setPixelRatio(this.pixelRatio);
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.12;
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = this.coarse ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
+    this.container.appendChild(renderer.domElement);
+    this.renderer = renderer;
+    this.canvas = renderer.domElement;
+  }
+
+  initLights() {
+    this.sun = new THREE.DirectionalLight(0xffffff, 2.3);
+    this.sun.castShadow = true;
+    const size = this.coarse ? 1024 : 2048;
+    this.sun.shadow.mapSize.set(size, size);
+    const cam = this.sun.shadow.camera;
+    cam.near = 20; cam.far = 520;
+    cam.left = -95; cam.right = 95; cam.top = 95; cam.bottom = -95;
+    this.sun.shadow.bias = -0.0006;
+    this.sun.shadow.normalBias = 0.35;
+    this.scene.add(this.sun, this.sun.target);
+    this.hemi = new THREE.HemisphereLight(0xffffff, 0x88aa66, 1);
+    this.scene.add(this.hemi);
+    this.sunDir = new THREE.Vector3(0.5, 0.8, 0.3).normalize();
+    this.scene.fog = new THREE.Fog(0xffffff, 150, 640);
+  }
+
+  applyBiome(biome) {
+    this.sun.color.setHex(biome.sun);
+    this.sun.intensity = biome.sunIntensity;
+    this.sunDir.set(...biome.sunDir).normalize();
+    this.hemi.color.setHex(biome.hemiSky);
+    this.hemi.groundColor.setHex(biome.hemiGround);
+    this.hemi.intensity = biome.hemiIntensity;
+    this.scene.fog.color.setHex(biome.fog);
+
     const canvas = document.createElement('canvas');
-    canvas.width = 16;
-    canvas.height = 256;
+    canvas.width = 4; canvas.height = 256;
     const ctx = canvas.getContext('2d');
     const grad = ctx.createLinearGradient(0, 0, 0, 256);
-    grad.addColorStop(0, `rgb(${skyZenith.r * 255 | 0},${skyZenith.g * 255 | 0},${skyZenith.b * 255 | 0})`);
-    grad.addColorStop(0.55, `rgb(${skyHorizon.r * 255 | 0},${skyHorizon.g * 255 | 0},${skyHorizon.b * 255 | 0})`);
-    grad.addColorStop(1, `rgb(${skyHorizon.r * 255 | 0},${skyHorizon.g * 255 | 0},${skyHorizon.b * 255 | 0})`);
+    const hex = (n) => `#${n.toString(16).padStart(6, '0')}`;
+    grad.addColorStop(0, hex(biome.skyTop));
+    grad.addColorStop(0.5, hex(biome.skyHorizon));
+    grad.addColorStop(0.56, hex(biome.fog));
+    grad.addColorStop(1, hex(biome.fog));
     ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, 16, 256);
-    const skyTexture = new THREE.CanvasTexture(canvas);
-    skyTexture.colorSpace = THREE.SRGBColorSpace;
-    this.scene.background = skyTexture;
-
-    // Distance fog melts terrain into the horizon haze (hides the far edge)
-    this.scene.fog = new THREE.Fog(0xffd493, 120, 320);
+    ctx.fillRect(0, 0, 4, 256);
+    this.scene.background?.dispose?.();
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    this.scene.background = tex;
   }
 
-  /**
-   * Small HUD badge showing the round seed. Click to copy a shareable URL.
-   */
-  initSeedBadge() {
-    const badge = document.createElement('div');
-    badge.textContent = `SEED ${this.seed}`;
-    badge.title = 'Click to copy a shareable link to this exact round';
-    Object.assign(badge.style, {
-      position: 'absolute',
-      bottom: '8px',
-      left: '8px',
-      padding: '4px 8px',
-      fontFamily: 'monospace',
-      fontSize: '11px',
-      letterSpacing: '0.5px',
-      color: '#fff',
-      background: 'rgba(20, 30, 20, 0.55)',
-      borderRadius: '4px',
-      cursor: 'pointer',
-      zIndex: '30',
-      userSelect: 'none',
+  initBall() {
+    this.ball = createBall();
+    this.ballMesh = new THREE.Mesh(
+      new THREE.IcosahedronGeometry(BALL_R, 2),
+      new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.35, flatShading: true }));
+    this.ballMesh.castShadow = true;
+    this.scene.add(this.ballMesh);
+    // Blob shadow: the depth cue that makes ball flight readable
+    this.blob = new THREE.Mesh(
+      new THREE.CircleGeometry(1, 16).rotateX(-Math.PI / 2),
+      new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.3, depthWrite: false }));
+    this.blob.renderOrder = 2;
+    this.scene.add(this.blob);
+    this.ballScale = 1.4;
+    this.sink = 0;
+  }
+
+  initInput() {
+    const c = this.canvas;
+    let drag = null;
+    c.addEventListener('pointerdown', (e) => {
+      this.audio.unlock();
+      drag = { id: e.pointerId, x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, t: performance.now(), moved: 0 };
+      c.setPointerCapture?.(e.pointerId);
     });
-    badge.addEventListener('click', async () => {
-      const url = `${location.origin}${location.pathname}?seed=${encodeURIComponent(this.seed)}`;
-      try {
-        await navigator.clipboard.writeText(url);
-        badge.textContent = 'LINK COPIED';
-        setTimeout(() => { badge.textContent = `SEED ${this.seed}`; }, 1200);
-      } catch {
-        window.prompt('Copy this link:', url);
+    c.addEventListener('pointermove', (e) => {
+      if (!drag || drag.id !== e.pointerId) return;
+      const dx = e.clientX - drag.x;
+      drag.moved = Math.max(drag.moved, Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy));
+      drag.x = e.clientX; drag.y = e.clientY;
+      if (this.state === 'aim' && !this.paused) {
+        // Putts need a jeweller's touch; full shots a quicker turn
+        const base = this.putting ? 0.0011 : 0.0042;
+        this.aimAngle += dx * base * (420 / Math.max(320, Math.min(window.innerWidth, 900)));
+        this.planDirty = true;
       }
     });
-    const container = document.getElementById('game-container') || document.body;
-    container.appendChild(badge);
-    this.seedBadge = badge;
-  }
+    const end = (e) => {
+      if (!drag || drag.id !== e.pointerId) return;
+      const tap = drag.moved < 12 && performance.now() - drag.t < 400;
+      drag = null;
+      if (tap) this.tap();
+    };
+    c.addEventListener('pointerup', end);
+    c.addEventListener('pointercancel', end);
+    document.addEventListener('pointerdown', () => this.audio.unlock(), { capture: true });
 
-  /**
-   * Initialize game objects: load hole 1, then create the one-time objects
-   * (ball, arrows, camera rig, minimap) that persist across holes.
-   */
-  initGameObjects() {
-    if (window.DEBUG) console.log("Initializing game objects");
-
-    this.loadHole(1);
-
-    // Create golf ball — physics randomness comes from the round seed
-    this.ball = new GolfBall(this.terrain, this.audioManager);
-    this.ball.setRng(this.gameRng.fork('ball').rng);
-    this.scene.add(this.ball.getMesh());
-    this.ball.reset(this.terrain.teePosition);
-
-    // Create ArrowHelper for shot direction
-    const arrowDir = new THREE.Vector3(0, 0.2, -1).normalize();
-    const arrowLength = 1.2;
-    const arrowColor = 0xffd700; // Gold
-    this.shotArrow = new THREE.ArrowHelper(arrowDir, new THREE.Vector3(0, 0, 0), arrowLength, arrowColor, 0.25, 0.15);
-    this.shotArrow.visible = false;
-    this.scene.add(this.shotArrow);
-
-    // Initialize camera controller with ball as target
-    this.cameraController = new CameraController(this.camera, this.ball, { terrain: this.terrain });
-    this.cameraController.game = this;
-
-    // Face the camera toward the opening shot's intended line.
-    this.cameraController.faceHole(this.getAimTarget(this.terrain.teePosition), this.terrain.teePosition);
-
-    // Create direction arrow UI
-    this.createDirectionArrow();
-
-    // Create the overhead minimap (canvas HUD)
-    const mmContainer = document.getElementById('game-container') || document.body;
-    this.minimap = new Minimap(mmContainer, this);
-
-    if (window.DEBUG) console.log("Game objects initialized successfully");
-  }
-
-  /**
-   * Design and load hole N of the round: dispose the old hole's meshes,
-   * generate terrain/water/flag/trees from the seed, rewire dependents.
-   */
-  loadHole(n) {
-    this.holeNumber = n;
-
-    // --- Dispose previous hole ---
-    if (this.terrainMesh) {
-      this.scene.remove(this.terrainMesh);
-      this.terrainMesh.geometry.dispose();
-      if (this.terrain.surfaceMaterials) {
-        Object.values(this.terrain.surfaceMaterials).forEach(m => m.dispose());
-      }
-    }
-    if (this.terrain?.waterMesh) {
-      this.scene.remove(this.terrain.waterMesh);
-      this.terrain.waterMesh.geometry.dispose();
-      this.terrain.waterMesh.material.dispose();
-    }
-    if (this.flag) {
-      this.scene.remove(this.flag);
-      this.flag.traverse(o => { o.geometry?.dispose?.(); o.material?.dispose?.(); });
-    }
-    if (this.treesGroup) {
-      this.scene.remove(this.treesGroup);
-      this.treesGroup.traverse(o => { o.geometry?.dispose?.(); o.material?.dispose?.(); });
-    }
-
-    // --- Design + build the new hole (deterministic from round seed) ---
-    const spec = designHole(this.seed, n);
-    this.holeSpec = spec;
-    if (window.DEBUG) console.log(`[loadHole] #${n}: ${spec.archetype} par ${spec.par}, fitness`, spec.fitness);
-
-    this.terrain = new TerrainGenerator({
-      width: 400,
-      length: 400,
-      maxHeight: 5,
-      minHeight: -1,
-      segmentsW: 64,
-      segmentsL: 64,
-      waterLevel: -0.8,
-      seed: `${this.seed}:hole-${n}`,
-      holeNumber: n,
-      holeSpec: spec,
-    });
-
-    this.terrainMesh = this.terrain.generateTerrain();
-    this.terrainMesh.receiveShadow = true;
-    this.scene.add(this.terrainMesh);
-
-    this.terrain.createWaterSurface(this.scene);
-    this.flag = this.terrain.createFlag(this.scene);
-
-    // Parkland trees (2 instanced draw calls) + trunk colliders for physics
-    const treeResult = createTrees(spec, this.terrain, this.scene);
-    this.treesGroup = treeResult.group;
-    this.terrain.treeColliders = treeResult.colliders;
-
-    this.par = spec.par;
-    this.strokes = 0;
-
-    // --- Rewire dependents to the new terrain ---
-    if (this.ball) {
-      this.ball.terrain = this.terrain;
-      this.ball.reset(this.terrain.teePosition);
-    }
-    if (this.cameraController) {
-      this.cameraController.terrain = this.terrain;
-      this.cameraController.faceHole(this.getAimTarget(this.terrain.teePosition), this.terrain.teePosition);
-    }
-    this.updateHoleBadge();
-    this.renderDirty = true;
-  }
-
-  /**
-   * Where the player should aim from ballPos: the next path waypoint ahead,
-   * so doglegs aim at the corner instead of through the trees.
-   */
-  getAimTarget(ballPos) {
-    const path = this.terrain?.spec?.path;
-    if (!path || path.length < 2) return this.terrain?.holePosition;
-    const info = this.terrain.fairwayInfo(ballPos.x, ballPos.z);
-    let walked = 0;
-    for (let i = 1; i < path.length; i++) {
-      walked += Math.hypot(path[i].x - path[i - 1].x, path[i].z - path[i - 1].z);
-      if (walked > info.along + 15) {
-        const y = this.terrain.getHeightAtPosition(path[i].x, path[i].z);
-        return new THREE.Vector3(path[i].x, y, path[i].z);
-      }
-    }
-    return this.terrain.holePosition;
-  }
-
-  /**
-   * Advance after a hole is sunk: next hole, or a fresh round on a new seed.
-   */
-  advanceHole() {
-    this.roundScores.push({ hole: this.holeNumber, par: this.par, strokes: this.strokes });
-
-    if (this.holeNumber < this.roundLength) {
-      this.loadHole(this.holeNumber + 1);
-      this.setGameState('READY_TO_HIT');
-    } else {
-      // Round complete — show the card, then start a fresh round on a new seed
-      const total = this.roundScores.reduce((s, h) => s + (h.strokes - h.par), 0);
-      const scoreText = total === 0 ? 'E' : (total > 0 ? `+${total}` : `${total}`);
-      const card = this.roundScores.map(h => `#${h.hole}: ${h.strokes} (par ${h.par})`).join(' · ');
-      this.ui?.showMessage(`ROUND COMPLETE — ${scoreText}`, card, 'A new course is being grown for you…', 5000);
-      setTimeout(() => {
-        this.seed = generateSeed();
-        this.gameRng = createGameRng(this.seed);
-        this.fxRng = this.gameRng.fork('fx').rng;
-        this.ball?.setRng(this.gameRng.fork('ball').rng);
-        this.roundScores = [];
-        this.score = 0;
-        this.ui?.updateScore(0);
-        if (this.seedBadge) this.seedBadge.textContent = `SEED ${this.seed}`;
-        this.loadHole(1);
-        this.setGameState('READY_TO_HIT');
-      }, 5000);
-    }
-  }
-
-  /**
-   * Top-center badge: hole number, par, archetype (the hole's identity).
-   */
-  updateHoleBadge() {
-    if (!this.holeBadge) {
-      const badge = document.createElement('div');
-      Object.assign(badge.style, {
-        position: 'absolute',
-        top: '8px',
-        left: '50%',
-        transform: 'translateX(-50%)',
-        padding: '6px 14px',
-        fontFamily: 'Lato, sans-serif',
-        fontSize: '15px',
-        fontWeight: 'bold',
-        letterSpacing: '1px',
-        color: '#fff8ec',
-        background: 'rgba(20, 30, 20, 0.55)',
-        borderRadius: '6px',
-        zIndex: '30',
-        userSelect: 'none',
-        pointerEvents: 'none',
-        textShadow: '1px 1px 2px rgba(0,0,0,0.4)',
-      });
-      (document.getElementById('game-container') || document.body).appendChild(badge);
-      this.holeBadge = badge;
-    }
-    const spec = this.holeSpec;
-    const arch = ARCHETYPES[spec.archetype]?.label || spec.archetype;
-    this.holeBadge.textContent = `HOLE ${spec.number}/${this.roundLength} · PAR ${spec.par} · ${arch}`;
-  }
-  
-  /**
-   * Add a flag at the hole position
-   */
-  addHoleFlag() {
-    if (!this.terrain || !this.terrain.holePosition) return;
-    
-    // Create flag pole
-    const poleGeometry = new THREE.CylinderGeometry(0.01, 0.01, 1, 8);
-    const poleMaterial = new THREE.MeshStandardMaterial({ color: 0xEEEEEE });
-    const pole = new THREE.Mesh(poleGeometry, poleMaterial);
-    
-    // Position at hole
-    pole.position.copy(this.terrain.holePosition);
-    pole.position.y += 0.5; // Half height of pole
-    
-    // Create flag
-    const flagGeometry = new THREE.PlaneGeometry(0.3, 0.2);
-    const flagMaterial = new THREE.MeshStandardMaterial({ 
-      color: 0xFF0000,
-      side: THREE.DoubleSide
-    });
-    const flag = new THREE.Mesh(flagGeometry, flagMaterial);
-    flag.position.set(0.15, 0.3, 0);
-    flag.rotation.y = Math.PI / 2;
-    
-    // Add flag to pole
-    pole.add(flag);
-    
-    // Add to scene
-    this.scene.add(pole);
-  }
-  
-  /**
-   * Initialize input handlers
-   */
-  initInputHandlers() {
-    // Keyboard events
+    this.keys = {};
     window.addEventListener('keydown', (e) => {
-      this.keys[e.key] = true;
-      this.handleKeyPress(e.key);
+      if (e.repeat) return;
+      this.keys[e.code] = true;
+      this.audio.unlock();
+      if (e.code === 'Space' || e.code === 'Enter') {
+        e.preventDefault();
+        if (this.state === 'intro') this.tap(); else this.swingDown();
+      } else if (e.code === 'ArrowUp') this.cycleClub(-1);
+      else if (e.code === 'ArrowDown') this.cycleClub(1);
+      else if (e.code === 'Escape') { if (this.paused) this.closeMenu(); else this.openMenu(); }
     });
-    
     window.addEventListener('keyup', (e) => {
-      this.keys[e.key] = false;
+      this.keys[e.code] = false;
+      if (e.code === 'Space' || e.code === 'Enter') this.swingUp();
     });
-    
-    // Mouse events
-    window.addEventListener('mousemove', (e) => {
-      // Update normalized mouse position for UI interactions
-      this.mousePosition.x = (e.clientX / window.innerWidth) * 2 - 1;
-      this.mousePosition.y = -(e.clientY / window.innerHeight) * 2 + 1;
-      
-      // Handle mouse aiming when in AIMING state
-      if (this.gameState === 'AIMING' && !this.isPaused && !this.isSpinSelectorOpen) {
-        const mouseDeltaX = e.clientX - this.lastMousePosition.x;
-        
-        // Only rotate if there's significant mouse movement
-        if (Math.abs(mouseDeltaX) > 1) {
-          const rotationAmount = mouseDeltaX * this.mouseSensitivity;
-          this.cameraController.rotateAim(rotationAmount);
-          this.renderDirty = true;
-        }
-      }
-      
-      // Update last mouse position
-      this.lastMousePosition.set(e.clientX, e.clientY);
+  }
+
+  resize() {
+    const w = window.innerWidth, h = window.innerHeight;
+    this.renderer.setSize(w, h);
+    this.rig.setAspect(w / h);
+    this.effects.resize(w, h, this.pixelRatio);
+  }
+
+  // ===========================================================================
+  // Title / round lifecycle
+  // ===========================================================================
+
+  showTitle() {
+    this.state = 'title';
+    this.round = null;
+    this.hud.setPlayVisible(false);
+    this.loadWorld(designHole(this.seed, 1));
+    this.ballMesh.visible = this.blob.visible = false;
+    const saved = store.get(SAVE_KEY);
+    const usable = saved && saved.index < saved.holes.length;
+    this.hud.showTitle({
+      saved: usable ? { hole: saved.index + 1, total: saved.scores.reduce((s, h) => s + h.strokes - h.par, 0) } : null,
+      best: store.get(BEST_KEY),
+      seed: this.seed,
     });
-    
-    window.addEventListener('mousedown', () => {
-      this.isMouseDown = true;
-      this.handleMouseDown();
-    });
-    
-    window.addEventListener('mouseup', () => {
-      this.isMouseDown = false;
-      this.handleMouseUp();
-    });
-
-    // Mouse Wheel for fine trajectory height (loft trim). Clubs stay on the
-    // arrow keys so scroll does one thing: higher/lower flight.
-    window.addEventListener('wheel', (e) => {
-      if (this.gameState === 'AIMING') {
-        // Determine scroll direction (normalize across browsers)
-        const delta = Math.sign(e.deltaY);
-        this.adjustLoftTrim(-delta); // Scroll up = higher flight, down = lower
-        e.preventDefault(); // Prevent page scrolling
-      }
-    }, { passive: false }); // Need passive: false to preventDefault
+    this.rig.cut();
   }
-  
-  /**
-   * Handle key press
-   */
-  handleKeyPress(key) {
-    if (this.isPaused) return;
-    this.renderDirty = true;
-    
-    switch (key.toLowerCase()) {
-      case ' ': // Space bar — 3-click swing: start, set power, strike
-        if (this.gameState === 'AIMING') {
-          if (this.swing.phase === 'idle') this.startSwing();
-        } else if (this.gameState === 'HITTING') {
-          this.advanceSwing();
-        }
-        break;
-      case 'escape': // Cancel an in-progress swing
-        this.cancelSwing();
-        break;
-      case 'h': // Help overlay (re-open; initial show is handled in init)
-        if (this.ui && !this.ui.isInstructionsVisible) {
-          this.ui.showInstructions();
-          this.isPaused = true;
-          document.addEventListener('instructionsDismissed', () => {
-            this.isPaused = false;
-          }, { once: true });
-        }
-        break;
-      case 'r': // Reset ball
-        this.resetBall();
-        this.setGameState('AIMING');
-        break;
-      case 'c': // Toggle camera mode
-        this.toggleCameraMode();
-        break;
-      case 'arrowup': // Longer club
-        this.cycleClub(-1);
-        break;
-      case 'arrowdown': // Shorter club
-        this.cycleClub(1);
-        break;
-      case 'v': // Cycle shot variant (full / punch / flop / chip)
-        this.cycleVariant();
-        break;
-      case 's': // Toggle spin selector
-        if (this.gameState === 'AIMING') {
-          this.toggleSpinSelector();
-        }
-        break;
-    }
-  }
-  
-  /**
-   * Handle mouse down events
-   */
-  handleMouseDown() {
-    // If game is paused (instructions showing), ignore mouse input
-    if (this.isPaused) {
-      if (window.DEBUG) console.log("Mouse input ignored while instructions are showing");
-      return;
-    }
-    
-    // Skip if user is interacting with the spin selector
-    if (this.isSpinSelectorOpen) {
-      if (window.DEBUG) console.log("Mouse input ignored while spin selector is open");
-      return;
-    }
-    this.renderDirty = true;
-    
-    if (this.gameState === 'AIMING') {
-      this.ui.hideReadyIndicator(); // Hide indicator when starting swing
-      this.startSwing();
-    } else if (this.gameState === 'HITTING') {
-      this.advanceSwing();
-    } else if (this.gameState === 'TITLE') {
-      this.setGameState('READY_TO_HIT');
-    }
-  }
-  
-  /**
-   * Handle mouse up events
-   */
-  handleMouseUp() {
-    // We're now using a two-click process for hitting the ball,
-    // so mouse up does not automatically trigger the hit
-    // This is intentionally empty
-  }
-  
-  /**
-   * Update game state
-   */
-  update() {
-    this.deltaTime = this.clock.getDelta();
-    
-    // Update animation mixer if it exists
-    if (this.mixer) {
-      this.mixer.update(this.deltaTime);
-    }
 
-    // Update ball physics
-    if (this.gameState === 'WATCHING') {
-      // Store previous position to check if ball moved
-      const prevPosition = this.ball.position.clone();
-      
-      // Ball is in motion after being hit
-      this.ball.update(this.deltaTime);
-      
-      // Only mark dirty if ball actually moved significantly
-      if (prevPosition.distanceTo(this.ball.position) > 0.001) {
-        this.renderDirty = true;
-      }
-      
-      // Check if ball has entered the hole -> begin the sink animation
-      if (this.terrain && this.terrain.checkBallInHole && this.terrain.checkBallInHole(this.ball)) {
-        this.startSink();
-      }
-    }
-
-    // Drive the sink animation: move the ball into the cup, then complete.
-    if (this.gameState === 'SINKING') {
-      TWEEN.update();
-      this.renderDirty = true;
-    }
-    
-    // Update water animation and check for ball-water collisions
-    if (this.terrain) {
-      // Update water surface waves
-      if (this.terrain.updateWater) {
-        this.terrain.updateWater(this.deltaTime);
-      }
-      
-      // Check for ball-water collision and create splash if needed
-      if (this.gameState === 'WATCHING' && this.ball && this.terrain.checkBallWaterCollision) {
-        // Get ball velocity for splash intensity
-        const ballVelocity = this.ball.velocity ? this.ball.velocity.length() : 0;
-        
-        // Check collision and create splash if needed
-        const isInWater = this.terrain.checkBallWaterCollision(
-          this.ball, 
-          this.scene, 
-          ballVelocity
-        );
-        
-        // Apply water physics to ball if in water
-        if (isInWater) {
-          // Make sure ball has velocity object
-          if (!this.ball.velocity) {
-            this.ball.velocity = new THREE.Vector3(0, 0, 0);
-          }
-          
-          // Slow down the ball in water (water resistance)
-          this.ball.velocity.multiplyScalar(0.95);
-          
-          // Apply slight downward force (sinking)
-          this.ball.velocity.y -= 0.05;
-          
-          // Ensure the ball keeps moving if it's in water
-          if (this.ball.velocity.length() < 0.1) {
-            // Add a small random movement to prevent complete stopping in water
-            this.ball.velocity.x += (this.fxRng() - 0.5) * 0.02;
-            this.ball.velocity.z += (this.fxRng() - 0.5) * 0.02;
-            this.ball.velocity.y -= 0.1; // Ensure it sinks
-          }
-        }
-      }
-      
-      // Update splash and ripple effects
-      if (this.terrain.updateSplashEffects) {
-        this.terrain.updateSplashEffects(this.deltaTime, this.scene);
-      }
-    }
-    
-    // Log state BEFORE camera update
-    if (window.DEBUG_CAMERA) {
-      if (window.DEBUG) console.log(`Camera before update: ${this.camera.position.toArray()}`);
-      if (window.DEBUG) console.log(`Ball before update: ${this.ball.position.toArray()}`);
-    }
-    
-    // Update camera controller
-    this.cameraController.update(this.deltaTime);
-    
-    // Update direction arrow to point to hole
-    this.updateDirectionArrow();
-
-    // Update the overhead minimap (course layout + live shot prediction)
-    this.updateMinimap();
-    
-    // Log state AFTER camera update
-    if (window.DEBUG_CAMERA) {
-      if (window.DEBUG) console.log(`Camera after update: ${this.camera.position.toArray()}`);
-    }
-    
-    // Update shot arrow position and direction if visible
-    if (this.gameState === 'AIMING' && this.shotArrow) {
-      const ballPos = this.ball.position;
-      // Get the direction from the camera to the ball (XZ plane)
-      const camToBall = ballPos.clone().sub(this.camera.position);
-      camToBall.y = 0;
-      camToBall.normalize();
-      const axis = new THREE.Vector3().crossVectors(camToBall, new THREE.Vector3(0, 1, 0)).normalize();
-      const loftRadians = this.currentLoft * Math.PI / 180;
-      const shotDir = camToBall.clone();
-      shotDir.applyAxisAngle(axis, loftRadians);
-      shotDir.normalize();
-      
-      // Store the current shot direction for use when hitting
-      this.currentShotDirection = {
-        horizontal: camToBall.clone(), // Store horizontal direction (no loft)
-        full: shotDir.clone()          // Store full direction (with loft)
+  startFromTitle(choice) {
+    this.audio.unlock();
+    this.audio.tap();
+    const saved = store.get(SAVE_KEY);
+    if (choice === 'continue' && saved) {
+      this.seed = saved.seed;
+      this.round = saved;
+    } else {
+      // A fresh round on the course shown behind the title
+      const length = Number(choice);
+      this.round = {
+        seed: this.seed,
+        length,
+        holes: roundHoles(length),
+        index: 0,
+        scores: [],
+        points: 0,
+        pureStreak: 0,
+        stats: { fairways: 0, fairwayChances: 0, gir: 0, putts: 0, longestDrive: 0, longestPutt: 0, pures: 0, swings: 0 },
       };
-      
-      // --- Deflection warning ---
-      let arrowColor = 0xffd700; // Gold by default
-      if (this.ball.terrain && this.ball.terrain.getNormalAtPosition) {
-        const surfaceNormal = this.ball.terrain.getNormalAtPosition(ballPos.x, ballPos.z);
-        if (surfaceNormal) {
-          // Calculate the angle between the shot direction and surface normal
-          const angle = Math.acos(Math.max(-1, Math.min(1, shotDir.dot(surfaceNormal))));
-          
-          // Check if this is a shot that would hit directly into the terrain
-          // We need to distinguish between shots that would skim along the ground (good)
-          // vs. shots directly into terrain (bad)
-          
-          // Get the horizontal component of the shot direction
-          const horizontalShotDir = shotDir.clone();
-          horizontalShotDir.y = 0;
-          horizontalShotDir.normalize();
-          
-          // Calculate how much of the shot direction is downward into the terrain
-          // vs. horizontal skimming along the surface
-          const isDownwardShot = shotDir.y < -0.1;
-          const horizontalComponent = horizontalShotDir.length();
-          
-          // Only show warning if:
-          // 1. The angle with normal is steep (greater than 60 degrees instead of 45)
-          // 2. AND the shot is significantly downward
-          // 3. OR if the shot is almost directly into the terrain (very small horizontal component)
-          if ((angle > Math.PI / 3 && isDownwardShot) || horizontalComponent < 0.4) {
-            arrowColor = 0xff3333; // Red warning
-          }
-        }
-      }
-      this.shotArrow.setColor(new THREE.Color(arrowColor));
-      // --- End deflection warning ---
-      this.shotArrow.position.copy(ballPos).add(new THREE.Vector3(0, this.ball.options.radius + 0.02, 0));
-      this.shotArrow.setDirection(shotDir);
-      this.shotArrow.setLength(1.2, 0.25, 0.15);
-      this.shotArrow.visible = true;
-      this.renderDirty = true;
-    } else if (this.shotArrow) {
-      this.shotArrow.visible = false;
-      this.renderDirty = true;
+      store.set(SAVE_KEY, this.round);
     }
-    
-    // Check if ball has stopped after being hit.
-    // Don't transition away if the ball is resting over the hole — let
-    // checkBallInHole (in the WATCHING branch above) claim it and start the
-    // sink instead. This prevents a slow roller from resting on the lip and
-    // skipping the hole completion.
-    if (this.gameState === 'WATCHING' && this.ball.isResting) {
-      const overHole = this.terrain && this.terrain.hole &&
-        Math.hypot(this.ball.position.x - this.terrain.hole.x,
-                    this.ball.position.z - this.terrain.hole.z) < this.terrain.hole.radius + 0.05;
-      if (!overHole) {
-        // Water hazard rule: ball at rest in water = +1 penalty, replay the shot
-        const surface = this.terrain?.getSurfaceTypeAtPosition?.(this.ball.position.x, this.ball.position.z);
-        const inWater = surface === 'water' || this.ball.position.y < this.terrain.options.waterLevel;
-        if (inWater) {
-          this.strokes += 1;
-          this.ui?.updateStrokes(this.strokes);
-          this.ui?.showMessage('WATER HAZARD', '+1 penalty stroke', '', 2500);
-          this.ball.reset(this.ball.lastSafePosition);
-        }
-        if (window.DEBUG) console.log("Ball has come to rest");
-        this.cameraController.followBall();
-        this.setGameState('CAMERA_TRANSITION');
-        this.cameraTransitionTime = 0;
-      }
-    }
-    
-    // If in camera transition phase
-    if (this.gameState === 'CAMERA_TRANSITION') {
-      this.cameraTransitionTime += this.deltaTime;
-      
-      // Show a visual indicator that camera is transitioning
-      if (this.ui) {
-        const progress = Math.min(this.cameraTransitionTime / this.CAMERA_TRANSITION_DURATION, 1);
-        this.ui.updateTransitionProgress(progress);
-      }
-      
-      // If transition is complete
-      if (this.cameraTransitionTime >= this.CAMERA_TRANSITION_DURATION) {
-        
-        // Before switching to READY_TO_HIT, ensure ball is properly positioned
-        if (this.ball && this.terrain) {
-          const terrainHeight = this.terrain.getHeightAtPosition(
-            this.ball.position.x, this.ball.position.z
-          );
-          
-          // Check if ball is embedded in terrain
-          if (this.ball.position.y - this.ball.options.radius < terrainHeight) {
-            if (window.DEBUG) console.log("Correcting ball position after camera transition");
-            this.ball.position.y = terrainHeight + this.ball.options.radius + 0.01;
-            // Update mesh position
-            this.ball.getMesh().position.copy(this.ball.position);
-          }
-        }
-        
-        this.setGameState('READY_TO_HIT');
-        if (this.ui) {
-          this.ui.hideTransitionProgress();
-        }
-      }
-    }
-    
-    // Handle input based on game state
-    this.handleInput();
-
-    // Update the 3-click swing meter
-    this.updateSwingMeter();
-    // NOTE: hole-in detection is handled in the WATCHING branch above via
-    // terrain.checkBallInHole() -> handleHoleComplete(), which is guarded to
-    // fire once. Do not add a second detection path here.
+    this.rng = createGameRng(`${this.seed}:play:${Date.now()}`).rng;
+    this.hud.clearLayer();
+    this.startHole();
   }
-  
-  /**
-   * Handle continuous input based on game state
-   */
-  handleInput() {
-    if (this.gameState === 'AIMING') {
-      // Adjust aim with left/right arrow keys (fixed inversion)
-      if (this.keys['ArrowLeft']) {
-        this.cameraController.rotateAim(-0.03);  // Fixed: left arrow now rotates left
-      }
-      if (this.keys['ArrowRight']) {
-        this.cameraController.rotateAim(0.03);   // Fixed: right arrow now rotates right
-      }
-      // Adjust loft with up/down arrow keys
-      // Need to check if key was *just* pressed to avoid rapid changes
-      // (We'll handle this logic in handleKeyPress for single trigger)
+
+  /** Swap in a new hole's world, mesh and scenery. */
+  loadWorld(spec) {
+    if (this.terrain) {
+      this.scene.remove(this.terrain, this.scenery.group);
+      disposeGroup(this.terrain);
+      disposeGroup(this.scenery.group);
     }
+    this.world = buildWorld(spec);
+    this.terrain = buildTerrainMesh(this.world);
+    this.scenery = buildScenery(this.world, { lowDetail: this.coarse });
+    this.scene.add(this.terrain, this.scenery.group);
+    this.applyBiome(this.world.biome);
+    this.rig.setWorld(this.world);
+    this.effects.hideAim();
+    this.effects.beads.hide();
+    this.effects.endTrail();
+    this.env = { windX: spec.wind.x, windZ: spec.wind.z };
   }
-  
-  /**
-   * Advance the 3-click swing meter (power up-sweep, accuracy down-sweep).
-   * Auto-locks power at 100 and auto-hits (max late) at the strike floor.
-   */
-  updateSwingMeter() {
-    if (this.swing.phase === 'idle') return;
 
-    // Clamp the step: a frame hitch (tab switch, slow frame) must slow the
-    // marker, never jump it — big dt could otherwise skip past the strike
-    // line or even auto-fire the hit.
-    const dt = Math.min(this.deltaTime, 0.05);
-    const event = swingStep(this.swing, dt);
-    this.ui.updateSwingMeter(this.swing);
-    this.renderDirty = true;
+  startHole() {
+    const round = this.round;
+    const number = round.holes[round.index];
+    const spec = designHole(round.seed, number);
+    this.loadWorld(spec);
 
-    if (!event) return;
-    if (event.type === 'powerLocked') {
-      this.ui.setSwingPhase('accuracy');
-    } else if (event.type === 'strike') {
-      this.executeSwingHit(event.timing);
+    this.strokes = 0;
+    this.putts = 0;
+    this.bonuses = [];
+    this.holePoints = 0;
+    placeBall(this.ball, this.world, this.world.tee.x, this.world.tee.z);
+    this.ballMesh.visible = this.blob.visible = true;
+    this.sink = 0;
+
+    this.hud.setPlayVisible(true);
+    this.hud.setControlsVisible(false);
+    this.hud.setHole({ index: round.index + 1, total: round.holes.length, par: spec.par, yards: spec.length });
+    this.hud.setPoints(round.points);
+    this.updateScoreHud();
+    const arch = ARCHETYPES[spec.archetype];
+    this.hud.showIntro({
+      index: round.index + 1, total: round.holes.length,
+      name: arch.label, blurb: arch.blurb, par: spec.par, yards: spec.length,
+      biome: BIOMES[spec.biome].name,
+    });
+    this.landing = null;
+    this.aimAngle = Math.atan2(this.world.cup.z - this.ball.z, this.world.cup.x - this.ball.x);
+    this.hud.drawMinimap(this.world, this.ball, null);
+    this.setState('intro');
+    this.rig.flyover(0);
+    this.rig.cut();
+    this.audio.whoosh();
+  }
+
+  roundTotal() {
+    return this.round.scores.reduce((s, h) => s + h.strokes - h.par, 0);
+  }
+
+  updateScoreHud(label) {
+    this.hud.setScore({ strokes: this.strokes, total: this.roundTotal(), shotLabel: label });
+  }
+
+  cardData() {
+    const round = this.round;
+    return {
+      currentLabel: round.holes[round.index],
+      holes: round.holes.map((n, i) => ({
+        label: n,
+        par: ROUND_PLAN[n - 1].par,
+        strokes: round.scores[i]?.strokes ?? null,
+        current: i === round.index,
+      })),
+    };
+  }
+
+  setState(state) {
+    this.state = state;
+    this.stateTime = 0;
+  }
+
+  // ===========================================================================
+  // Aiming
+  // ===========================================================================
+
+  get putting() { return this.club === PUTTER; }
+
+  beginAim() {
+    const { ball, world } = this;
+    placeBall(ball, world, ball.x, ball.z);
+    this.sink = 0;
+    this.timeScale = 1;
+    this.fastForward = false;
+    this.onTee = this.strokes === 0;
+    this.lie = lieFor(ball.surface);
+
+    const toPin = Math.hypot(world.cup.x - ball.x, world.cup.z - ball.z);
+    this.target = this.lie.id === 'green' ? { x: world.cup.x, z: world.cup.z, isPin: true } : aimTarget(world, ball.x, ball.z);
+    this.targetDist = Math.hypot(this.target.x - ball.x, this.target.z - ball.z);
+    this.aimAngle = Math.atan2(this.target.z - ball.z, this.target.x - ball.x);
+    this.setClub(autoSelectClub(this.targetDist, this.lie, this.onTee));
+    this.toPin = toPin;
+
+    this.setState('aim');
+    this.swing.phase = 'idle';
+    this.charging = false;
+    this.hud.setControlsVisible(true);
+    this.updateScoreHud();
+    this.rig.cut();
+    this.showHint();
+  }
+
+  setClub(club) {
+    this.club = club;
+    this.planDirty = true;
+    this.puttMax = null;
+    if (this.putting) {
+      // Putts always start aimed at the hole, whatever the path says
+      this.target = { x: this.world.cup.x, z: this.world.cup.z, isPin: true };
+      this.targetDist = Math.hypot(this.target.x - this.ball.x, this.target.z - this.ball.z);
+      this.effects.beads.layout(this.world, this.ball);
+    } else {
+      this.effects.beads.hide();
+    }
+    this.refreshClubHud();
+  }
+
+  availableClubs() {
+    return CLUBS.filter((c) => clubAllowed(c, this.lie, this.onTee));
+  }
+
+  cycleClub(dir) {
+    if (this.state !== 'aim' || this.paused) return;
+    const list = this.availableClubs();
+    const i = list.indexOf(this.club);
+    const next = list[Math.max(0, Math.min(list.length - 1, i + dir))];
+    if (next && next !== this.club) {
+      this.audio.tap();
+      const wasPutting = this.putting;
+      this.setClub(next);
+      if (wasPutting !== this.putting) this.aimAngle = Math.atan2(this.world.cup.z - this.ball.z, this.world.cup.x - this.ball.x);
     }
   }
 
-  /**
-   * Begin the swing (click 1): the marker sweeps up for power.
-   */
-  startSwing() {
-    if (this.swing.phase !== 'idle') return;
-
-    startSwing(this.swing);
-    this.setGameState('HITTING');
-    this.ui.showSwingMeter();
-    this.ui.setSwingPhase('power');
-
-    if (window.DEBUG) console.log("Swing started - click to set power");
+  refreshClubHud() {
+    const lie = this.lie;
+    const penalty = Math.round((1 - lie.speedFactor) * 100);
+    const lieText = this.onTee ? 'TEE' : penalty ? `${lie.name.toUpperCase()} −${penalty}%` : lie.name.toUpperCase();
+    if (this.putting) {
+      this.hud.setClub({ name: 'Putter', yards: `${feet(this.targetDist)} ft to hole`, lie: lieText, canChange: this.availableClubs().length > 1 });
+      this.hud.setSwingButton('PUTT', 'hold', 'ready');
+    } else {
+      const max = Math.round(distanceAt(this.club, 100, lie.speedFactor));
+      this.hud.setClub({ name: this.club.name, yards: `${max}y max`, lie: lieText, lieBad: penalty > 0, canChange: true });
+      this.hud.setSwingButton('SWING', '', 'ready');
+    }
   }
 
-  /**
-   * A swing click: click 2 locks power, click 3 strikes the ball.
-   */
+  /** Recompute the shot preview for the current aim/club. */
+  updatePlan() {
+    const { ball, world } = this;
+    const dirX = Math.cos(this.aimAngle), dirZ = Math.sin(this.aimAngle);
+    this.dirX = dirX; this.dirZ = dirZ;
+
+    if (this.putting) {
+      const dist = Math.hypot(world.cup.x - ball.x, world.cup.z - ball.z);
+      this.idealSpeed = puttSpeedFor(world, ball, dirX, dirZ, dist);
+      if (!this.puttMax) this.puttMax = puttMeterMax(this.idealSpeed);
+      this.idealPct = Math.min(96, (this.idealSpeed / this.puttMax) * 100);
+      const preview = previewPutt(world, ball, dirX, dirZ, this.idealSpeed);
+      this.effects.aimArc.hide();
+      this.effects.ring.visible = false;
+      this.effects.showPutt(preview.points, preview.holed);
+      this.landing = null;
+      this.hud.showPuttMeter(this.idealPct);
+      this.hud.setMeterCaption(preview.holed ? 'GOOD LINE — HIT THE PACE' : 'DRAG TO MOVE THE LINE');
+    } else {
+      const reach = distanceAt(this.club, 100, this.lie.speedFactor);
+      this.idealPower = reach >= this.targetDist ? powerFor(this.club, this.targetDist, this.lie.speedFactor) : null;
+      this.slope = slopeAlong(world, ball, dirX, dirZ);
+      const launch = buildLaunch({
+        club: this.club, power: this.idealPower ?? 100, dirX, dirZ, lie: this.lie, slope: this.slope,
+      });
+      const preview = previewShot(world, ball, launch);
+      this.effects.puttLine.hide();
+      this.landing = { x: preview.landX, y: preview.landY, z: preview.landZ };
+      const camDist = Math.hypot(preview.landX - this.camera.position.x, preview.landZ - this.camera.position.z);
+      this.effects.showAim(preview.points, preview.landX, world.heightAt(preview.landX, preview.landZ), preview.landZ, camDist);
+      if (this.state === 'aim') this.hud.hideMeter();
+    }
+    this.planDirty = false;
+  }
+
+  showHint() {
+    if (this.putting) {
+      this.hud.hint(this.hints.putt < 3 ? 'Drag to line it up · hold PUTT, release on the dashed mark' : null, true);
+    } else {
+      this.hud.hint(this.hints.swing < 3 ? 'Drag to aim · tap SWING to start' : null);
+    }
+  }
+
+  // ===========================================================================
+  // Swing input
+  // ===========================================================================
+
+  /** Tap on the course (not a button). */
+  tap() {
+    if (this.paused) return;
+    if (this.state === 'intro' && this.stateTime > 0.5) this.endIntro();
+    else if (this.state === 'swing' && !this.putting) this.advanceSwing();
+    else if (this.state === 'flight') this.fastForward = true;
+    else if (this.state === 'result') this.nextHole?.();
+  }
+
+  swingDown() {
+    if (this.paused) return;
+    if (this.state === 'intro') { if (this.stateTime > 0.5) this.endIntro(); return; }
+    if (this.state === 'flight') { this.fastForward = true; return; }
+    if (this.state === 'aim') {
+      if (this.planDirty) this.updatePlan();
+      if (this.putting) {
+        this.charging = true;
+        this.puttPower = 0;
+        this.puttDir = 1;
+        this.setState('swing');
+        this.hud.setSwingButton('RELEASE', 'on the mark', 'go');
+        this.hud.hint(this.hints.putt < 3 ? 'Let go when the bar reaches the dashed mark' : null, true);
+      } else {
+        startSwing(this.swing);
+        this.setState('swing');
+        this.hud.showSwingMeter(this.idealPower);
+        this.hud.setMeterCaption(this.idealPower ? 'TAP IN THE DASHED BOX' : 'FULL POWER!');
+        this.hud.setSwingButton('POWER', 'tap', 'go');
+        this.hud.hint(this.hints.swing < 3 ? 'Tap again to set your power' : null);
+        this.audio.tap();
+      }
+    } else if (this.state === 'swing' && !this.putting) {
+      this.advanceSwing();
+    }
+  }
+
+  swingUp() {
+    if (this.state !== 'swing' || !this.putting || !this.charging) return;
+    this.charging = false;
+    if (this.puttPower < 5) {
+      // A stray tap, not a stroke
+      this.setState('aim');
+      this.refreshClubHud();
+      this.hud.updatePuttMeter(0);
+      this.showHint();
+      return;
+    }
+    this.hitPutt(this.puttPower);
+  }
+
   advanceSwing() {
     const event = swingClick(this.swing);
-    if (!event) return;
+    if (event) this.handleSwingEvent(event);
+  }
 
+  handleSwingEvent(event) {
     if (event.type === 'powerLocked') {
-      this.ui.setSwingPhase('accuracy');
-      this.ui.updateSwingMeter(this.swing);
-      this.renderDirty = true;
+      this.audio.powerLock(event.power);
+      this.hud.setSwingButton('HIT!', 'on the line', 'go');
+      this.hud.setMeterCaption('TAP ON THE WHITE LINE');
+      this.hud.hint(this.hints.swing < 3 ? 'Now tap as the marker crosses the white line' : null);
     } else if (event.type === 'strike') {
-      this.executeSwingHit(event.timing);
+      this.hitShot(event.timing);
     }
   }
 
-  /**
-   * Cancel an in-progress swing (Escape) and return to aiming.
-   */
-  cancelSwing() {
-    if (this.gameState !== 'HITTING' || this.swing.phase === 'idle') return;
-    this.swing.phase = 'idle';
-    this.ui.hideSwingMeter();
-    this.setGameState('AIMING');
-    if (this.ui.showReadyIndicator) this.ui.showReadyIndicator();
-    if (window.DEBUG) console.log("Swing cancelled");
+  // ===========================================================================
+  // Hitting
+  // ===========================================================================
+
+  beginFlight(wasPutt) {
+    const { ball } = this;
+    this.shot = {
+      putt: wasPutt,
+      fromX: ball.x, fromZ: ball.z,
+      fromSurface: this.onTee ? 'tee' : ball.surface,
+      toPin: this.toPin,
+      treeCalled: false,
+    };
+    this.strokes += 1;
+    this.round.stats.swings += 1;
+    this.updateScoreHud(`SHOT ${this.strokes}`);
+    this.hud.hideMeter();
+    this.hud.hint(null);
+    this.hud.setControlsVisible(false);
+    this.effects.hideAim();
+    this.effects.beads.hide();
+    this.setState('flight');
+    this.simAccumulator = 0;
   }
 
-  /**
-   * Debug/replay hook (window.THREEWOOD.debugSwing): execute a full swing
-   * with exact inputs from AIMING. timing: + = early/pull, - = late/push.
-   */
-  debugSwing(power, timing = 0) {
-    if (this.gameState !== 'AIMING' || !this.ball || !this.ball.isResting) return false;
-    this.swing.power = Math.max(2, Math.min(100, power));
-    this.executeSwingHit(timing);
+  /** Dry-run the shot so the camera knows where the ball will end up. */
+  planShot() {
+    const b = copyBall(this.ball);
+    const events = [];
+    let t = 0, landTime = null;
+    while ((b.mode === 'air' || b.mode === 'roll') && t < 40) {
+      stepBall(b, this.world, this.env, SIM_DT, events);
+      t += SIM_DT;
+      if (landTime === null && b.landed) landTime = t;
+    }
+    return {
+      landTime: landTime ?? t,
+      time: t,
+      restX: b.x, restZ: b.z,
+      holed: b.mode === 'holed',
+      lipout: events.some((e) => e.type === 'lipout'),
+    };
+  }
+
+  hitShot(timing) {
+    const { ball } = this;
+    const strike = strikeFromTiming(timing, this.club.loft, this.rng);
+    const launch = buildLaunch({
+      club: this.club, power: this.swing.power, dirX: this.dirX, dirZ: this.dirZ,
+      lie: this.lie, strike, scatter: this.rng() * 2 - 1, slope: this.slope,
+    });
+    this.beginFlight(false);
+    launchBall(ball, launch);
+    this.plan = this.planShot();
+    this.shot.chase = this.plan.landTime > 2.1;
+
+    const pure = strike.grade === 'pure';
+    this.audio.strike(this.swing.power, strike.grade);
+    this.effects.strikeFlash(ball.x, ball.y, ball.z, pure);
+    this.effects.startTrail(pure ? 0xffd84a : 0xffffff);
+    this.rig.addShake(pure ? 0.22 : 0.12);
+    this.hud.callout(describeStrike(strike), pure ? 'gold' : strike.grade === 'good' ? '' : 'bad');
+
+    const round = this.round;
+    if (pure) {
+      round.pureStreak += 1;
+      round.stats.pures += 1;
+      this.award(round.pureStreak > 1 ? `Pure strike ×${round.pureStreak}` : 'Pure strike', 50 * Math.min(5, round.pureStreak), true);
+    } else {
+      round.pureStreak = 0;
+    }
+    if (this.hints.swing < 3) { this.hints.swing += 1; store.set(HINT_KEY, this.hints); }
+  }
+
+  hitPutt(power) {
+    const speed = puttSpeedAt(this.puttMax, power);
+    this.beginFlight(true);
+    this.putts += 1;
+    this.round.stats.putts += 1;
+    puttBall(this.ball, { speed, dirX: this.dirX, dirZ: this.dirZ });
+    this.plan = this.planShot();
+    this.audio.putt(speed);
+    const off = (power - this.idealPct) / this.idealPct;
+    if (Math.abs(off) < 0.06) this.hud.callout('PERFECT PACE', 'gold small');
+    if (this.hints.putt < 3) { this.hints.putt += 1; store.set(HINT_KEY, this.hints); }
+  }
+
+  /** Add points; `now` pops it on screen immediately. */
+  award(label, points, now = false) {
+    this.bonuses.push({ label, points });
+    this.holePoints += points;
+    this.round.points += points;
+    this.hud.setPoints(this.round.points, true);
+    if (now) {
+      this.hud.callout(`+${points}`, 'pts');
+      this.audio.reward(this.bonuses.length);
+    }
+  }
+
+  // ===========================================================================
+  // Flight
+  // ===========================================================================
+
+  updateFlight(dt) {
+    const { ball, world, plan, shot } = this;
+
+    // Drama: slow the last moment of a putt that is going to scare the hole
+    let scale = 1;
+    const cupDist = Math.hypot(world.cup.x - ball.x, world.cup.z - ball.z);
+    if (shot.putt && (plan.holed || plan.lipout) && cupDist < 1.6 && cupDist > 0.2) scale = 0.4;
+    else if (this.fastForward && ball.mode === 'roll') scale = 3;
+    this.timeScale += (scale - this.timeScale) * Math.min(1, dt * 10);
+
+    this.simAccumulator += dt * this.timeScale;
+    this.events.length = 0;
+    let steps = 0;
+    while (this.simAccumulator >= SIM_DT && steps < 40 && (ball.mode === 'air' || ball.mode === 'roll')) {
+      stepBall(ball, world, this.env, SIM_DT, this.events);
+      this.simAccumulator -= SIM_DT;
+      steps++;
+    }
+    if (ball.mode === 'air' && !ball.landed) this.effects.addTrailPoint(ball.x, ball.y, ball.z);
+
+    for (const e of this.events) this.handleBallEvent(e);
+    if (this.state !== 'flight') return;
+
+    // Camera
+    if (shot.putt) {
+      this.rig.watch(ball, 0.25);
+    } else if (shot.chase) {
+      if (ball.time > plan.landTime - 1.25 || ball.mode !== 'air') {
+        this.rig.landing(ball, plan.restX, plan.restZ, shot.fromX, shot.fromZ);
+      } else {
+        this.rig.chase(ball);
+      }
+    } else {
+      this.rig.watch(ball, 0.1);
+    }
+  }
+
+  handleBallEvent(e) {
+    const fx = this.effects;
+    switch (e.type) {
+      case 'land':
+        fx.puff(e.x, e.y, e.z, e.surface, Math.min(1.6, e.speed / 18));
+        this.audio.bounce(e.speed * 0.5, e.surface);
+        break;
+      case 'roll':
+        fx.endTrail();
+        break;
+      case 'bounce':
+        fx.puff(e.x, e.y, e.z, e.surface, Math.min(1, e.speed / 12));
+        this.audio.bounce(e.speed, e.surface);
+        break;
+      case 'tree':
+        this.audio.tree();
+        fx.puff(e.x, e.y, e.z, 'rough', 1.2);
+        if (!this.shot.treeCalled) { this.hud.callout('TIMBER!', 'bad small'); this.shot.treeCalled = true; }
+        break;
+      case 'lipout':
+        this.audio.lipOut();
+        this.hud.callout('LIP OUT!', 'bad');
+        break;
+      case 'splash':
+        fx.splash(e.x, e.y, e.z);
+        this.audio.splash();
+        this.penalty('WATER');
+        break;
+      case 'oob':
+        this.penalty('OUT OF BOUNDS');
+        break;
+      case 'holed':
+        this.holed(e);
+        break;
+      case 'rest':
+        this.atRest();
+        break;
+      default:
+        break;
+    }
+  }
+
+  penalty(label) {
+    this.effects.endTrail();
+    this.strokes += 1;
+    this.round.pureStreak = 0;
+    this.hud.callout(label, 'bad');
+    this.hud.callout('+1 PENALTY', 'bad small');
+    this.audio.penalty();
+    this.updateScoreHud();
+    this.ballMesh.visible = this.blob.visible = false;
+    this.setState('settle');
+    this.settleFor = 1.5;
+    this.afterSettle = () => {
+      const { ball, world, shot } = this;
+      // Drop a touch back from where it last crossed dry land
+      let x = ball.dryX, z = ball.dryZ;
+      const dx = shot.fromX - x, dz = shot.fromZ - z;
+      const d = Math.hypot(dx, dz);
+      if (d > 3) { x += (dx / d) * 2; z += (dz / d) * 2; }
+      if (world.surfaceAt(x, z) === 'water') { x = shot.fromX; z = shot.fromZ; }
+      placeBall(ball, world, x, z);
+      this.ballMesh.visible = this.blob.visible = true;
+      if (!this.pickUpIfDone()) this.beginAim();
+    };
+  }
+
+  /** Too many strokes: concede the hole so a bad one never stalls the round. */
+  pickUpIfDone() {
+    const limit = this.world.spec.par + 5;
+    if (this.strokes < limit) return false;
+    this.strokes = limit;
+    this.hud.callout('PICKED UP', 'bad');
+    this.finishHole();
     return true;
   }
 
-  /**
-   * Strike the ball with the locked power and a signed timing error.
-   * @param {number} timing -1..1 (+ early/pull, - late/push) from the meter
-   */
-  executeSwingHit(timing) {
-    // Play swing sound before hitting
-    this.audioManager.playSwingSound();
+  atRest() {
+    const { ball, world, shot, round } = this;
+    this.effects.endTrail();
+    const toPin = Math.hypot(world.cup.x - ball.x, world.cup.z - ball.z);
+    const carried = Math.hypot(ball.x - shot.fromX, ball.z - shot.fromZ);
+    const surface = ball.surface;
+    const par = world.spec.par;
 
-    // Compute the strike outcome (mishit model) from the seeded ball stream
-    const strike = strikeFromTiming(timing, this.currentLoft, this.ball.rng);
-    this.lastStrike = strike;
-
-    if (window.DEBUG) {
-      console.log(`Strike: power ${this.swing.power.toFixed(1)}, timing ${timing.toFixed(3)} ->`,
-        describeStrike(strike), strike);
-    }
-
-    // Get current power and direction
-    let power = this.swing.power;
-    
-    // Use the stored shot direction if available, otherwise fall back to camera direction
-    let direction;
-    if (this.currentShotDirection && this.currentShotDirection.horizontal) {
-      direction = this.currentShotDirection.horizontal.clone();
+    if (shot.putt) {
+      if (toPin < GIMME) {
+        // Conceded: knock it in without making the player line up a six-incher
+        this.strokes += 1;
+        this.putts += 1;
+        round.stats.putts += 1;
+        this.shot.gimme = true;
+        this.hud.callout('TAP-IN', 'small');
+        const d = toPin || 1;
+        puttBall(ball, { speed: 1.1, dirX: (world.cup.x - ball.x) / d, dirZ: (world.cup.z - ball.z) / d });
+        this.plan = this.planShot();
+        this.updateScoreHud();
+        return;
+      }
+      this.hud.callout(`${feet(toPin)} ft left`, 'small');
+      if (shot.toPin > 8 && toPin < 1.2) this.award('Great lag putt', 100, true);
     } else {
-      direction = this.cameraController.getAimDirection();
-    }
-    
-    let loft = this.currentLoft;
-
-    // --- Calculate the true launch vector (aim + loft) for collision checks ---
-    let launchDirection;
-    
-    // Use the pre-calculated full direction if available
-    if (this.currentShotDirection && this.currentShotDirection.full) {
-      launchDirection = this.currentShotDirection.full.clone();
-    } else {
-      // Fallback to calculating from direction and loft
-      launchDirection = direction.clone();
-      const loftRadians = loft * Math.PI / 180;
-      const upVector = new THREE.Vector3(0, 1, 0);
-      const rotationAxis = new THREE.Vector3().crossVectors(upVector, launchDirection).normalize();
-      launchDirection.applyAxisAngle(rotationAxis, loftRadians);
-    }
-    
-    launchDirection.normalize();
-    
-    // Store this direction on the ball for deflection logic on first impact
-    this.ball.lastShotDirection = launchDirection.clone();
-    
-    // Get spin values with safe default
-    let spinValues = this.spinValues || { x: 0, y: 0 };
-    if (!spinValues.x && !spinValues.y) {
-      // If no spin values stored, try getting from UI
-      try {
-        if (this.ui && this.ui.spinValues) {
-          spinValues = this.ui.spinValues;
+      if (shot.fromSurface === 'tee' && par > 3) {
+        round.stats.fairwayChances += 1;
+        round.stats.longestDrive = Math.max(round.stats.longestDrive, Math.round(carried));
+        if (surface === 'fairway') {
+          round.stats.fairways += 1;
+          this.hud.callout('FAIRWAY!', '');
+          this.award('Fairway hit', 100, true);
+          if (carried >= 195) { this.hud.callout(`${Math.round(carried)}y BOMB`, 'gold small'); this.award('Big drive', 100); }
         }
-      } catch (e) {
-        console.warn("Error getting spin values:", e);
+      }
+      if (surface === 'green') {
+        if (shot.fromSurface !== 'green') {
+          this.hud.callout('ON THE GREEN', '');
+          this.award('Hit the green', 150, true);
+          if (this.strokes <= par - 2) { round.stats.gir += 1; this.award('Green in regulation', 100); }
+        }
+        if (toPin * 3 <= 6) { this.hud.callout(`STONE DEAD · ${feet(toPin)} ft`, 'gold small'); this.award('Stone dead', 400); }
+        else if (toPin * 3 <= 15) { this.hud.callout(`STUCK IT · ${feet(toPin)} ft`, 'gold small'); this.award('Stuck it close', 250); }
+        else this.hud.callout(`${feet(toPin)} ft to the hole`, 'small');
+      } else if (surface === 'bunker') {
+        this.hud.callout('BUNKER', 'bad');
+      } else if (surface === 'rough') {
+        this.hud.callout('ROUGH', 'bad small');
+      } else if (surface === 'fringe') {
+        this.hud.callout('FRINGE', 'small');
+      } else if (surface === 'fairway' && shot.fromSurface !== 'tee') {
+        this.hud.callout(`${Math.round(toPin)}y to go`, 'small');
       }
     }
-    
-    // Calculate sidespin based on horizontal (x) position
-    // Negative x = left spin (hook), Positive x = right spin (slice)
-    let sidespin = (spinValues.x || 0); // Use raw value from spin selector
-    
-    // Hit the ball using the horizontal direction, loft angle, sidespin, the
-    // strike outcome (mishit yaw / thin-fat launch changes), and the club's
-    // launch profile (max ball speed + spin shaping) — plus the lie, which
-    // bleeds speed/spin and twists the club in rough and sand
-    const shot = {
-      maxSpeed: this.currentMaxSpeed,
-      spinFactor: VARIANTS[this.currentVariant].spinFactor,
-      lie: getLieAt(this.terrain, this.ball.position),
+
+    this.setState('settle');
+    this.settleFor = 1.0;
+    this.afterSettle = () => { if (!this.pickUpIfDone()) this.beginAim(); };
+  }
+
+  // ===========================================================================
+  // Holing out
+  // ===========================================================================
+
+  holed(e) {
+    const { shot, world, round } = this;
+    const par = world.spec.par;
+    this.effects.endTrail();
+    this.audio.cup();
+    this.sink = 0.001;
+    this.timeScale = 1;
+    this.effects.confetti(world.cup.x, world.cup.y, world.cup.z, 70 + Math.max(0, par - this.strokes) * 50);
+    this.rig.addShake(0.08);
+
+    if (shot.putt && !shot.gimme) {
+      const ft = feet(shot.toPin);
+      round.stats.longestPutt = Math.max(round.stats.longestPutt, ft);
+      if (ft >= 20) this.hud.callout(`${ft} FT BOMB!`, 'gold');
+      this.award(`${ft} ft putt holed`, Math.min(600, 40 + ft * 14));
+      if (this.putts === 1) this.award('One-putt', 150);
+    } else if (!shot.putt) {
+      if (this.strokes === 1) this.award('HOLE IN ONE', 10000);
+      else if (shot.toPin > 60) this.award('Holed from the fairway', 3000);
+      else this.award(e.dunk ? 'Slam dunk' : 'Chip-in', 1000);
+      this.hud.callout(this.strokes === 1 ? 'ACE!!!' : 'HOLED IT!', 'gold');
+    }
+
+    const d = this.strokes - par;
+    const scoreBonus = d <= -2 ? 1500 : d === -1 ? 600 : d === 0 ? 200 : d === 1 ? 50 : 0;
+    if (scoreBonus) this.award(scoreName(this.strokes, par).replace('!', ''), scoreBonus);
+
+    this.setState('holed');
+    this.celebrateAngle = Math.atan2(this.camera.position.z - world.cup.z, this.camera.position.x - world.cup.x);
+    setTimeout(() => {
+      this.hud.callout(scoreName(this.strokes, par), d < 0 ? 'gold' : d > 0 ? 'bad' : '');
+      this.audio.fanfare(d <= -2 ? 3 : d === -1 ? 2 : d === 0 ? 1 : 0);
+    }, 450);
+  }
+
+  finishHole() {
+    const { round, world } = this;
+    const par = world.spec.par;
+    round.scores[round.index] = { number: world.spec.number, par, strokes: this.strokes, putts: this.putts };
+    const last = round.index >= round.holes.length - 1;
+    const card = this.cardData();
+    round.index += 1;
+    store.set(SAVE_KEY, round);
+
+    const d = this.strokes - par;
+    this.hud.setPlayVisible(false);
+    this.updateScoreHud();
+    this.setState('result');
+    this.nextHole = () => {
+      this.nextHole = null;
+      this.audio.tap();
+      this.hud.clearLayer();
+      if (last) this.showSummary(); else this.startHole();
     };
-    this.ball.hit(power, direction, loft, sidespin, strike, shot);
-
-    // Strike feedback on the meter ("PURE!", "PULL · THIN", ...)
-    this.ui.showStrikeFeedback(describeStrike(strike), strike.grade);
-    
-    // Hide the spin selector and indicator after hitting
-    try {
-      if (this.ui) {
-        if (this.ui.hideSpinSelector) this.ui.hideSpinSelector();
-        if (this.ui.hideSpinIndicator) this.ui.hideSpinIndicator();
-      }
-    } catch (e) {
-      console.warn("Error hiding spin UI:", e);
-    }
-    
-    // Increment stroke count
-    this.strokes++;
-
-    // Reset the swing
-    this.swing.phase = 'idle';
-    this.ui.hideSwingMeter();
-    
-    // Change camera mode to watch the ball
-    this.cameraController.watchBallInFlight();
-    
-    // Change game state
-    this.setGameState('WATCHING');
-    
-    // Update UI
-    this.ui.updateStrokes(this.strokes);
-  }
-
-  /**
-   * Begin the sink animation: tween the ball from its current position down
-   * into the cup, then fire hole-complete. The ball physics loop can't do this
-   * (it early-returns when isResting and the state would stop calling it), so
-   * the Game drives the sink directly via ball.sinkTo().
-   */
-  startSink() {
-    if (!this.terrain || !this.terrain.hole) return;
-    const hole = this.terrain.hole;
-    const ballRadius = this.ball.options.radius;
-
-    // Capture the ball's current position and snap horizontally to hole center.
-    const start = {
-      x: this.ball.position.x,
-      y: this.ball.position.y,
-      z: this.ball.position.z,
-    };
-    // End: centered in the cup, resting on the cup floor.
-    const end = {
-      x: hole.x,
-      y: hole.bottomY + ballRadius, // ball sits on the cup floor
-      z: hole.z,
-    };
-
-    this.setGameState('SINKING');
-
-    // Keep existing tweens from piling up if startSink fires twice.
-    if (this._sinkTween) this._sinkTween.stop();
-
-    // NOTE: second arg `true` adds the tween to the mainGroup — without it
-    // TWEEN.update() never advances this tween (sink would hang in SINKING).
-    this._sinkTween = new TWEEN.Tween(start, true)
-      .to(end, 600)
-      .easing(TWEEN.Easing.Quadratic.In)
-      .onUpdate(() => {
-        this.ball.sinkTo(new THREE.Vector3(start.x, start.y, start.z));
-      })
-      .onComplete(() => {
-        this._sinkTween = null;
-        this.handleHoleComplete();
-      })
-      .start();
-  }
-
-  /**
-   * Show the spin selector UI
-   */
-  showSpinSelector() {
-    if (this.gameState !== 'AIMING') return;
-    
-    // Show the spin selector UI
-    this.ui.showSpinSelector();
-  }
-  
-  /**
-   * Toggle camera mode (follow/overview)
-   */
-  toggleCameraMode() {
-    this.renderDirty = true;
-    if (this.cameraController.currentMode === this.cameraController.MODES.FOLLOW) {
-      this.cameraController.setMode(this.cameraController.MODES.OVERVIEW);
-    } else {
-      this.cameraController.setMode(this.cameraController.MODES.FOLLOW);
-    }
-  }
-  
-  /**
-   * Reset the ball to the tee
-   */
-  resetBall() {
-    this.renderDirty = true;
-    if (window.DEBUG) console.log('[Game.resetBall] Resetting ball. Tee Pos:', this.terrain.teePosition.toArray());
-    this.ball.reset(); // Ball.reset() uses terrain.teePosition if no arg is given
-    if (window.DEBUG) console.log('[Game.resetBall] Ball position after reset:', this.ball.position.toArray());
-    this.strokes = 0;
-    
-    // Update UI
-    this.ui.updateStrokes(this.strokes);
-    
-    // Point the camera toward the hole before setting game state
-    if (this.cameraController && this.terrain && this.terrain.holePosition) {
-      // Calculate direction from ball to hole
-      const ballPos = this.ball.position;
-      const holePos = this.terrain.holePosition;
-
-      // Aim the camera at the hole (faceHole uses the correct atan2 convention
-      // for the aim vector (cos θ, 0, sin θ)).
-      this.cameraController.faceHole(holePos, ballPos);
-    }
-    
-    // Ensure the game state is set to allow hitting
-    // We need to set it to READY_TO_HIT which will transition to AIMING
-    // This is critical for allowing the player to hit the ball again
-    this.setGameState('READY_TO_HIT');
-    
-    // Show the shot arrow again
-    if (this.shotArrow) {
-      this.shotArrow.visible = true;
-    }
-    
-    // Reset any other game state variables that might prevent hitting
-    this.swing.phase = 'idle';
-    if (this.ui) {
-      this.ui.hideSwingMeter();
-      this.ui.showReadyIndicator();
-    }
-  }
-
-  // Hole-in detection is handled in update()'s WATCHING branch via
-  // terrain.checkBallInHole(this.ball) -> this.handleHoleComplete().
-  // That path is guarded to fire once; no separate checkBallInHole here.
-  
-  /**
-   * Set the game state
-   */
-  /** Current game state name (delegates to the state machine). */
-  get gameState() {
-    return this.fsm.state;
-  }
-
-  /**
-   * Declare every legal state and its enter hook. Replaces the old
-   * string-switch; unknown states now throw instead of silently no-op'ing.
-   */
-  createStateMachine() {
-    return new StateMachine({
-      TITLE: {},
-      READY_TO_HIT: {
-        enter: (previousState) => {
-          // Reset any lingering state from previous gameplay
-          if (previousState === 'HOLE_COMPLETE') {
-            if (window.DEBUG) console.log('Transitioning from HOLE_COMPLETE to READY_TO_HIT');
-            if (this.ball && this.ball.velocity) {
-              this.ball.velocity.set(0, 0, 0);
-              this.ball.isResting = true;
-            }
-          }
-          // Immediately transition to aiming
-          this.setGameState('AIMING');
-        }
-      },
-      AIMING: {
-        enter: (previousState) => {
-          // Aim at the next path waypoint ahead (dogleg corner, not through
-          // the trees) so the intended line is readable from every lie.
-          if (this.cameraController && this.terrain && this.ball) {
-            this.cameraController.faceHole(this.getAimTarget(this.ball.position), this.ball.position);
-          }
-          this.cameraController?.setMode(this.cameraController.MODES.AIMING);
-          if (window.DEBUG) console.log("Player can now aim/adjust club");
-
-          // Auto club selection on a new lie (skipped when we arrived here by
-          // cancelling a swing — keep the player's manual choice then).
-          // Lie-aware: rough/sand penalties call for more club.
-          if (previousState !== 'HITTING' && this.terrain?.holePosition && this.ball) {
-            const distToPin = Math.hypot(
-              this.ball.position.x - this.terrain.holePosition.x,
-              this.ball.position.z - this.terrain.holePosition.z
-            );
-            const lie = getLieAt(this.terrain, this.ball.position);
-            this.selectClub(autoSelectClub(distToPin, lie.id === 'green', lie));
-          }
-
-          // Reset spin values for a new shot
-          this.resetSpinValues();
-
-          // Show spin indicator if there's spin applied
-          try {
-            if (this.ui && this.ui.spinValues &&
-                (Math.abs(this.ui.spinValues.x) > 0.05 || Math.abs(this.ui.spinValues.y) > 0.05)) {
-              this.ui.updateSpinIndicator();
-            }
-          } catch (e) {
-            console.warn("Could not update spin indicator:", e);
-          }
-        }
-      },
-      HITTING: {
-        enter: () => {
-          if (window.DEBUG) console.log("Power meter active");
-          if (this.shotArrow) this.shotArrow.visible = false;
-        }
-      },
-      WATCHING: {
-        enter: () => {
-          if (window.DEBUG) console.log("Ball in motion");
-          if (this.shotArrow) this.shotArrow.visible = false;
-          try {
-            if (this.ui && this.ui.hideSpinIndicator) {
-              this.ui.hideSpinIndicator();
-            }
-          } catch (e) {
-            console.warn("Could not hide spin indicator:", e);
-          }
-        }
-      },
-      CAMERA_TRANSITION: {
-        enter: () => {
-          if (window.DEBUG) console.log("Camera transitioning to aiming position");
-          if (this.ui && this.ui.showTransitionIndicator) {
-            this.ui.showTransitionIndicator();
-          }
-        }
-      },
-      SINKING: {},
-      HOLE_COMPLETE: {},
-    }, {
-      onTransition: (prev, next) => {
-        if (window.DEBUG) console.log(`Game state changing from ${prev} to ${next}`);
-        this.renderDirty = true;
-      }
+    this.hud.showResult({
+      title: scoreName(this.strokes, par),
+      kind: d < 0 ? 'gold' : '',
+      strokes: this.strokes, par,
+      bonuses: this.bonuses,
+      holePoints: this.holePoints,
+      card, last,
+      onNext: () => this.nextHole?.(),
     });
   }
 
-  /**
-   * Change the current game state (delegates to the state machine).
-   */
-  setGameState(state) {
-    this.fsm.set(state);
-  }
-  
-  /**
-   * Toggle the spin selector visibility
-   */
-  toggleSpinSelector() {
-    try {
-      if (!this.ui) return;
-      
-      if (!this.isSpinSelectorOpen) {
-        // Show spin selector
-        this.isSpinSelectorOpen = true;
-        
-        // Use the UI's showSpinSelector method
-        if (this.ui.showSpinSelector) {
-          this.ui.showSpinSelector((spinValues) => {
-            // This is the callback when spin is confirmed
-            if (window.DEBUG) console.log("Spin applied:", spinValues);
-            // Store spin values for use when hitting
-            this.spinValues = spinValues;
-          });
-        }
-      } else {
-        // Hide spin selector
-        this.isSpinSelectorOpen = false;
-        
-        if (this.ui.closeSpinSelector) {
-          this.ui.closeSpinSelector(false); // false = don't call callback
-        }
+  showSummary() {
+    const round = this.round;
+    const total = this.roundTotal();
+    const strokes = round.scores.reduce((s, h) => s + h.strokes, 0);
+    const par = round.scores.reduce((s, h) => s + h.par, 0);
+    const st = round.stats;
+    let best = false;
+    if (round.length === 18) {
+      const prev = store.get(BEST_KEY);
+      if (!prev || total < prev.score || (total === prev.score && round.points > prev.points)) {
+        store.set(BEST_KEY, { score: total, points: round.points, seed: round.seed });
+        best = true;
       }
-    } catch (e) {
-      console.warn("Error toggling spin selector:", e);
     }
-  }
-  
-  /**
-   * Main animation/game loop
-   */
-  animate() {
-    requestAnimationFrame(() => this.animate());
-    
-    try {
-      // Update game state
-      this.update();
-      
-      // Render the scene only when necessary
-      const shouldRender = this.renderDirty ||
-                          this.gameState === 'WATCHING' ||
-                          this.gameState === 'SINKING' ||
-                          this.gameState === 'CAMERA_TRANSITION' ||
-                          (this.gameState === 'HITTING' && this.swing.phase !== 'idle');
-                          
-      if (shouldRender) {
-        this.renderer.render(this.scene, this.camera);
-        this.renderDirty = false;
-      }
-
-      // Update FPS counter
-      if (this.fpsCounter) {
-        this.fpsCounter.update();
-      }
-    } catch (error) {
-      console.error("Error in animation loop:", error);
-    }
-  }
-
-  /** Current club object from the bag. */
-  get currentClub() {
-    return CLUBS[this.clubIndex];
-  }
-
-  /** Current shot variant id ('full' | 'punch' | 'flop' | 'chip'). */
-  get currentVariant() {
-    const club = this.currentClub;
-    return club.variants[this.variantIndex] || 'full';
-  }
-
-  /** Effective launch loft in degrees (club + variant + wheel trim). */
-  get currentLoft() {
-    const base = effectiveLoft(this.currentClub, this.currentVariant);
-    return Math.max(1, Math.min(64, base + this.loftTrim));
-  }
-
-  /** Ball speed at 100% power for the current club + variant. */
-  get currentMaxSpeed() {
-    return launchSpeed(this.currentClub, this.currentVariant);
-  }
-
-  /**
-   * Cycle the club selection (up-down arrows). +1 = shorter club.
-   */
-  cycleClub(direction) {
-    if (this.gameState !== 'AIMING') return;
-    this.renderDirty = true;
-
-    const n = CLUBS.length;
-    this.clubIndex = ((this.clubIndex + direction) % n + n) % n;
-    // Keep the variant valid for the new club
-    if (this.variantIndex >= this.currentClub.variants.length) {
-      this.variantIndex = 0;
-    }
-    this.loftTrim = 0; // New club, fresh trajectory
-    this.updateClubDisplay();
-  }
-
-  /**
-   * Cycle the shot variant for the current club (V key).
-   */
-  cycleVariant() {
-    if (this.gameState !== 'AIMING') return;
-    this.renderDirty = true;
-
-    const variants = this.currentClub.variants;
-    this.variantIndex = (this.variantIndex + 1) % variants.length;
-    this.loftTrim = 0; // New shot type, fresh trajectory
-    this.updateClubDisplay();
-  }
-
-  /**
-   * Fine trajectory height on the mouse wheel: ±0.5° per notch, clamped to
-   * ±8° around the club + variant loft. Scroll up = higher, down = lower.
-   */
-  adjustLoftTrim(direction) {
-    if (this.gameState !== 'AIMING') return;
-    this.renderDirty = true;
-
-    const next = this.loftTrim + direction * 0.5;
-    this.loftTrim = Math.max(-8, Math.min(8, next));
-    this.updateClubDisplay();
-  }
-
-  /**
-   * Select a club by id (auto club selection on a new lie).
-   */
-  selectClub(clubId) {
-    const index = CLUBS.findIndex(c => c.id === clubId);
-    if (index === -1) return;
-    this.clubIndex = index;
-    this.variantIndex = 0;
-    this.loftTrim = 0;
-    this.updateClubDisplay();
-  }
-
-  /** Lie under the ball right now (fairway fallback when terrain is gone). */
-  get currentLie() {
-    return this.terrain && this.ball
-      ? getLieAt(this.terrain, this.ball.position)
-      : null;
-  }
-
-  /**
-   * Push the current club/variant/distance estimate to the HUD. The yardage
-   * is lie-adjusted — from the rough the book honestly says you get less.
-   */
-  updateClubDisplay() {
-    if (!this.ui) return;
-    const club = this.currentClub;
-    const variant = this.currentVariant;
-    const lie = this.currentLie;
-    this.ui.updateClubDisplay({
-      clubName: club.name,
-      variantName: VARIANTS[variant].name,
-      loft: this.currentLoft,
-      loftTrim: this.loftTrim,
-      distance: estimateDistance(club, variant, lie),
-      lieText: lie ? describeLie(lie) : null,
+    store.del(SAVE_KEY);
+    this.setState('summary');
+    this.audio.fanfare(total <= 0 ? 3 : 1);
+    const card = this.cardData();
+    card.holes.forEach((h) => { h.current = false; });
+    this.hud.showSummary({
+      total, par, strokes, points: round.points, best, seed: round.seed, card,
+      stats: [
+        { label: 'FAIRWAYS', value: `${st.fairways}/${st.fairwayChances}` },
+        { label: 'GREENS IN REG', value: `${st.gir}/${round.holes.length}` },
+        { label: 'PUTTS', value: st.putts },
+        { label: 'PURE STRIKES', value: st.pures },
+        { label: 'LONGEST DRIVE', value: `${st.longestDrive}y` },
+        { label: 'LONGEST PUTT', value: `${st.longestPutt} ft` },
+      ],
+      onAgain: () => {
+        this.seed = generateSeed();
+        history.replaceState(null, '', location.pathname);
+        this.hud.clearLayer();
+        this.showTitle();
+      },
+      onShare: async (button) => {
+        const url = `${location.origin}${location.pathname}?seed=${encodeURIComponent(round.seed)}`;
+        const text = `I shot ${total === 0 ? 'even par' : total > 0 ? `+${total}` : total} on ThreeWood course ${round.seed}. Beat it:`;
+        try {
+          if (navigator.share) await navigator.share({ title: 'ThreeWood', text, url });
+          else { await navigator.clipboard.writeText(`${text} ${url}`); button.textContent = 'LINK COPIED'; }
+        } catch { /* cancelled */ }
+      },
     });
   }
 
-  /**
-   * Reset an in-progress swing
-   * Called when closing spin selector or other cases where we need
-   * to cancel any accidental swing activation
-   */
-  resetPowerMeterState() {
-    if (this.gameState === 'HITTING' && !this.ball.isMoving) {
-      this.cancelSwing();
-    }
+  endIntro() {
+    this.hud.clearLayer();
+    this.audio.tap();
+    this.beginAim();
   }
 
-  /**
-   * Reset spin values for a new shot
-   */
-  resetSpinValues() {
-    this.spinValues = { x: 0, y: 0 };
-    if (this.ui) {
-      this.ui.updateSpinIndicator();
-    }
-  }
-  
-  /**
-   * Create the direction arrow UI element
-   */
-  createDirectionArrow() {
-    // Create the direction arrow UI element
-    const container = document.getElementById('game-container') || document.body;
-    this.directionArrow = new DirectionArrow(container);
-    
-    // Initially hide the arrow until the game starts
-    this.directionArrow.setVisible(false);
-  }
-  
-  /**
-   * Update the direction arrow to point toward the hole
-   * Dynamically recalculates orientation based on camera position
-   */
-  updateDirectionArrow() {
-    if (!this.directionArrow || !this.ball || !this.terrain || !this.terrain.holePosition || !this.camera) {
-      return;
-    }
+  // ===========================================================================
+  // Menu
+  // ===========================================================================
 
-    // Only show the arrow when the ball is stationary and we're ready to hit
-    const shouldShowArrow = ['READY_TO_HIT', 'AIMING'].includes(this.gameState) && !this.ball.isMoving;
-
-    // Only flag a re-render when visibility actually changes (avoid dirtying every frame)
-    if (shouldShowArrow !== this._dirArrowVisible) {
-      this._dirArrowVisible = shouldShowArrow;
-      this.renderDirty = true;
-    }
-
-    this.directionArrow.setVisible(shouldShowArrow);
-
-    if (shouldShowArrow) {
-      // Update the arrow direction with camera position for perspective adjustment
-      this.directionArrow.update(
-        this.ball.position,
-        this.terrain.holePosition,
-        this.camera.position
-      );
-    }
-  }
-
-  /**
-   * Update the overhead minimap. Visible whenever the player can act or is
-   * watching a shot; draws the live predicted arc only while aiming.
-   */
-  updateMinimap() {
-    if (!this.minimap || !this.ball || !this.terrain) return;
-
-    const aimable = ['READY_TO_HIT', 'AIMING', 'HITTING'].includes(this.gameState);
-    const showMap = aimable || this.gameState === 'WATCHING' || this.gameState === 'SINKING';
-    this.minimap.setVisible(showMap);
-
-    if (!showMap) return;
-
-    // Aim direction: prefer the camera->ball shot direction computed during
-    // AIMING; fall back to the camera controller's aim vector.
-    let aimDir = null;
-    if (this.currentShotDirection && this.currentShotDirection.horizontal) {
-      aimDir = this.currentShotDirection.horizontal;
-    } else if (this.cameraController) {
-      aimDir = this.cameraController.getAimDirection();
-    }
-
-    // The predicted arc respects the lie: a flyer from the rough flies shorter
-    const lieFactor = this.currentLie ? this.currentLie.speedFactor : 1;
-    this.minimap.update({
-      ball: this.ball.position,
-      aimDir,
-      loft: this.currentLoft,
-      maxSpeed: this.currentMaxSpeed * lieFactor,
-      power: this.swing.phase === 'power' ? this.swing.marker
-        : this.swing.phase === 'accuracy' ? this.swing.power : 60,
-      showShot: this.gameState === 'AIMING' || this.gameState === 'HITTING',
+  openMenu() {
+    if (!this.round || this.paused || this.state === 'result' || this.state === 'summary') return;
+    this.paused = true;
+    this.audio.tap();
+    this.hud.showMenu({
+      muted: this.audio.muted,
+      card: this.cardData(),
+      onResume: () => this.closeMenu(),
+      onMute: () => { this.audio.setMuted(!this.audio.muted); return this.audio.muted; },
+      onHelp: () => this.hud.showHelp(() => this.openMenuAgain()),
+      onQuit: () => { this.paused = false; this.hud.clearLayer(); this.showTitle(); },
     });
+  }
+
+  openMenuAgain() { this.paused = false; this.openMenu(); }
+
+  closeMenu() {
+    this.paused = false;
+    this.hud.clearLayer();
+    if (this.state === 'intro') {
+      // The menu replaced the intro card: put it back
+      const spec = this.world.spec, arch = ARCHETYPES[spec.archetype];
+      this.hud.showIntro({
+        index: this.round.index + 1, total: this.round.holes.length,
+        name: arch.label, blurb: arch.blurb, par: spec.par, yards: spec.length, biome: BIOMES[spec.biome].name,
+      });
+    }
+  }
+
+  // ===========================================================================
+  // Frame
+  // ===========================================================================
+
+  loop() {
+    requestAnimationFrame(this.loop);
+    const raw = this.clock.getDelta();
+    const dt = Math.min(raw, 0.05);
+    this.adaptQuality(raw);
+    if (!this.paused) this.update(dt);
+    this.updateVisuals(dt);
+    this.renderer.render(this.scene, this.camera);
+  }
+
+  update(dt) {
+    this.time += dt;
+    this.stateTime += dt;
+    const { ball, world } = this;
+
+    switch (this.state) {
+      case 'title': {
+        const g = world.spec.green;
+        this.rig.orbit(g.x, world.cup.y, g.z, 34, 11, this.time * 0.12);
+        break;
+      }
+      case 'intro': {
+        this.rig.flyover(Math.min(1, this.stateTime / (INTRO_TIME - 0.6)));
+        if (this.stateTime > INTRO_TIME) this.endIntro();
+        break;
+      }
+      case 'aim': {
+        const turn = (this.keys.ArrowRight ? 1 : 0) - (this.keys.ArrowLeft ? 1 : 0);
+        if (turn) { this.aimAngle += turn * dt * (this.putting ? 0.12 : 0.7); this.planDirty = true; }
+        if (this.planDirty) this.updatePlan();
+        this.aimCamera();
+        break;
+      }
+      case 'swing': {
+        this.aimCamera();
+        if (this.putting) {
+          if (this.charging) {
+            this.puttPower += this.puttDir * PUTT_METER_RATE * dt;
+            if (this.puttPower >= 100) { this.puttPower = 100; this.puttDir = -1; }
+            if (this.puttPower <= 0) { this.puttPower = 0; this.puttDir = 1; }
+            this.hud.updatePuttMeter(this.puttPower);
+          }
+        } else {
+          const event = swingStep(this.swing, dt);
+          this.hud.updateSwingMeter(this.swing);
+          if (event) this.handleSwingEvent(event);
+        }
+        break;
+      }
+      case 'flight':
+        this.updateFlight(dt);
+        break;
+      case 'settle':
+        if (this.shot?.putt) this.rig.watch(ball); else if (this.rig.mode === 'landing') this.rig.landing(ball, this.plan.restX, this.plan.restZ, this.shot.fromX, this.shot.fromZ);
+        if (this.stateTime > this.settleFor) this.afterSettle();
+        break;
+      case 'holed':
+        this.celebrateAngle += dt * 0.5;
+        this.rig.orbit(world.cup.x, world.cup.y, world.cup.z, 5.2, 2.3, this.celebrateAngle);
+        if (this.stateTime > 2.6) this.finishHole();
+        break;
+      case 'result':
+        this.celebrateAngle += dt * 0.25;
+        this.rig.orbit(world.cup.x, world.cup.y, world.cup.z, 9, 4, this.celebrateAngle);
+        this.hud.setAutoProgress(this.stateTime / 9);
+        if (this.stateTime > 9) this.nextHole?.();
+        break;
+      default:
+        break;
+    }
+  }
+
+  aimCamera() {
+    const { ball } = this;
+    const dirX = Math.cos(this.aimAngle), dirZ = Math.sin(this.aimAngle);
+    if (this.putting) {
+      this.rig.putt(ball, dirX, dirZ, this.targetDist);
+    } else {
+      const reach = this.idealPower ? this.targetDist : distanceAt(this.club, 100, this.lie.speedFactor);
+      this.rig.aim(ball, dirX, dirZ, reach);
+    }
+  }
+
+  updateVisuals(dt) {
+    const { ball, world, camera } = this;
+    this.rig.update(dt);
+
+    // Ball: drawn a little larger with distance so it never becomes a pixel
+    const camDist = camera.position.distanceTo(this.ballMesh.position);
+    const want = Math.max(1.4, Math.min(16, camDist / (this.rig.portrait ? 7.5 : 9)));
+    this.ballScale += (want - this.ballScale) * Math.min(1, dt * 8);
+    const s = this.ballScale;
+    const ground = world.heightAt(ball.x, ball.z);
+    const lift = Math.max(0, ball.y - BALL_R - ground);
+    let y = ground + lift + BALL_R * s;
+    if (this.sink > 0) {
+      this.sink = Math.min(1, this.sink + dt * 3.2);
+      y -= this.sink * 0.42;
+      this.ballMesh.position.x += (world.cup.x - this.ballMesh.position.x) * 0.3;
+      this.ballMesh.position.z += (world.cup.z - this.ballMesh.position.z) * 0.3;
+      this.ballMesh.position.y = y;
+    } else {
+      this.ballMesh.position.set(ball.x, y, ball.z);
+    }
+    this.ballMesh.scale.setScalar(s);
+    if (ball.mode === 'roll' || ball.mode === 'air') {
+      const speed = Math.hypot(ball.vx, ball.vz);
+      if (speed > 0.05) {
+        this._axis = this._axis || new THREE.Vector3();
+        this._axis.set(ball.vz, 0, -ball.vx).normalize();
+        this.ballMesh.rotateOnWorldAxis(this._axis, (speed * dt * this.timeScale) / (BALL_R * s));
+      }
+    }
+    this.blob.position.set(this.ballMesh.position.x, ground + 0.03, this.ballMesh.position.z);
+    this.blob.scale.setScalar(BALL_R * s * (1.25 + lift * 0.04));
+    this.blob.material.opacity = this.sink > 0 ? 0 : Math.max(0.1, 0.34 - lift * 0.006);
+
+    // Sun follows the action so one shadow map covers it
+    const fx = Math.round(this.rig.look.x / 8) * 8, fz = Math.round(this.rig.look.z / 8) * 8;
+    this.sun.target.position.set(fx, 0, fz);
+    this.sun.position.set(fx + this.sunDir.x * 260, this.sunDir.y * 260, fz + this.sunDir.z * 260);
+
+    updateScenery(this.scenery, this.time, dt);
+    const onGreen = this.round && (this.putting || ball.surface === 'green') && this.state !== 'intro' && this.state !== 'title';
+    updateFlag(this.scenery.flag, this.time, onGreen && this.state !== 'holed' && this.state !== 'result');
+    this.effects.update(dt, this.time);
+
+    if (!this.round) return;
+
+    // HUD that tracks the 3D scene
+    const showTag = (this.state === 'aim' || this.state === 'swing') && !this.putting;
+    if (showTag) {
+      this._v = this._v || new THREE.Vector3();
+      this._v.set(world.cup.x, world.cup.y + 4.1, world.cup.z).project(camera);
+      const visible = this._v.z < 1 && Math.abs(this._v.x) < 1.1;
+      const d = Math.hypot(world.cup.x - ball.x, world.cup.z - ball.z);
+      this.hud.setPinTag(`${Math.round(d)}y`, (this._v.x * 0.5 + 0.5) * window.innerWidth, (-this._v.y * 0.5 + 0.5) * window.innerHeight, visible);
+    } else {
+      this.hud.setPinTag('', 0, 0, false);
+    }
+
+    if (this.state === 'aim' || this.state === 'swing' || this.state === 'flight') {
+      // Wind arrow in screen space: up = away from the camera
+      const dirX = Math.cos(this.aimAngle), dirZ = Math.sin(this.aimAngle);
+      const w = world.spec.wind;
+      const forward = w.x * dirX + w.z * dirZ;
+      const right = w.x * -dirZ + w.z * dirX;
+      this.hud.setWind(w.speed, Math.atan2(right, forward));
+      this.mapTimer = (this.mapTimer || 0) - dt;
+      if (this.mapTimer <= 0) {
+        this.mapTimer = 0.08;
+        this.hud.drawMinimap(world, ball, this.state === 'flight' ? null : this.landing);
+      }
+    }
+  }
+
+  /** Test hook: jump to hole `index` (0-based) of the round. */
+  debugGoto(index) {
+    this.round.index = index;
+    this.hud.clearLayer();
+    this.startHole();
+  }
+
+  /** Test hook: drop the ball `dist` yards from the pin and take aim. */
+  debugPlace(dist, angle = 0.6) {
+    const { world, ball } = this;
+    this.hud.clearLayer();
+    this.hud.setPlayVisible(true);
+    this.strokes = Math.max(1, this.strokes);
+    placeBall(ball, world, world.cup.x + Math.cos(angle) * dist, world.cup.z + Math.sin(angle) * dist);
+    this.ballMesh.visible = this.blob.visible = true;
+    this.beginAim();
+  }
+
+  /** Drop resolution if the device cannot hold frame rate. */
+  adaptQuality(dt) {
+    this.frameTimes.push(dt);
+    if (this.frameTimes.length < 90) return;
+    const avg = this.frameTimes.reduce((a, b) => a + b, 0) / this.frameTimes.length;
+    this.frameTimes.length = 0;
+    if (avg > 1 / 42 && this.pixelRatio > 1) {
+      this.pixelRatio = Math.max(1, this.pixelRatio - 0.25);
+      this.renderer.setPixelRatio(this.pixelRatio);
+      this.resize();
+    }
   }
 }
-
-// Add the handleHoleComplete method to the Game class prototype
-Game.prototype.handleHoleComplete = handleHoleComplete;
-
-export default Game;

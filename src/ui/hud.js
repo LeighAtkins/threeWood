@@ -1,0 +1,523 @@
+import { SWING, markerToPercent } from '../core/swing.js';
+import { blobRadius, greenDistance } from '../course/shapes.js';
+
+/**
+ * The HUD — DOM over the canvas, laid out for thumbs.
+ *
+ *   top:     menu · hole/par/yards · score
+ *   sides:   wind + points (left), minimap (right)
+ *   bottom:  club picker (left thumb), SWING button (right thumb), meter above
+ *
+ * The HUD holds no game state: the game pushes values in and gets callbacks
+ * out, so it can be restyled without touching the rules.
+ */
+
+const el = (tag, cls, html) => {
+  const node = document.createElement(tag);
+  if (cls) node.className = cls;
+  if (html != null) node.innerHTML = html;
+  return node;
+};
+
+const vsPar = (n) => (n === 0 ? 'E' : n > 0 ? `+${n}` : `${n}`);
+
+export function scoreName(strokes, par) {
+  if (strokes === 1) return 'HOLE IN ONE!';
+  const d = strokes - par;
+  if (d <= -3) return 'ALBATROSS!';
+  if (d === -2) return 'EAGLE!';
+  if (d === -1) return 'BIRDIE!';
+  if (d === 0) return 'PAR';
+  if (d === 1) return 'BOGEY';
+  if (d === 2) return 'DOUBLE BOGEY';
+  return `+${d}`;
+}
+
+export class Hud {
+  constructor(handlers) {
+    this.h = handlers;
+    this.root = el('div');
+    this.root.id = 'hud';
+    document.body.appendChild(this.root);
+
+    this.root.innerHTML = `
+      <div class="top play">
+        <button class="menu-btn" aria-label="Menu">☰</button>
+        <div class="pill hole-pill"><div class="big"></div><div class="small"></div></div>
+        <div class="spacer"></div>
+        <div class="pill score-pill"><div class="big">E</div><div class="small">SHOT 1</div></div>
+      </div>
+      <div class="side-left play">
+        <div class="pill wind"><svg class="wind-arrow" viewBox="0 0 24 24"><path d="M12 2 L19 14 L13.5 12.5 L13.5 22 L10.5 22 L10.5 12.5 L5 14 Z" fill="#fff8ec"/></svg><span></span></div>
+        <div class="pill points">★ 0</div>
+      </div>
+      <div class="side-right play"><canvas id="minimap" width="208" height="208"></canvas></div>
+      <div class="pin-tag play hidden"></div>
+      <div class="callouts"></div>
+      <div class="pill hint hidden"></div>
+      <div class="meter hidden">
+        <div class="caption"></div>
+        <div class="track">
+          <div class="fill"></div>
+          <div class="zone good"></div><div class="zone pure"></div>
+          <div class="ideal"></div>
+          <div class="line"></div>
+          <div class="lock hidden"></div>
+          <div class="marker"></div>
+        </div>
+      </div>
+      <div class="bottom play">
+        <div class="club-wrap">
+          <div class="pill lie hidden"></div>
+          <div class="club">
+            <button class="prev" aria-label="Longer club">‹</button>
+            <div class="info"><div class="name"></div><div class="yards"></div></div>
+            <button class="next" aria-label="Shorter club">›</button>
+          </div>
+        </div>
+        <button class="swing-btn">SWING</button>
+      </div>
+      <div class="layer"></div>
+    `;
+
+    const q = (s) => this.root.querySelector(s);
+    this.playEls = [...this.root.querySelectorAll('.play')];
+    this.holeBig = q('.hole-pill .big');
+    this.holeSmall = q('.hole-pill .small');
+    this.scoreBig = q('.score-pill .big');
+    this.scoreSmall = q('.score-pill .small');
+    this.wind = q('.wind');
+    this.windArrow = q('.wind-arrow');
+    this.windText = q('.wind span');
+    this.points = q('.points');
+    this.minimap = q('#minimap');
+    this.pinTag = q('.pin-tag');
+    this.callouts = q('.callouts');
+    this.hintEl = q('.hint');
+    this.meter = q('.meter');
+    this.meterCaption = q('.meter .caption');
+    this.fill = q('.meter .fill');
+    this.zoneGood = q('.meter .zone.good');
+    this.zonePure = q('.meter .zone.pure');
+    this.ideal = q('.meter .ideal');
+    this.line = q('.meter .line');
+    this.lock = q('.meter .lock');
+    this.marker = q('.meter .marker');
+    this.clubName = q('.club .name');
+    this.clubYards = q('.club .yards');
+    this.lie = q('.lie');
+    this.swingBtn = q('.swing-btn');
+    this.layer = q('.layer');
+    this.bottom = q('.bottom');
+
+    q('.menu-btn').addEventListener('click', () => this.h.onMenu());
+    q('.club .prev').addEventListener('click', () => this.h.onClub(-1));
+    q('.club .next').addEventListener('click', () => this.h.onClub(1));
+    q('.club .info').addEventListener('click', () => this.h.onClub(1));
+
+    // The swing button works on press AND release (putts are hold-to-charge)
+    const down = (e) => {
+      e.preventDefault();
+      this.swingBtn.setPointerCapture?.(e.pointerId);
+      this.swingBtn.classList.add('down');
+      this.h.onSwingDown();
+    };
+    const up = (e) => {
+      e.preventDefault();
+      if (!this.swingBtn.classList.contains('down')) return;
+      this.swingBtn.classList.remove('down');
+      this.h.onSwingUp();
+    };
+    this.swingBtn.addEventListener('pointerdown', down);
+    this.swingBtn.addEventListener('pointerup', up);
+    this.swingBtn.addEventListener('pointercancel', up);
+    this.swingBtn.addEventListener('contextmenu', (e) => e.preventDefault());
+
+    this.mapCtx = this.minimap.getContext('2d');
+    this.setPlayVisible(false);
+  }
+
+  // --- Visibility -------------------------------------------------------------
+
+  setPlayVisible(v) {
+    for (const node of this.playEls) node.classList.toggle('hidden', !v);
+    if (!v) { this.meter.classList.add('hidden'); this.hintEl.classList.add('hidden'); }
+  }
+
+  setControlsVisible(v) { this.bottom.classList.toggle('hidden', !v); }
+
+  // --- Top / side readouts ------------------------------------------------------
+
+  setHole({ index, total, par, yards }) {
+    this.holeBig.textContent = `HOLE ${index}`;
+    this.holeSmall.textContent = `PAR ${par} · ${yards}y · ${index}/${total}`;
+  }
+
+  setScore({ strokes, total, shotLabel }) {
+    this.scoreBig.textContent = vsPar(total);
+    this.scoreSmall.textContent = shotLabel || `SHOT ${strokes + 1}`;
+  }
+
+  setPoints(points, bump) {
+    this.points.textContent = `★ ${points.toLocaleString()}`;
+    if (bump) {
+      this.points.classList.remove('bump');
+      void this.points.offsetWidth;
+      this.points.classList.add('bump');
+    }
+  }
+
+  /** angle: radians, 0 = blowing straight up the screen (away from camera). */
+  setWind(speed, angle) {
+    this.wind.classList.toggle('calm', speed < 1);
+    this.windText.textContent = speed < 1 ? 'CALM' : `${speed} mph`;
+    this.windArrow.style.transform = `rotate(${angle}rad)`;
+  }
+
+  setClub({ name, yards, lie, lieBad, canChange }) {
+    this.clubName.textContent = name;
+    this.clubYards.textContent = yards;
+    this.lie.textContent = lie || '';
+    this.lie.classList.toggle('hidden', !lie);
+    this.lie.classList.toggle('bad', !!lieBad);
+    this.bottom.querySelector('.club').style.opacity = canChange ? 1 : 0.6;
+  }
+
+  setPinTag(text, x, y, visible) {
+    this.pinTag.classList.toggle('hidden', !visible);
+    if (!visible) return;
+    this.pinTag.textContent = text;
+    this.pinTag.style.transform = `translate(${x}px, ${y}px) translate(-50%, -100%)`;
+  }
+
+  setSwingButton(label, sub, mode) {
+    this.swingBtn.innerHTML = sub ? `${label}<small>${sub}</small>` : label;
+    this.swingBtn.classList.toggle('pulse', mode === 'ready');
+    this.swingBtn.classList.toggle('go', mode === 'go');
+    this.swingBtn.classList.toggle('disabled', mode === 'disabled');
+  }
+
+  // --- Meter --------------------------------------------------------------------
+
+  /** Full-swing meter: late zone | strike line | power -> */
+  showSwingMeter(idealPower) {
+    this.meter.classList.remove('hidden');
+    this.meter.dataset.mode = 'swing';
+    const pct = markerToPercent;
+    const pure = SWING.PURE_MAX * SWING.WINDOW, good = SWING.GOOD_MAX * SWING.WINDOW;
+    this.line.style.left = `${pct(SWING.LINE)}%`;
+    this.zonePure.style.left = `${pct(SWING.LINE - pure)}%`;
+    this.zonePure.style.width = `${pct(SWING.LINE + pure) - pct(SWING.LINE - pure)}%`;
+    this.zoneGood.style.left = `${pct(SWING.LINE - good)}%`;
+    this.zoneGood.style.width = `${pct(SWING.LINE + good) - pct(SWING.LINE - good)}%`;
+    this.zonePure.classList.remove('hidden');
+    this.zoneGood.classList.remove('hidden');
+    this.line.classList.remove('hidden');
+    this.ideal.classList.toggle('hidden', idealPower == null || idealPower >= 99.5);
+    if (idealPower != null) this.ideal.style.left = `${pct(idealPower)}%`;
+    this.lock.classList.add('hidden');
+    this.fill.style.left = `${pct(0)}%`;
+    this.fill.style.width = '0%';
+  }
+
+  updateSwingMeter(swing) {
+    const pct = markerToPercent;
+    this.marker.style.left = `${pct(swing.marker)}%`;
+    if (swing.phase === 'power') {
+      this.fill.style.width = `${pct(swing.marker) - pct(0)}%`;
+    } else if (swing.phase === 'accuracy') {
+      this.fill.style.width = `${pct(swing.power) - pct(0)}%`;
+      this.lock.classList.remove('hidden');
+      this.lock.style.left = `${pct(swing.power)}%`;
+    }
+  }
+
+  /** Putt meter: plain 0..100 fill with the dead-weight pace marked. */
+  showPuttMeter(idealPct) {
+    this.meter.classList.remove('hidden');
+    this.meter.dataset.mode = 'putt';
+    this.zonePure.classList.add('hidden');
+    this.zoneGood.classList.add('hidden');
+    this.line.classList.add('hidden');
+    this.lock.classList.add('hidden');
+    this.ideal.classList.remove('hidden');
+    this.ideal.style.left = `${idealPct}%`;
+    this.fill.style.left = '0%';
+    this.fill.style.width = '0%';
+    this.marker.style.left = '0%';
+  }
+
+  updatePuttMeter(power) {
+    this.fill.style.width = `${power}%`;
+    this.marker.style.left = `${power}%`;
+  }
+
+  setMeterCaption(text) { this.meterCaption.textContent = text || ''; }
+
+  hideMeter() { this.meter.classList.add('hidden'); }
+
+  // --- Callouts / hints ---------------------------------------------------------
+
+  callout(text, kind = '') {
+    const node = el('div', `callout ${kind}`);
+    node.textContent = text;
+    this.callouts.appendChild(node);
+    while (this.callouts.children.length > 4) this.callouts.firstChild.remove();
+    node.addEventListener('animationend', () => node.remove());
+  }
+
+  hint(text, high = false) {
+    this.hintEl.classList.toggle('hidden', !text);
+    this.hintEl.classList.toggle('high', high);
+    if (text) this.hintEl.textContent = text;
+  }
+
+  // --- Overlays -------------------------------------------------------------------
+
+  clearLayer() { this.layer.innerHTML = ''; }
+
+  showTitle({ saved, best, seed }) {
+    this.clearLayer();
+    const node = el('div', 'title', `
+      <div class="logo">
+        <h1>THREE<span>WOOD</span></h1>
+        <p>18 HOLES · NEW COURSE EVERY ROUND</p>
+      </div>
+      <div class="title-actions">
+        ${saved ? `<button class="btn" data-a="continue">CONTINUE · HOLE ${saved.hole} (${vsPar(saved.total)})</button>` : ''}
+        <button class="btn ${saved ? 'ghost' : ''}" data-a="18">PLAY 18 HOLES</button>
+        <button class="btn ghost" data-a="9">QUICK 9</button>
+        <div class="title-foot">${best ? `BEST ROUND ${vsPar(best.score)} · ★ ${best.points.toLocaleString()}<br>` : ''}COURSE ${seed}</div>
+      </div>`);
+    node.addEventListener('click', (e) => {
+      const a = e.target.closest('[data-a]')?.dataset.a;
+      if (a) this.h.onStart(a);
+    });
+    this.layer.appendChild(node);
+  }
+
+  showIntro({ index, total, name, par, yards, blurb, biome }) {
+    this.clearLayer();
+    const node = el('div', 'overlay pass', `
+      <div class="intro">
+        <div class="num">HOLE ${index} OF ${total} · ${biome.toUpperCase()}</div>
+        <div class="name">${name}</div>
+        <div class="meta">PAR ${par} · ${yards} YARDS</div>
+        <div class="blurb">${blurb}</div>
+        <div class="skip">TAP TO TEE OFF</div>
+      </div>`);
+    this.layer.appendChild(node);
+  }
+
+  showResult({ title, kind, strokes, par, bonuses, holePoints, card, last, onNext }) {
+    this.clearLayer();
+    const node = el('div', 'overlay', `
+      <div class="card">
+        <h2>HOLE ${card.currentLabel}</h2>
+        <h1 class="${kind}">${title}</h1>
+        <div class="result-score">${strokes} ${strokes === 1 ? 'stroke' : 'strokes'} · par ${par}</div>
+        <div class="bonus-list">
+          ${bonuses.map((b, i) => `<div class="bonus" style="animation-delay:${0.25 + i * 0.12}s"><span>${b.label}</span><b>+${b.points}</b></div>`).join('')}
+          <div class="total-line"><span>HOLE POINTS</span><span class="gold">★ ${holePoints.toLocaleString()}</span></div>
+        </div>
+        ${scorecardHtml(card)}
+        <button class="btn" data-a="next">${last ? 'FINISH ROUND' : 'NEXT HOLE'}<span class="auto"></span></button>
+      </div>`);
+    node.querySelector('[data-a="next"]').addEventListener('click', onNext);
+    this.layer.appendChild(node);
+  }
+
+  showSummary({ total, par, strokes, points, stats, card, best, seed, onAgain, onShare }) {
+    this.clearLayer();
+    const node = el('div', 'overlay dim', `
+      <div class="card">
+        <h2>ROUND COMPLETE</h2>
+        <h1 class="gold">${vsPar(total)}</h1>
+        <div class="result-score">${strokes} strokes · par ${par} · ★ ${points.toLocaleString()}${best ? ' · <b class="gold">NEW BEST!</b>' : ''}</div>
+        ${scorecardHtml(card)}
+        <div class="stats">${stats.map((s) => `<div class="stat"><b>${s.value}</b><span>${s.label}</span></div>`).join('')}</div>
+        <button class="btn" data-a="again">NEW COURSE</button>
+        <button class="btn ghost" data-a="share">CHALLENGE A FRIEND · ${seed}</button>
+      </div>`);
+    node.querySelector('[data-a="again"]').addEventListener('click', onAgain);
+    node.querySelector('[data-a="share"]').addEventListener('click', (e) => onShare(e.currentTarget));
+    this.layer.appendChild(node);
+  }
+
+  showMenu({ muted, card, onResume, onMute, onQuit, onHelp }) {
+    this.clearLayer();
+    const node = el('div', 'overlay dim', `
+      <div class="card">
+        <h2>PAUSED</h2>
+        ${scorecardHtml(card)}
+        <button class="btn" data-a="resume">RESUME</button>
+        <div class="btn-row">
+          <button class="btn ghost" data-a="mute">${muted ? 'SOUND OFF' : 'SOUND ON'}</button>
+          <button class="btn ghost" data-a="help">HOW TO PLAY</button>
+        </div>
+        <button class="btn ghost" data-a="quit">QUIT TO TITLE</button>
+      </div>`);
+    node.addEventListener('click', (e) => {
+      const a = e.target.closest('[data-a]')?.dataset.a;
+      if (a === 'resume') onResume();
+      if (a === 'mute') e.target.textContent = onMute() ? 'SOUND OFF' : 'SOUND ON';
+      if (a === 'help') onHelp();
+      if (a === 'quit') onQuit();
+    });
+    this.layer.appendChild(node);
+  }
+
+  showHelp(onClose) {
+    this.clearLayer();
+    const node = el('div', 'overlay dim', `
+      <div class="card" style="text-align:left">
+        <h2 style="text-align:center">HOW TO PLAY</h2>
+        <p><b class="gold">Aim</b> — drag left or right anywhere on the course.</p>
+        <p><b class="gold">Swing</b> — tap SWING to start, tap again to set power (the dashed box is the distance to your target), then tap as the marker crosses the white line. Early pulls it left, late pushes it right.</p>
+        <p><b class="gold">Club</b> — the caddie picks one. Use ‹ › to change it.</p>
+        <p><b class="gold">Putt</b> — the white dots show which way the green falls. Drag to move the line, then hold PUTT and let go on the dashed pace mark.</p>
+        <p><b class="gold">Wind</b> — the arrow shows where it blows. The aim line does not allow for it. You must.</p>
+        <p style="opacity:.7;font-size:13px">Keyboard: ←/→ aim · ↑/↓ club · Space swing</p>
+        <button class="btn" data-a="close">GOT IT</button>
+      </div>`);
+    node.querySelector('[data-a="close"]').addEventListener('click', onClose);
+    this.layer.appendChild(node);
+  }
+
+  /** Progress bar on the result card's button (auto-advance). */
+  setAutoProgress(f) {
+    const bar = this.layer.querySelector('.btn .auto');
+    if (bar) bar.style.width = `${Math.min(100, f * 100)}%`;
+  }
+
+  // --- Minimap ----------------------------------------------------------------------
+
+  /**
+   * Overhead map, rotated so the hole plays up the screen.
+   * @param {object} world
+   * @param {{x:number,z:number}} ball
+   * @param {{x:number,z:number}|null} landing predicted landing point
+   */
+  drawMinimap(world, ball, landing) {
+    const ctx = this.mapCtx;
+    const S = this.minimap.width;
+    const spec = world.spec;
+    ctx.clearRect(0, 0, S, S);
+
+    // Frame: tee at the bottom, green at the top
+    const tee = world.tee, cup = world.cup;
+    const ang = Math.atan2(cup.z - tee.z, cup.x - tee.x);
+    const cos = Math.cos(-ang - Math.PI / 2), sin = Math.sin(-ang - Math.PI / 2);
+    const pts = spec.path.map((p) => ({ x: p.x * cos - p.z * sin, y: p.x * sin + p.z * cos }));
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (const p of pts) { minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x); minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y); }
+    const pad = 34;
+    const scale = (S - 28) / Math.max(maxX - minX + pad * 2, maxY - minY + pad * 2);
+    const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+    const P = (x, z) => [S / 2 + (x * cos - z * sin - cx) * scale, S / 2 + (x * sin + z * cos - cy) * scale];
+    const biome = world.biome;
+    const hex = (n) => `#${n.toString(16).padStart(6, '0')}`;
+
+    const blob = (shape, color) => {
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      for (let i = 0; i <= 20; i++) {
+        const a = (i / 20) * Math.PI * 2;
+        const r = blobRadius(shape, a);
+        const [x, y] = P(shape.x + Math.cos(a) * r, shape.z + Math.sin(a) * r);
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      }
+      ctx.fill();
+    };
+
+    for (const w of spec.water) blob(w, hex(biome.water));
+
+    // Fairway ribbon
+    ctx.strokeStyle = hex(biome.fairway);
+    ctx.lineWidth = spec.fairwayHalf * 2 * scale;
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.beginPath();
+    let started = false, walked = 0;
+    for (let i = 0; i < spec.path.length; i++) {
+      if (i > 0) walked += Math.hypot(spec.path[i].x - spec.path[i - 1].x, spec.path[i].z - spec.path[i - 1].z);
+      if (walked < spec.fairwayStart && i < spec.path.length - 1) continue;
+      const [x, y] = P(spec.path[i].x, spec.path[i].z);
+      if (!started) {
+        // Begin where the short grass begins
+        const prev = spec.path[Math.max(0, i - 1)];
+        const seg = Math.hypot(spec.path[i].x - prev.x, spec.path[i].z - prev.z) || 1;
+        const back = Math.min(seg, Math.max(0, walked - spec.fairwayStart));
+        const [sx, sy] = P(spec.path[i].x - (spec.path[i].x - prev.x) / seg * back, spec.path[i].z - (spec.path[i].z - prev.z) / seg * back);
+        ctx.moveTo(sx, sy);
+        started = true;
+      }
+      ctx.lineTo(x, y);
+    }
+    if (started) ctx.stroke();
+
+    // Green
+    ctx.fillStyle = hex(biome.green);
+    ctx.beginPath();
+    const g = spec.green;
+    for (let i = 0; i <= 28; i++) {
+      const a = (i / 28) * Math.PI * 2;
+      let r = g.size * 1.5;
+      for (let k = 0; k < 9; k++) {
+        if (greenDistance(g, g.x + Math.cos(a) * r, g.z + Math.sin(a) * r) < 1) break;
+        r *= 0.88;
+      }
+      const [x, y] = P(g.x + Math.cos(a) * r, g.z + Math.sin(a) * r);
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.fill();
+
+    for (const b of spec.bunkers) blob(b, hex(biome.sand));
+
+    ctx.fillStyle = 'rgba(20,50,30,0.75)';
+    for (const t of spec.trees) {
+      const [x, y] = P(t.x, t.z);
+      ctx.beginPath(); ctx.arc(x, y, Math.max(1.6, 2.6 * t.s * scale), 0, 6.3); ctx.fill();
+    }
+
+    // Aim line
+    const [bx, by] = P(ball.x, ball.z);
+    if (landing) {
+      const [lx, ly] = P(landing.x, landing.z);
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 3; ctx.setLineDash([7, 6]);
+      ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(lx, ly); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.beginPath(); ctx.arc(lx, ly, 6, 0, 6.3); ctx.stroke();
+    }
+
+    // Pin + ball
+    const [px, py] = P(cup.x, cup.z);
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px, py - 15); ctx.stroke();
+    ctx.fillStyle = '#ff4d4d';
+    ctx.beginPath(); ctx.moveTo(px, py - 15); ctx.lineTo(px + 10, py - 11); ctx.lineTo(px, py - 7); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.strokeStyle = '#12261a'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(bx, by, 5, 0, 6.3); ctx.fill(); ctx.stroke();
+  }
+}
+
+function scorecardHtml(card) {
+  // card: { holes: [{ label, par, strokes|null }], current }
+  const halves = [];
+  for (let i = 0; i < card.holes.length; i += 9) halves.push(card.holes.slice(i, i + 9));
+  const mark = (h) => {
+    if (h.strokes == null) return `<span class="s ${h.current ? 'now' : ''}">${h.current ? '·' : ''}</span>`;
+    const d = h.strokes - h.par;
+    const cls = d <= -2 ? 'eagle' : d === -1 ? 'birdie' : d === 1 ? 'bogey' : d >= 2 ? 'worse' : '';
+    return `<span class="s ${cls}">${h.strokes}</span>`;
+  };
+  return halves.map((half, hi) => {
+    const played = half.filter((h) => h.strokes != null);
+    const sum = played.reduce((s, h) => s + h.strokes, 0);
+    const label = halves.length > 1 ? (hi === 0 ? 'OUT' : 'IN') : 'TOT';
+    return `<table class="sc">
+      <tr><th class="lbl">HOLE</th>${half.map((h) => `<th>${h.label}</th>`).join('')}<th>${label}</th></tr>
+      <tr class="par"><td class="lbl">PAR</td>${half.map((h) => `<td>${h.par}</td>`).join('')}<td>${half.reduce((s, h) => s + h.par, 0)}</td></tr>
+      <tr><td class="lbl">YOU</td>${half.map((h) => `<td>${mark(h)}</td>`).join('')}<td class="sum">${played.length ? sum : ''}</td></tr>
+    </table>`;
+  }).join('');
+}

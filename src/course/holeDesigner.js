@@ -1,130 +1,73 @@
 import { createGameRng } from '../core/rng.js';
+import { BIOMES } from './biomes.js';
+import { pathLength, pointAlongPath, pathInfo, blobCovers, greenDistance } from './shapes.js';
 
 /**
- * The course generator — the heart of ThreeWood.
+ * The course generator.
  *
- * Holes are designed like a level designer would, not a noise function:
- * pick an archetype, lay tee → landing → green along a spline, dress it with
- * hazards that create a strategy, then validate with a fitness function and
- * REJECT bad layouts. Everything is deterministic from the round seed.
+ * Holes are designed the way a level designer would, not by a noise function:
+ * pick an archetype, lay tee -> corner -> green along a path, dress it with
+ * hazards that create a decision, then check it for fairness and REJECT bad
+ * layouts. Everything is deterministic from the round seed.
  *
- * Coordinates: one 400×400 tile per hole, world units ≈ yards. Tee west,
- * green east. Play flows along the path polyline.
+ * Coordinates: one square tile per hole, world units ≈ yards. The hole is
+ * laid out heading +X from the origin, then rotated and centred in the tile.
  */
 
-// ---------------------------------------------------------------------------
-// Path helpers (shared with terrain/minimap)
-// ---------------------------------------------------------------------------
-
-export function pathLength(path) {
-  let len = 0;
-  for (let i = 1; i < path.length; i++) {
-    len += Math.hypot(path[i].x - path[i - 1].x, path[i].z - path[i - 1].z);
-  }
-  return len;
-}
-
-/** Point at distance `d` along the path. Returns { x, z, dirX, dirZ, segT }. */
-export function pointAlongPath(path, d) {
-  let remaining = d;
-  for (let i = 1; i < path.length; i++) {
-    const dx = path[i].x - path[i - 1].x;
-    const dz = path[i].z - path[i - 1].z;
-    const segLen = Math.hypot(dx, dz);
-    if (remaining <= segLen || i === path.length - 1) {
-      const t = segLen > 0 ? Math.max(0, Math.min(1, remaining / segLen)) : 0;
-      return {
-        x: path[i - 1].x + dx * t,
-        z: path[i - 1].z + dz * t,
-        dirX: segLen > 0 ? dx / segLen : 1,
-        dirZ: segLen > 0 ? dz / segLen : 0,
-      };
-    }
-    remaining -= segLen;
-  }
-  const last = path[path.length - 1];
-  return { x: last.x, z: last.z, dirX: 1, dirZ: 0 };
-}
-
-/** Distance from point to path polyline, plus where it lands. */
-export function pathInfo(path, x, z) {
-  let best = { dist: Infinity, along: 0, across: 0, dirX: 1, dirZ: 0 };
-  let walked = 0;
-  for (let i = 1; i < path.length; i++) {
-    const ax = path[i - 1].x, az = path[i - 1].z;
-    const dx = path[i].x - ax, dz = path[i].z - az;
-    const segLen = Math.hypot(dx, dz);
-    if (segLen === 0) continue;
-    const ux = dx / segLen, uz = dz / segLen;
-    const px = x - ax, pz = z - az;
-    const proj = Math.max(0, Math.min(segLen, px * ux + pz * uz));
-    const cx = ax + ux * proj, cz = az + uz * proj;
-    const dist = Math.hypot(x - cx, z - cz);
-    if (dist < best.dist) {
-      best = {
-        dist,
-        along: walked + proj,           // distance along path of nearest point
-        across: (px * -uz + pz * ux),   // signed side distance (+ = left of dir)
-        dirX: ux,
-        dirZ: uz,
-      };
-    }
-    walked += segLen;
-  }
-  return best;
-}
-
-// ---------------------------------------------------------------------------
-// Archetype grammar
-// ---------------------------------------------------------------------------
+export const TILE_HALF = 240;   // half-width of the terrain tile
+export const PLAY_HALF = 228;   // beyond this is out of bounds
+const FEATURE_BOUND = 205;      // tee/green/hazards must sit inside this
 
 export const ARCHETYPES = {
-  straight: {
-    label: 'Straightaway',
-    blurb: 'Bunkers guard the landing zone. Find the short grass.',
-  },
-  doglegL: {
-    label: 'Dogleg Left',
-    blurb: 'Cut the corner over the trees for a short approach — or play safe.',
-  },
-  doglegR: {
-    label: 'Dogleg Right',
-    blurb: 'Cut the corner over the trees for a short approach — or play safe.',
-  },
-  overWater: {
-    label: 'The Carry',
-    blurb: 'Water between you and the flag. Commit to the carry.',
-  },
-  bottleneck: {
-    label: 'The Chute',
-    blurb: 'A narrow gate of trees. Thread it or lay up short.',
-  },
-  elevatedGreen: {
-    label: 'The Tabletop',
-    blurb: 'Elevated green with guarding bunkers. Long is dead.',
-  },
+  straight:      { label: 'Straightaway',  blurb: 'Bunkers pinch the landing zone. Find the short grass.' },
+  doglegL:       { label: 'Dogleg Left',   blurb: 'Cut the corner over the trees, or play it safe.' },
+  doglegR:       { label: 'Dogleg Right',  blurb: 'Cut the corner over the trees, or play it safe.' },
+  doubleDogleg:  { label: 'The Serpent',   blurb: 'Two turns. Three good shots, or two great ones.' },
+  overWater:     { label: 'The Carry',     blurb: 'Water between you and the flag. Commit.' },
+  waterApproach: { label: 'The Moat',      blurb: 'A pond guards the front of the green.' },
+  lakeside:      { label: 'Lakeside',      blurb: 'Water all down one side. Bail out the other.' },
+  cape:          { label: 'The Cape',      blurb: 'Bite off as much lake as you dare.' },
+  bottleneck:    { label: 'The Chute',     blurb: 'A narrow gate of trees. Thread it.' },
+  elevatedGreen: { label: 'The Tabletop',  blurb: 'A raised green. Short rolls all the way back.' },
+  potBunkers:    { label: 'Postage Stamp', blurb: 'A tiny target ringed with sand.' },
+  dunes:         { label: 'The Gauntlet',  blurb: 'Bunkers staggered all the way home.' },
+  islandGreen:   { label: 'The Island',    blurb: 'Nothing but green and water. Good luck.' },
 };
 
-// Par → [min, max] hole length (units ≈ yards)
-export const PAR_BANDS = { 3: [100, 155], 4: [175, 245], 5: [255, 330] };
-export const MAX_CARRY = 185; // longest forced carry a player can be asked to make
-export const TILE_BOUND = 150; // keep features inside ±150 on a 400 tile
+// Par -> [min, max] hole length
+export const PAR_BANDS = { 3: [100, 165], 4: [255, 320], 5: [350, 400] };
 
 /**
- * Round pacing: which par + candidate archetypes for hole N (1-indexed).
- * A warm-up, a signature, a test — not N identical holes.
+ * The 18-hole routing (par 72). Pacing is authored: a gentle open, a
+ * signature hole in each third, and the island green at 17.
  */
-export const ROUND_PLANS = [
-  { par: 4, archetypes: ['straight', 'doglegL', 'doglegR'] },        // warm-up
-  { par: 3, archetypes: ['overWater'] },                             // signature
-  { par: 4, archetypes: ['bottleneck', 'elevatedGreen'] },           // the test
-  { par: 5, archetypes: ['doglegL', 'doglegR'] },                    // reachable 5
-  { par: 4, archetypes: ['straight', 'bottleneck'] },
-  { par: 3, archetypes: ['elevatedGreen', 'overWater'] },
-  { par: 4, archetypes: ['doglegL', 'doglegR'] },
-  { par: 5, archetypes: ['doglegR', 'doglegL'] },
-  { par: 4, archetypes: ['elevatedGreen', 'straight'] },             // closer
+export const ROUND_PLAN = [
+  { par: 4, archetypes: ['straight'],                 biome: 'parkland' },
+  { par: 4, archetypes: ['doglegR', 'doglegL'],       biome: 'parkland' },
+  { par: 3, archetypes: ['overWater'],                biome: 'parkland' },
+  { par: 5, archetypes: ['doglegL', 'doglegR'],       biome: 'parkland' },
+  { par: 4, archetypes: ['bottleneck'],               biome: 'parkland' },
+  { par: 3, archetypes: ['elevatedGreen'],            biome: 'parkland' },
+  { par: 4, archetypes: ['lakeside'],                 biome: 'links' },
+  { par: 5, archetypes: ['dunes'],                    biome: 'links' },
+  { par: 4, archetypes: ['elevatedGreen', 'dunes'],   biome: 'links' },
+  { par: 4, archetypes: ['doglegL', 'doglegR'],       biome: 'links' },
+  { par: 3, archetypes: ['potBunkers'],               biome: 'links' },
+  { par: 5, archetypes: ['lakeside', 'cape'],         biome: 'links' },
+  { par: 4, archetypes: ['bottleneck', 'straight'],   biome: 'pines' },
+  { par: 4, archetypes: ['waterApproach'],            biome: 'pines' },
+  { par: 5, archetypes: ['doubleDogleg'],             biome: 'pines' },
+  { par: 4, archetypes: ['cape'],                     biome: 'pines' },
+  { par: 3, archetypes: ['islandGreen'],              biome: 'pines' },
+  { par: 4, archetypes: ['lakeside', 'waterApproach'], biome: 'pines' },
 ];
+
+/** Which course holes make up a round of the given length. */
+export function roundHoles(length) {
+  if (length >= 18) return ROUND_PLAN.map((_, i) => i + 1);
+  if (length === 9) return [1, 3, 4, 7, 9, 11, 15, 17, 18];
+  return [1, 3, 17].slice(0, length);
+}
 
 // ---------------------------------------------------------------------------
 // Layout
@@ -132,235 +75,306 @@ export const ROUND_PLANS = [
 
 function layoutHole(rng, plan) {
   const { par, archetype } = plan;
+  const biome = BIOMES[plan.biome];
   const band = PAR_BANDS[par];
-  const totalLen = rng.range(band[0], band[1]);
+  let totalLen = rng.range(band[0], band[1]);
+  if (archetype === 'islandGreen') totalLen = rng.range(100, 125);
+  if (archetype === 'potBunkers') totalLen = rng.range(95, 120);
+  if (archetype === 'overWater') totalLen = rng.range(120, 150);
 
-  const tee = { x: -(115 + rng.range(0, 20)), z: rng.range(-60, 60) };
-  const a1 = rng.range(-0.28, 0.28); // primary azimuth off +X
+  const tee = { x: 0, z: 0 };
+  const at = (len, ang, from = tee) => ({ x: from.x + Math.cos(ang) * len, z: from.z + Math.sin(ang) * len });
+  const rad = (deg) => (deg * Math.PI) / 180;
 
-  let path, dogleg = null;
-  if (archetype === 'doglegL' || archetype === 'doglegR') {
-    const side = archetype === 'doglegL' ? 1 : -1;
-    const angleDeg = rng.range(28, 46) * side;
-    const l1 = totalLen * rng.range(0.55, 0.65);
-    const l2 = totalLen - l1;
-    const corner = {
-      x: tee.x + Math.cos(a1) * l1,
-      z: tee.z + Math.sin(a1) * l1,
-    };
-    const a2 = a1 + (angleDeg * Math.PI) / 180;
-    const green = {
-      x: corner.x + Math.cos(a2) * l2,
-      z: corner.z + Math.sin(a2) * l2,
-    };
-    path = [tee, corner, green];
-    dogleg = { corner, angleDeg, side };
+  let path;
+  let dogleg = null;
+  if (archetype === 'doglegL' || archetype === 'doglegR' || archetype === 'cape') {
+    const side = archetype === 'doglegL' ? 1 : archetype === 'doglegR' ? -1 : rng.sign();
+    const angle = rad(rng.range(26, 44)) * side;
+    const l1 = totalLen * rng.range(0.56, 0.64);
+    const corner = at(l1, 0);
+    path = [tee, corner, at(totalLen - l1, angle, corner)];
+    dogleg = { corner, side, l1 };
+  } else if (archetype === 'doubleDogleg') {
+    const side = rng.sign();
+    const a1 = rad(rng.range(20, 30)) * side;
+    const l1 = totalLen * 0.45, l2 = totalLen * 0.3;
+    const c1 = at(l1, 0);
+    const c2 = at(l2, a1, c1);
+    path = [tee, c1, c2, at(totalLen - l1 - l2, 0, c2)];
+    dogleg = { corner: c1, side, l1 };
+  } else if (par > 3) {
+    // "Straight" holes still drift a little so no two play the same line
+    const mid = { x: totalLen * 0.5, z: rng.range(-9, 9) };
+    path = [tee, mid, { x: totalLen, z: 0 }];
   } else {
-    const green = {
-      x: tee.x + Math.cos(a1) * totalLen,
-      z: tee.z + Math.sin(a1) * totalLen,
-    };
-    path = [tee, green];
+    path = [tee, { x: totalLen, z: 0 }];
   }
-  const green = path[path.length - 1];
+  totalLen = pathLength(path);
+  const greenPt = path[path.length - 1];
+  const prev = path[path.length - 2];
 
-  const greenSize = par === 3 ? 13 : 15;
-  const greenElev = archetype === 'elevatedGreen' ? rng.range(2, 3) : 0;
-  const fairwayWidth = 22;
+  const green = {
+    x: greenPt.x,
+    z: greenPt.z,
+    size: archetype === 'potBunkers' ? 11.5 : par === 3 ? rng.range(13, 15) : rng.range(14, 16.5),
+    angle: Math.atan2(greenPt.z - prev.z, greenPt.x - prev.x),
+    elev: archetype === 'elevatedGreen' ? rng.range(1.8, 2.8) : 0,
+    tiltAngle: rng.range(0, Math.PI * 2),
+    tilt: rng.range(0.008, 0.024),
+    undulation: biome.greenUndulation * rng.range(0.8, 1.25),
+  };
 
-  // --- Landing zone (the strategic target) ---
-  // Par 3s land on the green; longer holes target the 60% fairway zone.
-  const landingPoint = par === 3
-    ? { x: green.x, z: green.z }
-    : pointAlongPath(path, totalLen * 0.6);
-  const landingZone = { x: landingPoint.x, z: landingPoint.z, radius: par === 3 ? greenSize : 12 };
+  const fairwayHalf = par === 5 ? 12 : 13;
+  // Where the short grass starts: par 3s only get an apron near the green
+  let fairwayStart = par === 3 ? totalLen - green.size * 2.4 : rng.range(28, 40);
 
-  // --- Hazards, per archetype (path-frame coordinates: along / across) ---
   const bunkers = [];
   const water = [];
   const trees = [];
-  const half = fairwayWidth / 2;
 
-  const addBunkerAt = (along, across, r) => {
+  const offPath = (along, across) => {
     const p = pointAlongPath(path, along);
-    bunkers.push({
-      x: p.x + -p.dirZ * across,
-      z: p.z + p.dirX * across,
-      r,
-    });
+    return { x: p.x - p.dirZ * across, z: p.z + p.dirX * across };
+  };
+  const addBunker = (along, across, r, depth = 0.5) => {
+    bunkers.push({ ...offPath(along, across), r, depth, phase: rng.range(0, 6.28), wobble: 0.9 });
+  };
+  const addPond = (center, r, wobble = 1) => {
+    water.push({ x: center.x, z: center.z, r, wobble, phase: rng.range(0, 6.28) });
+  };
+  const greenside = () => {
+    if (rng.rng() < 0.75) addBunker(totalLen - rng.range(2, 8), rng.sign() * (green.size + 5), rng.range(4.5, 6));
   };
 
   switch (archetype) {
     case 'straight': {
-      addBunkerAt(totalLen * 0.6, +(half + 5), rng.range(6, 8));
-      addBunkerAt(totalLen * 0.62, -(half + 5), rng.range(6, 8));
-      if (rng.rng() < 0.5) addBunkerAt(totalLen * 0.92, rng.sign() * (greenSize + 3), rng.range(5, 6));
+      addBunker(totalLen * 0.64, fairwayHalf + 6, rng.range(6, 8));
+      addBunker(totalLen * 0.70, -(fairwayHalf + 6), rng.range(6, 8));
+      greenside();
       break;
     }
     case 'doglegL':
     case 'doglegR': {
-      // Inside-corner bunker punishes a lazy line; outside trees guard the cut
-      const cornerAlong = pathLength([path[0], path[1]]);
-      addBunkerAt(cornerAlong + 6, -dogleg.side * (half + 4), rng.range(6, 8));
-      addBunkerAt(totalLen * 0.9, dogleg.side * (greenSize + 4), rng.range(5, 6));
-      const cornerTrees = rng.int(8, 12);
-      for (let i = 0; i < cornerTrees; i++) {
-        const ang = rng.range(0, Math.PI * 2);
-        const rad = rng.range(16, 34);
-        trees.push({
-          x: dogleg.corner.x + Math.cos(ang) * rad,
-          z: dogleg.corner.z + Math.sin(ang) * rad,
-          s: rng.range(0.9, 1.5),
+      addBunker(dogleg.l1 + 10, -dogleg.side * (fairwayHalf + 5), rng.range(6, 8));
+      addBunker(totalLen - 6, dogleg.side * (green.size + 5), rng.range(5, 6));
+      // A stand of trees on the inside of the corner guards the short cut
+      const n = rng.int(7, 10);
+      for (let i = 0; i < n; i++) {
+        const along = dogleg.l1 + rng.range(-34, 12);
+        const across = dogleg.side * (fairwayHalf + rng.range(7, 30));
+        trees.push({ ...offPath(along, across), s: rng.range(1.0, 1.4) });
+      }
+      break;
+    }
+    case 'doubleDogleg': {
+      addBunker(dogleg.l1 + 8, -dogleg.side * (fairwayHalf + 5), rng.range(6, 8));
+      addBunker(totalLen * 0.72, dogleg.side * (fairwayHalf + 5), rng.range(6, 8));
+      greenside();
+      break;
+    }
+    case 'cape': {
+      // Lake fills the inside of the corner: the brave line carries it
+      const r = rng.range(30, 38);
+      const inside = offPath(dogleg.l1 - 8, dogleg.side * (fairwayHalf * 0.5 + r));
+      addPond(inside, r, 0.7);
+      addBunker(dogleg.l1 + 14, -dogleg.side * (fairwayHalf + 5), rng.range(6, 7));
+      greenside();
+      break;
+    }
+    case 'overWater': {
+      const r = rng.range(24, 32);
+      addPond(offPath(totalLen * rng.range(0.42, 0.52), 0), r);
+      fairwayStart = totalLen - green.size * 2.2;
+      greenside();
+      break;
+    }
+    case 'waterApproach': {
+      const r = rng.range(17, 22);
+      addPond(offPath(totalLen - green.size * 1.5 - r - 6, rng.range(-6, 6)), r, 0.8);
+      addBunker(totalLen + 2, rng.sign() * (green.size + 5), rng.range(5, 6));
+      break;
+    }
+    case 'lakeside': {
+      const side = rng.sign();
+      const r = rng.range(30, 40);
+      addPond(offPath(totalLen * rng.range(0.55, 0.68), side * (fairwayHalf * 0.55 + r)), r, 0.8);
+      addBunker(totalLen * 0.62, -side * (fairwayHalf + 6), rng.range(6, 8));
+      greenside();
+      break;
+    }
+    case 'bottleneck': {
+      const gateAlong = totalLen * rng.range(0.56, 0.64);
+      const gap = rng.range(11, 13);
+      for (const side of [1, -1]) {
+        for (let i = 0; i < 4; i++) {
+          const along = gateAlong - 16 + i * 10 + rng.range(-2, 2);
+          trees.push({ ...offPath(along, side * (gap + 4.5 + rng.range(0, 3))), s: rng.range(1.1, 1.4) });
+          trees.push({ ...offPath(along + 4, side * (gap + 14 + rng.range(0, 8))), s: rng.range(1.0, 1.4) });
+        }
+      }
+      addBunker(totalLen * 0.84, rng.sign() * (fairwayHalf + 5), rng.range(5, 7));
+      greenside();
+      break;
+    }
+    case 'elevatedGreen': {
+      addBunker(totalLen - 4, green.size + 5, rng.range(5, 6), 0.7);
+      addBunker(totalLen - 4, -(green.size + 5), rng.range(5, 6), 0.7);
+      if (par > 3) addBunker(totalLen * 0.66, rng.sign() * (fairwayHalf + 6), rng.range(6, 8));
+      break;
+    }
+    case 'potBunkers': {
+      const n = 5;
+      const start = rng.range(0, 6.28);
+      for (let i = 0; i < n; i++) {
+        const a = start + (i / n) * Math.PI * 2 + rng.range(-0.25, 0.25);
+        bunkers.push({
+          x: green.x + Math.cos(a) * (green.size * 1.32 + 3),
+          z: green.z + Math.sin(a) * (green.size * 1.2 + 3),
+          r: rng.range(3.2, 4.2), depth: 0.95, phase: rng.range(0, 6.28), wobble: 0.5,
         });
       }
       break;
     }
-    case 'overWater': {
-      // Pond guards the approach mid-hole; the tee shot must carry it.
-      const pondAlong = totalLen * rng.range(0.5, 0.62);
-      const p = pointAlongPath(path, pondAlong);
-      const r = rng.range(20, 28);
-      water.push({ x: p.x, z: p.z, r });
-      if (rng.rng() < 0.6) addBunkerAt(totalLen * 0.93, rng.sign() * (greenSize + 3), rng.range(5, 6));
-      break;
-    }
-    case 'bottleneck': {
-      // Two tree lines forming a gate the drive must thread
-      const gateAlong = totalLen * rng.range(0.5, 0.6);
-      const gateHalfGap = rng.range(8, 10); // chute half-width (16–20 full)
-      const lineLen = rng.int(5, 7);
-      for (const side of [1, -1]) {
-        for (let i = 0; i < lineLen; i++) {
-          const along = gateAlong - 14 + i * 6 + rng.range(-1.5, 1.5);
-          const across = side * (gateHalfGap + 3 + rng.range(0, 14));
-          const p = pointAlongPath(path, along);
-          trees.push({
-            x: p.x + -p.dirZ * across + rng.range(-1, 1),
-            z: p.z + p.dirX * across + rng.range(-1, 1),
-            s: rng.range(1.0, 1.5),
-          });
-        }
+    case 'dunes': {
+      let side = rng.sign();
+      for (let f = 0.34; f < 0.9; f += rng.range(0.13, 0.18)) {
+        addBunker(totalLen * f, side * (fairwayHalf + rng.range(3, 7)), rng.range(5, 7.5), 0.7);
+        side = -side;
       }
-      addBunkerAt(totalLen * 0.8, +(half + 5), rng.range(5, 7));
-      plan._gate = { along: gateAlong, gap: gateHalfGap * 2 };
+      greenside();
       break;
     }
-    case 'elevatedGreen': {
-      addBunkerAt(totalLen * 0.9, +(greenSize * 0.8), rng.range(5, 6));
-      addBunkerAt(totalLen * 0.9, -(greenSize * 0.8), rng.range(5, 6));
+    case 'islandGreen': {
+      addPond({ x: green.x, z: green.z }, green.size * 2.7, 0.3);
+      fairwayStart = totalLen; // no fairway: it's all carry
       break;
     }
   }
 
-  // --- Scattered parkland trees in the rough (never in play corridors) ---
-  const scattered = [];
-  for (let i = 0; i < 80 && scattered.length < 55; i++) {
-    const tx = rng.range(-175, 175);
-    const tz = rng.range(-175, 175);
-    const info = pathInfo(path, tx, tz);
-    if (info.dist < half + 7) continue;
-    if (Math.hypot(tx - tee.x, tz - tee.z) < 14) continue;
-    if (Math.hypot(tx - green.x, tz - green.z) < greenSize + 9) continue;
-    if (water.some(w => Math.hypot(tx - w.x, tz - w.z) < w.r + 4)) continue;
-    if (bunkers.some(b => Math.hypot(tx - b.x, tz - b.z) < b.r + 4)) continue;
-    if (trees.some(t => Math.hypot(tx - t.x, tz - t.z) < 5)) continue;
-    if (scattered.some(t => Math.hypot(tx - t.x, tz - t.z) < 5)) continue;
-    scattered.push({ x: tx, z: tz, s: rng.range(0.8, 1.4) });
+  // --- Pin: somewhere honest on the putting surface ---
+  let pin = { x: green.x, z: green.z };
+  for (let i = 0; i < 30; i++) {
+    const a = rng.range(0, Math.PI * 2);
+    const d = rng.range(0.15, 0.6) * green.size;
+    const c = { x: green.x + Math.cos(a) * d, z: green.z + Math.sin(a) * d };
+    if (greenDistance(green, c.x, c.z) < 0.68) { pin = c; break; }
   }
-  trees.push(...scattered);
 
-  // Carry demanded across water along the play line: walk the path in 1-unit
-  // steps and measure the longest covered span (core of the pond only).
-  const carryRequired = computeCarry(path, water);
+  // --- Scattered trees in the rough (never in the play corridor) ---
+  const blocked = (x, z, pad) =>
+    Math.hypot(x - tee.x, z - tee.z) < 16 + pad ||
+    greenDistance(green, x, z) < 1.55 + pad / green.size ||
+    water.some((w) => blobCovers(w, x, z, 5 + pad)) ||
+    bunkers.some((b) => blobCovers(b, x, z, 4 + pad));
 
-  return {
+  for (let i = trees.length - 1; i >= 0; i--) {
+    if (blocked(trees[i].x, trees[i].z, 0)) trees.splice(i, 1);
+  }
+  const corridor = fairwayHalf + 10;
+  const span = totalLen * 0.5 + 95;
+  const cx = (tee.x + greenPt.x) / 2, cz = (tee.z + greenPt.z) / 2;
+  for (let i = 0; i < biome.treeCount * 5 && trees.length < biome.treeCount; i++) {
+    const x = cx + rng.range(-span, span);
+    const z = cz + rng.range(-span, span);
+    const info = pathInfo(path, x, z);
+    if (info.dist < corridor || info.dist > 120) continue;
+    if (blocked(x, z, 2)) continue;
+    if (trees.some((t) => Math.hypot(x - t.x, z - t.z) < 8)) continue;
+    trees.push({ x, z, s: rng.range(0.8, 1.35) });
+  }
+
+  // --- Rotate the whole hole and centre it in the tile ---
+  const theta = rng.range(0, Math.PI * 2);
+  const cosT = Math.cos(theta), sinT = Math.sin(theta);
+  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+  const rot = (p) => {
+    const x = p.x * cosT - p.z * sinT, z = p.x * sinT + p.z * cosT;
+    p.x = x; p.z = z;
+  };
+  const pathPts = path.map((p) => ({ ...p }));
+  pathPts.forEach(rot);
+  for (const p of pathPts) {
+    minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+    minZ = Math.min(minZ, p.z); maxZ = Math.max(maxZ, p.z);
+  }
+  const ox = -(minX + maxX) / 2, oz = -(minZ + maxZ) / 2;
+  const move = (p) => { rot(p); p.x += ox; p.z += oz; };
+  pathPts.forEach((p) => { p.x += ox; p.z += oz; });
+  [green, pin, ...bunkers, ...water, ...trees].forEach(move);
+  green.angle += theta;
+  green.tiltAngle += theta;
+
+  const windSpeed = Math.round(rng.range(biome.wind[0], biome.wind[1]));
+  const windAngle = rng.range(0, Math.PI * 2);
+
+  const spec = {
     seed: plan.seed,
     number: plan.number,
     par,
     archetype,
-    tee, green, greenSize, greenElev, fairwayWidth,
-    path,
-    landingZone,
-    bunkers, water, trees,
-    carryRequired,
-    _gate: plan._gate || null,
-    _dogleg: dogleg,
+    biome: biome.id,
+    length: Math.round(totalLen),
+    path: pathPts,
+    tee: { x: pathPts[0].x, z: pathPts[0].z },
+    green,
+    pin,
+    fairwayHalf,
+    fairwayStart,
+    bunkers,
+    water,
+    trees,
+    wind: { speed: windSpeed, x: Math.cos(windAngle) * windSpeed, z: Math.sin(windAngle) * windSpeed },
   };
+  spec.carryRequired = computeCarry(spec);
+  return spec;
 }
 
-// Exact organic coverage — the SAME formulas terrain.js carves with, so the
-// fitness function can never disagree with the built hole.
-function waterCovers(w, x, z, margin = 0) {
-  const dx = x - w.x, dz = z - w.z;
-  const d = Math.hypot(dx, dz);
-  const a = Math.atan2(dz, dx);
-  const organic = 1 + 0.3 * Math.sin(a * 3) + 0.2 * Math.sin(a * 5) + 0.15 * Math.sin(a * 7);
-  return d < w.r * organic + margin;
-}
-
-function bunkerCovers(b, x, z, margin = 0) {
-  const dx = x - b.x, dz = z - b.z;
-  const d = Math.hypot(dx, dz);
-  const a = Math.atan2(dz, dx);
-  const organic = Math.max(0.5, 1 + 0.4 * Math.sin(a * 2) + 0.25 * Math.sin(a * 4) - 0.15 * Math.cos(a * 3));
-  return d < b.r * organic + margin;
-}
-
-function computeCarry(path, water) {
-  if (!water.length) return 0;
-  const len = pathLength(path);
+/** Longest stretch of water the play line crosses. */
+function computeCarry(spec) {
+  if (!spec.water.length) return 0;
+  const len = pathLength(spec.path);
   let maxCarry = 0, cur = 0;
   for (let d = 0; d <= len; d += 1) {
-    const p = pointAlongPath(path, d);
-    const covered = water.some(w => waterCovers(w, p.x, p.z, -2));
-    if (covered) {
-      cur += 1;
-      maxCarry = Math.max(maxCarry, cur);
-    } else {
-      cur = 0;
-    }
+    const p = pointAlongPath(spec.path, d);
+    const wet = greenDistance(spec.green, p.x, p.z) > 1.15 && spec.water.some((w) => blobCovers(w, p.x, p.z));
+    cur = wet ? cur + 1 : 0;
+    maxCarry = Math.max(maxCarry, cur);
   }
   return maxCarry;
 }
 
 // ---------------------------------------------------------------------------
-// Fitness: fairness, readability, interest. Bad holes are REJECTED.
+// Fitness: fairness and readability. Bad holes are rejected and re-rolled.
 // ---------------------------------------------------------------------------
 
 function evaluateFitness(spec) {
   const checks = {};
-  const band = PAR_BANDS[spec.par];
-  const len = pathLength(spec.path);
+  const { green, tee, pin } = spec;
+  const wetAt = (x, z, m) => spec.water.some((w) => blobCovers(w, x, z, m));
+  const sandAt = (x, z, m) => spec.bunkers.some((b) => blobCovers(b, x, z, m));
 
-  // Fairness (exact coverage — same math the terrain carves with)
-  checks.lengthInBand = len >= band[0] - 5 && len <= band[1] + 5;
-  checks.carryOk = spec.carryRequired <= MAX_CARRY;
-  checks.landingClear =
-    !spec.water.some(w => waterCovers(w, spec.landingZone.x, spec.landingZone.z, 2)) &&
-    !spec.bunkers.some(b => bunkerCovers(b, spec.landingZone.x, spec.landingZone.z, 2));
-  checks.greenClear = !spec.water.some(w => waterCovers(w, spec.green.x, spec.green.z, 4));
-  checks.teeClear =
-    !spec.water.some(w => waterCovers(w, spec.tee.x, spec.tee.z, 6)) &&
-    !spec.bunkers.some(b => bunkerCovers(b, spec.tee.x, spec.tee.z, 6));
+  checks.inBounds = [...spec.path, ...spec.water, ...spec.bunkers].every(
+    (p) => Math.abs(p.x) + (p.r || 0) <= FEATURE_BOUND && Math.abs(p.z) + (p.r || 0) <= FEATURE_BOUND);
+  checks.teeClear = !wetAt(tee.x, tee.z, 12) && !sandAt(tee.x, tee.z, 8);
+  checks.pinClear = !sandAt(pin.x, pin.z, 4);
+  checks.greenDry = spec.archetype === 'islandGreen' || !wetAt(green.x, green.z, green.size * 0.9);
+  checks.carryOk = spec.carryRequired <= 120;
+  checks.waterInPlay = !['overWater', 'islandGreen'].includes(spec.archetype) || spec.carryRequired >= 18;
 
-  // Readability
-  checks.inBounds =
-    [spec.tee, spec.green, ...spec.path].every(p => Math.abs(p.x) <= TILE_BOUND && Math.abs(p.z) <= TILE_BOUND);
-  checks.doglegOk = !spec._dogleg || (Math.abs(spec._dogleg.angleDeg) >= 24 && Math.abs(spec._dogleg.angleDeg) <= 50);
-  checks.chuteOk = !spec._gate || spec._gate.gap >= 14;
-  // An over-water hole must actually force a meaningful carry
-  checks.waterOnLine = spec.archetype !== 'overWater' || spec.carryRequired >= 15;
-
-  // Interest
-  checks.hasHazards = spec.bunkers.length + spec.water.length > 0;
+  // The drive needs somewhere dry to land (par 4/5)
+  if (spec.par > 3) {
+    let ok = false;
+    for (let d = 150; d <= 195; d += 5) {
+      const p = pointAlongPath(spec.path, Math.min(d, spec.length - 30));
+      if (!wetAt(p.x, p.z, 3) && !sandAt(p.x, p.z, 1)) { ok = true; break; }
+    }
+    checks.landingClear = ok;
+  }
 
   const names = Object.keys(checks);
-  const passed = names.filter(n => checks[n]).length;
-  return {
-    checks,
-    score: passed / names.length,
-    pass: names.every(n => checks[n]),
-  };
+  const passed = names.filter((n) => checks[n]).length;
+  return { checks, score: passed / names.length, pass: passed === names.length };
 }
 
 // ---------------------------------------------------------------------------
@@ -368,25 +382,25 @@ function evaluateFitness(spec) {
 // ---------------------------------------------------------------------------
 
 /**
- * Design one hole. Deterministic from (seedString, holeNumber).
- * Re-rolls with attempt sub-seeds until the fitness function passes.
+ * Design hole `holeNumber` (1..18) of the course grown from `seedString`.
+ * Re-rolls with attempt sub-seeds until the fitness checks pass.
  */
 export function designHole(seedString, holeNumber, request = {}) {
   const holeRng = createGameRng(`${seedString}:design-${holeNumber}`);
-  const plan = ROUND_PLANS[(holeNumber - 1) % ROUND_PLANS.length];
-  const par = request.par || plan.par;
+  const plan = ROUND_PLAN[(holeNumber - 1) % ROUND_PLAN.length];
   const archetype = request.archetype || holeRng.pick(plan.archetypes);
+  const par = request.par || plan.par;
+  const biome = request.biome || plan.biome;
 
   let best = null;
   for (let attempt = 0; attempt < 60; attempt++) {
     const rng = holeRng.fork(`attempt-${attempt}`);
-    const spec = layoutHole(rng, { seed: seedString, number: holeNumber, par, archetype });
+    const spec = layoutHole(rng, { seed: seedString, number: holeNumber, par, archetype, biome });
     const fitness = evaluateFitness(spec);
     spec.fitness = { ...fitness, attempts: attempt + 1 };
     if (fitness.pass) return spec;
     if (!best || fitness.score > best.fitness.score) best = spec;
   }
-  // Should not happen; return the best-effort layout rather than crashing.
   best.fitness.bestEffort = true;
   return best;
 }

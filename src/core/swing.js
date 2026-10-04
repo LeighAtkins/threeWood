@@ -16,15 +16,15 @@
  */
 
 export const SWING = {
-  POWER_SPEED: 90,      // marker units/s on the way up (0 -> 100 in ~1.1s)
-  ACCURACY_SPEED: 165,  // marker units/s on the way back down
+  POWER_SPEED: 85,      // marker units/s on the way up (0 -> 100 in ~1.2s)
+  ACCURACY_SPEED: 120,  // marker units/s on the way back down (touch-friendly)
   LINE: 8,              // strike line value on the return sweep
   WINDOW: 45,           // units of marker travel mapped to timing -1..+1
   FLOOR: 8 - 45,        // = -37: unclicked marker auto-hits here (max late)
-  // Grade thresholds on |timing| (0..1). Pure is a ~±20ms skill window.
-  PURE_MAX: 0.08,
-  GOOD_MAX: 0.30,
-  POOR_MAX: 0.60,
+  // Grade thresholds on |timing| (0..1). Pure is a ~±40ms skill window.
+  PURE_MAX: 0.11,
+  GOOD_MAX: 0.34,
+  POOR_MAX: 0.66,
 };
 
 export function createSwing() {
