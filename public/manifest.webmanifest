@@ -1,0 +1,13 @@
+{
+  "name": "ThreeWood",
+  "short_name": "ThreeWood",
+  "description": "18 holes of procedurally generated golf, built for your thumbs.",
+  "start_url": "/",
+  "display": "fullscreen",
+  "orientation": "any",
+  "background_color": "#4aa3ee",
+  "theme_color": "#4aa3ee",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

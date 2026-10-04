@@ -70,7 +70,7 @@ export class CameraRig {
   }
 
   /** Putting view: ball near the bottom of frame, cup beyond it. */
-  putt(ball, dirX, dirZ, distance) {
+  putt(ball, dirX, dirZ, distance, lift = 0) {
     this.mode = 'putt';
     this.stiffness = 7;
     const d = Math.min(distance, 28);
@@ -78,19 +78,24 @@ export class CameraRig {
     const up = 1.5 + d * 0.17 + (this.portrait ? 0.4 : 0);
     this.wantPos.set(ball.x - dirX * back, ball.y + up, ball.z - dirZ * back);
     const ahead = Math.max(1.5, d * 0.62);
-    this.wantLook.set(ball.x + dirX * ahead, ball.y, ball.z + dirZ * ahead);
+    this.wantLook.set(ball.x + dirX * ahead, ball.y + lift, ball.z + dirZ * ahead);
   }
 
   /** Follow a ball in flight from behind and above. */
   chase(ball) {
-    this.mode = 'chase';
-    this.stiffness = 3.2;
+    if (this.mode !== 'chase') {
+      this.mode = 'chase';
+      this.chaseT = 0;
+    }
+    this.chaseT += 1 / 60;
+    // Ease in from the address view, then stay tight on the ball
+    this.stiffness = Math.min(9, 2.5 + this.chaseT * 9);
     const vh = Math.hypot(ball.vx, ball.vz) || 1;
     const dx = ball.vx / vh, dz = ball.vz / vh;
     const height = Math.max(0, ball.y - this.ground(ball.x, ball.z));
-    const back = 9 + height * 0.35;
-    this.wantPos.set(ball.x - dx * back, ball.y + 3 + height * 0.12, ball.z - dz * back);
-    this.wantLook.set(ball.x + dx * 4, ball.y, ball.z + dz * 4);
+    const back = 7 + height * 0.3;
+    this.wantPos.set(ball.x - dx * back, ball.y + 2.2 + height * 0.1, ball.z - dz * back);
+    this.wantLook.set(ball.x + dx * 6, ball.y - height * 0.15, ball.z + dz * 6);
   }
 
   /** Park beyond where the ball will finish and watch it come in. */
@@ -100,14 +105,15 @@ export class CameraRig {
       let dx = restX - fromX, dz = restZ - fromZ;
       const len = Math.hypot(dx, dz) || 1;
       dx /= len; dz /= len;
-      const px = restX + dx * 10 - dz * 5.5;
-      const pz = restZ + dz * 10 + dx * 5.5;
-      this.pos.set(px, this.ground(px, pz) + 3.6, pz);
+      const px = restX + dx * 8 - dz * 4.5;
+      const pz = restZ + dz * 8 + dx * 4.5;
+      this.pos.set(px, this.ground(px, pz) + 2.6, pz);
       this.wantPos.copy(this.pos);
-      this.look.set(ball.x, ball.y, ball.z);
+      this.look.set(ball.x, ball.y + 1.3, ball.z);
     }
     this.stiffness = 9;
-    this.wantLook.set(ball.x, ball.y, ball.z);
+    // Look a touch above the ball so it sits in the lower half of the frame
+    this.wantLook.set(ball.x, ball.y + 1.3, ball.z);
   }
 
   /** Hold position, keep the ball in frame. */

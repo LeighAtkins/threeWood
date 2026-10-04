@@ -202,6 +202,15 @@ button { font: inherit; color: inherit; border: 0; background: none; padding: 0;
 }
 .meter .ticks { position: relative; height: 14px; font-size: 10px; opacity: 0.8; }
 
+.carry {
+  position: absolute; left: 0; right: 0; bottom: calc(var(--sab) + 9%);
+  text-align: center;
+  font-size: clamp(40px, 13vw, 64px); font-weight: 700; letter-spacing: 1px;
+  color: var(--cream);
+  text-shadow: 0 4px 0 rgba(0, 0, 0, 0.35), 0 0 22px rgba(0, 0, 0, 0.3);
+  font-variant-numeric: tabular-nums;
+}
+
 /* ---- Callouts ----------------------------------------------------------------- */
 .callouts {
   position: absolute; left: 0; right: 0; top: 34%;
@@ -292,7 +301,7 @@ button { font: inherit; color: inherit; border: 0; background: none; padding: 0;
 .bonus-list { margin: 12px 0 2px; text-align: left; }
 .bonus {
   display: flex; justify-content: space-between;
-  font-size: 15px; padding: 5px 4px;
+  font-size: 15px; padding: 4px 4px;
   border-bottom: 1px dashed rgba(255, 255, 255, 0.14);
   animation: bonusIn 0.3s backwards;
 }

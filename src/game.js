@@ -21,6 +21,14 @@ import { Audio } from './audio.js';
 const SAVE_KEY = 'threewood.save.v2';
 const BEST_KEY = 'threewood.best.v2';
 const HINT_KEY = 'threewood.hints.v2';
+const DAILY_KEY = 'threewood.daily.v1';
+
+/** Everyone gets the same course each day. */
+function dailySeed() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  return `DAILY-${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
 
 const GIMME = 0.5;            // yards: closer than this is conceded as a tap-in
 const PUTT_METER_RATE = 82;   // meter units per second while holding PUTT
@@ -72,13 +80,17 @@ export class Game {
     this.swing = createSwing();
     this.hints = store.get(HINT_KEY) || { swing: 0, putt: 0 };
 
+    this.seedPinned = !!getSeedFromUrl();
     this.seed = getSeedFromUrl() || store.get(SAVE_KEY)?.seed || generateSeed();
     this.round = null;
 
     this.resize();
     window.addEventListener('resize', () => this.resize());
     window.addEventListener('orientationchange', () => setTimeout(() => this.resize(), 200));
-    document.addEventListener('visibilitychange', () => { this.clock.getDelta(); });
+    document.addEventListener('visibilitychange', () => {
+      this.clock.getDelta();
+      if (document.visibilityState === 'visible' && this.round) this.keepAwake();
+    });
 
     this.showTitle();
     this.clock = new THREE.Clock();
@@ -154,7 +166,7 @@ export class Game {
     this.ball = createBall();
     this.ballMesh = new THREE.Mesh(
       new THREE.IcosahedronGeometry(BALL_R, 2),
-      new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.35, flatShading: true }));
+      new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.35, flatShading: true, emissive: 0x777777 }));
     this.ballMesh.castShadow = true;
     this.scene.add(this.ballMesh);
     // Blob shadow: the depth cue that makes ball flight readable
@@ -173,7 +185,7 @@ export class Game {
     c.addEventListener('pointerdown', (e) => {
       this.audio.unlock();
       drag = { id: e.pointerId, x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, t: performance.now(), moved: 0 };
-      c.setPointerCapture?.(e.pointerId);
+      try { c.setPointerCapture?.(e.pointerId); } catch { /* synthetic pointer */ }
     });
     c.addEventListener('pointermove', (e) => {
       if (!drag || drag.id !== e.pointerId) return;
@@ -182,7 +194,7 @@ export class Game {
       drag.x = e.clientX; drag.y = e.clientY;
       if (this.state === 'aim' && !this.paused) {
         // Putts need a jeweller's touch; full shots a quicker turn
-        const base = this.putting ? 0.0011 : 0.0042;
+        const base = this.putting ? 0.0011 : 0.003;
         this.aimAngle += dx * base * (420 / Math.max(320, Math.min(window.innerWidth, 900)));
         this.planDirty = true;
       }
@@ -195,7 +207,9 @@ export class Game {
     };
     c.addEventListener('pointerup', end);
     c.addEventListener('pointercancel', end);
-    document.addEventListener('pointerdown', () => this.audio.unlock(), { capture: true });
+    for (const type of ['pointerdown', 'touchend', 'click']) {
+      document.addEventListener(type, () => this.audio.unlock(), { capture: true, passive: true });
+    }
 
     this.keys = {};
     window.addEventListener('keydown', (e) => {
@@ -237,6 +251,7 @@ export class Game {
     this.hud.showTitle({
       saved: usable ? { hole: saved.index + 1, total: saved.scores.reduce((s, h) => s + h.strokes - h.par, 0) } : null,
       best: store.get(BEST_KEY),
+      daily: store.get(DAILY_KEY)?.[dailySeed()] ?? null,
       seed: this.seed,
     });
     this.rig.cut();
@@ -250,9 +265,15 @@ export class Game {
       this.seed = saved.seed;
       this.round = saved;
     } else {
-      // A fresh round on the course shown behind the title
-      const length = Number(choice);
+      if (choice === 'daily') {
+        this.seed = dailySeed();
+      } else if (!this.seedPinned && saved && saved.seed === this.seed) {
+        // Abandoning a round: grow a new course rather than replaying it
+        this.seed = generateSeed();
+      }
+      const length = choice === 'daily' ? 18 : Number(choice);
       this.round = {
+        daily: choice === 'daily',
         seed: this.seed,
         length,
         holes: roundHoles(length),
@@ -266,7 +287,15 @@ export class Game {
     }
     this.rng = createGameRng(`${this.seed}:play:${Date.now()}`).rng;
     this.hud.clearLayer();
+    this.keepAwake();
     this.startHole();
+  }
+
+  /** Keep the screen on during a round (it is a long time between taps on a putt read). */
+  async keepAwake() {
+    try {
+      this.wakeLock = await navigator.wakeLock?.request('screen');
+    } catch { /* not supported or denied: fine */ }
   }
 
   /** Swap in a new hole's world, mesh and scenery. */
@@ -316,6 +345,20 @@ export class Game {
     this.landing = null;
     this.aimAngle = Math.atan2(this.world.cup.z - this.ball.z, this.world.cup.x - this.ball.x);
     this.hud.drawMinimap(this.world, this.ball, null);
+
+    // Resuming mid-hole (the tab was closed on the 14th fairway): pick up
+    // exactly where the ball was lying.
+    const live = round.live;
+    if (live && live.index === round.index && live.strokes > 0) {
+      this.strokes = live.strokes;
+      this.putts = live.putts;
+      this.bonuses = live.bonuses || [];
+      this.holePoints = live.holePoints || 0;
+      placeBall(this.ball, this.world, live.x, live.z);
+      this.hud.clearLayer();
+      this.beginAim();
+      return;
+    }
     this.setState('intro');
     this.rig.flyover(0);
     this.rig.cut();
@@ -370,12 +413,22 @@ export class Game {
     this.setClub(autoSelectClub(this.targetDist, this.lie, this.onTee));
     this.toPin = toPin;
 
+    this.round.live = {
+      index: this.round.index, x: ball.x, z: ball.z,
+      strokes: this.strokes, putts: this.putts, bonuses: this.bonuses, holePoints: this.holePoints,
+    };
+    store.set(SAVE_KEY, this.round);
+
+    this.blocked = false;
+    this.effects.aimArc.material.color.setHex(0xffffff);
     this.setState('aim');
     this.swing.phase = 'idle';
     this.charging = false;
     this.hud.setControlsVisible(true);
+    this.hud.setCarry(null);
     this.updateScoreHud();
     this.rig.cut();
+    this.ballScale = 1.4;
     this.showHint();
   }
 
@@ -451,6 +504,14 @@ export class Game {
         club: this.club, power: this.idealPower ?? 100, dirX, dirZ, lie: this.lie, slope: this.slope,
       });
       const preview = previewShot(world, ball, launch);
+      if (preview.blocked !== this.blocked) {
+        this.blocked = preview.blocked;
+        this.effects.aimArc.material.color.setHex(preview.blocked ? 0xff5a3c : 0xffffff);
+        if (this.state === 'aim') {
+          if (preview.blocked) this.hud.hint('Tree in the way — aim around it');
+          else this.showHint();
+        }
+      }
       this.effects.puttLine.hide();
       this.landing = { x: preview.landX, y: preview.landY, z: preview.landZ };
       const camDist = Math.hypot(preview.landX - this.camera.position.x, preview.landZ - this.camera.position.z);
@@ -661,12 +722,21 @@ export class Game {
     }
     if (ball.mode === 'air' && !ball.landed) this.effects.addTrailPoint(ball.x, ball.y, ball.z);
 
+    if (!shot.putt) {
+      // Live yardage: the number climbing is half the fun of a good drive
+      this.hud.setCarry(`${Math.round(Math.hypot(ball.x - shot.fromX, ball.z - shot.fromZ))}y`);
+    }
+
     for (const e of this.events) this.handleBallEvent(e);
     if (this.state !== 'flight') return;
 
     // Camera
     if (shot.putt) {
-      this.rig.watch(ball, 0.25);
+      // Walk in behind the ball as it tracks toward the hole
+      const d = cupDist || 1;
+      // (no controls on screen now, so frame the ball lower)
+      this.rig.putt(ball, (world.cup.x - ball.x) / d, (world.cup.z - ball.z) / d, Math.max(1.2, cupDist), 0.9 + cupDist * 0.07);
+      this.rig.stiffness = 2.2;
     } else if (shot.chase) {
       if (ball.time > plan.landTime - 1.25 || ball.mode !== 'air') {
         this.rig.landing(ball, plan.restX, plan.restZ, shot.fromX, shot.fromZ);
@@ -724,6 +794,7 @@ export class Game {
     this.effects.endTrail();
     this.strokes += 1;
     this.round.pureStreak = 0;
+    this.hud.setCarry(null);
     this.hud.callout(label, 'bad');
     this.hud.callout('+1 PENALTY', 'bad small');
     this.audio.penalty();
@@ -823,6 +894,7 @@ export class Game {
     const { shot, world, round } = this;
     const par = world.spec.par;
     this.effects.endTrail();
+    this.hud.setCarry(null);
     this.audio.cup();
     this.sink = 0.001;
     this.timeScale = 1;
@@ -848,10 +920,7 @@ export class Game {
 
     this.setState('holed');
     this.celebrateAngle = Math.atan2(this.camera.position.z - world.cup.z, this.camera.position.x - world.cup.x);
-    setTimeout(() => {
-      this.hud.callout(scoreName(this.strokes, par), d < 0 ? 'gold' : d > 0 ? 'bad' : '');
-      this.audio.fanfare(d <= -2 ? 3 : d === -1 ? 2 : d === 0 ? 1 : 0);
-    }, 450);
+    this.announced = false;
   }
 
   finishHole() {
@@ -861,6 +930,7 @@ export class Game {
     const last = round.index >= round.holes.length - 1;
     const card = this.cardData();
     round.index += 1;
+    round.live = null;
     store.set(SAVE_KEY, round);
 
     const d = this.strokes - par;
@@ -898,7 +968,16 @@ export class Game {
         best = true;
       }
     }
+    if (round.daily) {
+      const all = store.get(DAILY_KEY) || {};
+      const prev = all[round.seed];
+      if (!prev || total < prev.score) { all[round.seed] = { score: total, points: round.points }; best = true; }
+      // Only today's (and a few recent) results are worth keeping
+      for (const key of Object.keys(all).sort().slice(0, -7)) delete all[key];
+      store.set(DAILY_KEY, all);
+    }
     store.del(SAVE_KEY);
+    this.wakeLock?.release?.().catch(() => {});
     this.setState('summary');
     this.audio.fanfare(total <= 0 ? 3 : 1);
     const card = this.cardData();
@@ -914,6 +993,7 @@ export class Game {
         { label: 'LONGEST PUTT', value: `${st.longestPutt} ft` },
       ],
       onAgain: () => {
+        this.seedPinned = false;
         this.seed = generateSeed();
         history.replaceState(null, '', location.pathname);
         this.hud.clearLayer();
@@ -975,6 +1055,7 @@ export class Game {
 
   loop() {
     requestAnimationFrame(this.loop);
+    if (this.manual) return;
     const raw = this.clock.getDelta();
     const dt = Math.min(raw, 0.05);
     this.adaptQuality(raw);
@@ -1032,6 +1113,12 @@ export class Game {
       case 'holed':
         this.celebrateAngle += dt * 0.5;
         this.rig.orbit(world.cup.x, world.cup.y, world.cup.z, 5.2, 2.3, this.celebrateAngle);
+        if (!this.announced && this.stateTime > 0.45) {
+          this.announced = true;
+          const d = this.strokes - world.spec.par;
+          this.hud.callout(scoreName(this.strokes, world.spec.par), d < 0 ? 'gold' : d > 0 ? 'bad' : '');
+          this.audio.fanfare(d <= -2 ? 3 : d === -1 ? 2 : d === 0 ? 1 : 0);
+        }
         if (this.stateTime > 2.6) this.finishHole();
         break;
       case 'result':
@@ -1061,9 +1148,10 @@ export class Game {
     this.rig.update(dt);
 
     // Ball: drawn a little larger with distance so it never becomes a pixel
-    const camDist = camera.position.distanceTo(this.ballMesh.position);
-    const want = Math.max(1.4, Math.min(16, camDist / (this.rig.portrait ? 7.5 : 9)));
-    this.ballScale += (want - this.ballScale) * Math.min(1, dt * 8);
+    const camDist = Math.hypot(camera.position.x - ball.x, camera.position.y - ball.y, camera.position.z - ball.z);
+    const want = Math.max(1.4, Math.min(18, camDist / (this.rig.portrait ? 6 : 8)));
+    // Shrink at once (camera cuts), grow smoothly (ball flying away)
+    this.ballScale = want < this.ballScale ? want : this.ballScale + (want - this.ballScale) * Math.min(1, dt * 8);
     const s = this.ballScale;
     const ground = world.heightAt(ball.x, ball.z);
     const lift = Math.max(0, ball.y - BALL_R - ground);
@@ -1129,6 +1217,13 @@ export class Game {
     }
   }
 
+  /** Test/capture hook: with `manual` set, advance exactly one frame. */
+  debugFrame(dt, render = true) {
+    if (!this.paused) this.update(dt);
+    this.updateVisuals(dt);
+    if (render) this.renderer.render(this.scene, this.camera);
+  }
+
   /** Test hook: jump to hole `index` (0-based) of the round. */
   debugGoto(index) {
     this.round.index = index;
@@ -1153,10 +1248,15 @@ export class Game {
     if (this.frameTimes.length < 90) return;
     const avg = this.frameTimes.reduce((a, b) => a + b, 0) / this.frameTimes.length;
     this.frameTimes.length = 0;
-    if (avg > 1 / 42 && this.pixelRatio > 1) {
+    if (avg <= 1 / 42) return;
+    if (this.pixelRatio > 1) {
       this.pixelRatio = Math.max(1, this.pixelRatio - 0.25);
       this.renderer.setPixelRatio(this.pixelRatio);
       this.resize();
+    } else if (this.sun.castShadow) {
+      // Last resort: real shadows go, the ball's blob shadow stays
+      this.sun.castShadow = false;
+      this.renderer.shadowMap.needsUpdate = true;
     }
   }
 }

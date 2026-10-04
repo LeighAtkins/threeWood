@@ -53,6 +53,7 @@ export class Hud {
       </div>
       <div class="side-right play"><canvas id="minimap" width="208" height="208"></canvas></div>
       <div class="pin-tag play hidden"></div>
+      <div class="carry hidden"></div>
       <div class="callouts"></div>
       <div class="pill hint hidden"></div>
       <div class="meter hidden">
@@ -93,6 +94,7 @@ export class Hud {
     this.minimap = q('#minimap');
     this.pinTag = q('.pin-tag');
     this.callouts = q('.callouts');
+    this.carry = q('.carry');
     this.hintEl = q('.hint');
     this.meter = q('.meter');
     this.meterCaption = q('.meter .caption');
@@ -118,7 +120,7 @@ export class Hud {
     // The swing button works on press AND release (putts are hold-to-charge)
     const down = (e) => {
       e.preventDefault();
-      this.swingBtn.setPointerCapture?.(e.pointerId);
+      try { this.swingBtn.setPointerCapture?.(e.pointerId); } catch { /* synthetic pointer */ }
       this.swingBtn.classList.add('down');
       this.h.onSwingDown();
     };
@@ -266,6 +268,12 @@ export class Hud {
     node.addEventListener('animationend', () => node.remove());
   }
 
+  /** Big live distance readout while a shot is in the air. */
+  setCarry(text) {
+    this.carry.classList.toggle('hidden', !text);
+    if (text && this.carry.textContent !== text) this.carry.textContent = text;
+  }
+
   hint(text, high = false) {
     this.hintEl.classList.toggle('hidden', !text);
     this.hintEl.classList.toggle('high', high);
@@ -276,7 +284,7 @@ export class Hud {
 
   clearLayer() { this.layer.innerHTML = ''; }
 
-  showTitle({ saved, best, seed }) {
+  showTitle({ saved, best, daily, seed }) {
     this.clearLayer();
     const node = el('div', 'title', `
       <div class="logo">
@@ -286,7 +294,10 @@ export class Hud {
       <div class="title-actions">
         ${saved ? `<button class="btn" data-a="continue">CONTINUE · HOLE ${saved.hole} (${vsPar(saved.total)})</button>` : ''}
         <button class="btn ${saved ? 'ghost' : ''}" data-a="18">PLAY 18 HOLES</button>
-        <button class="btn ghost" data-a="9">QUICK 9</button>
+        <div class="btn-row">
+          <button class="btn ghost" data-a="daily">DAILY${daily ? ` · ${vsPar(daily.score)}` : ''}</button>
+          <button class="btn ghost" data-a="9">QUICK 9</button>
+        </div>
         <div class="title-foot">${best ? `BEST ROUND ${vsPar(best.score)} · ★ ${best.points.toLocaleString()}<br>` : ''}COURSE ${seed}</div>
       </div>`);
     node.addEventListener('click', (e) => {
@@ -317,10 +328,10 @@ export class Hud {
         <h1 class="${kind}">${title}</h1>
         <div class="result-score">${strokes} ${strokes === 1 ? 'stroke' : 'strokes'} · par ${par}</div>
         <div class="bonus-list">
-          ${bonuses.map((b, i) => `<div class="bonus" style="animation-delay:${0.25 + i * 0.12}s"><span>${b.label}</span><b>+${b.points}</b></div>`).join('')}
+          ${mergeBonuses(bonuses).map((b, i) => `<div class="bonus" style="animation-delay:${0.25 + i * 0.12}s"><span>${b.label}</span><b>+${b.points}</b></div>`).join('')}
           <div class="total-line"><span>HOLE POINTS</span><span class="gold">★ ${holePoints.toLocaleString()}</span></div>
         </div>
-        ${scorecardHtml(card)}
+        ${scorecardHtml(card, true)}
         <button class="btn" data-a="next">${last ? 'FINISH ROUND' : 'NEXT HOLE'}<span class="auto"></span></button>
       </div>`);
     node.querySelector('[data-a="next"]').addEventListener('click', onNext);
@@ -500,10 +511,21 @@ export class Hud {
   }
 }
 
-function scorecardHtml(card) {
-  // card: { holes: [{ label, par, strokes|null }], current }
-  const halves = [];
+/** Keep the list short: the biggest six, the rest rolled into one line. */
+function mergeBonuses(bonuses) {
+  if (bonuses.length <= 6) return bonuses;
+  const sorted = [...bonuses].sort((a, b) => b.points - a.points);
+  const rest = sorted.slice(5);
+  return [...sorted.slice(0, 5), { label: `${rest.length} more`, points: rest.reduce((s, b) => s + b.points, 0) }];
+}
+
+function scorecardHtml(card, compact = false) {
+  // card: { holes: [{ label, par, strokes|null, current }] }
+  let halves = [];
   for (let i = 0; i < card.holes.length; i += 9) halves.push(card.holes.slice(i, i + 9));
+  // Compact: just the nine being played (keeps the result card on one screen)
+  const all = halves.length;
+  if (compact && all > 1) halves = halves.filter((half) => half.some((h) => h.current)).slice(0, 1);
   const mark = (h) => {
     if (h.strokes == null) return `<span class="s ${h.current ? 'now' : ''}">${h.current ? '·' : ''}</span>`;
     const d = h.strokes - h.par;
@@ -513,7 +535,7 @@ function scorecardHtml(card) {
   return halves.map((half, hi) => {
     const played = half.filter((h) => h.strokes != null);
     const sum = played.reduce((s, h) => s + h.strokes, 0);
-    const label = halves.length > 1 ? (hi === 0 ? 'OUT' : 'IN') : 'TOT';
+    const label = all > 1 ? (half[0] === card.holes[0] ? 'OUT' : 'IN') : 'TOT';
     return `<table class="sc">
       <tr><th class="lbl">HOLE</th>${half.map((h) => `<th>${h.label}</th>`).join('')}<th>${label}</th></tr>
       <tr class="par"><td class="lbl">PAR</td>${half.map((h) => `<td>${h.par}</td>`).join('')}<td>${half.reduce((s, h) => s + h.par, 0)}</td></tr>

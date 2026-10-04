@@ -45,7 +45,10 @@ export function previewShot(world, ball, launch) {
   const b = copyBall(ball);
   launchBall(b, launch);
   const run = simulate(b, world, null, { sample: 0.08, stopOnLand: true, maxTime: 12 });
-  return { points: run.points, landX: b.x, landY: b.y, landZ: b.z, landed: b.landed };
+  return {
+    points: run.points, landX: b.x, landY: b.y, landZ: b.z, landed: b.landed,
+    blocked: run.events.some((e) => e.type === 'tree'),
+  };
 }
 
 /** Full roll-out of a putt along a line (cup included). */
