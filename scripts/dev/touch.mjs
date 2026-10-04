@@ -52,6 +52,7 @@ if (await g('g.idealPower == null')) {
   await page.locator('.swing-btn').tap({ force: true });
 }
 check('power locked', await g(`g.swing.phase === 'accuracy' && g.swing.power > 5`), `power ${await g('g.swing.power.toFixed(0)')}`);
+await waitG(`g.lockGrace === 0`, 10); // the grace window is game time, slow under software rendering
 await page.touchscreen.tap(vp.width / 2, vp.height / 2); // tap 3 anywhere on the course
 check('tap 3 (on course) strikes', await g(`g.state === 'flight' && g.strokes === 1`));
 for (let i = 0; i < 60 && (await g('g.state')) !== 'aim'; i++) { await page.touchscreen.tap(vp.width / 2, 200); await page.waitForTimeout(500); }
