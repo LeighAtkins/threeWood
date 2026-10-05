@@ -67,7 +67,14 @@ function buildTrees(world, rng) {
 
 // --- Water -------------------------------------------------------------------
 
-const waterUniforms = { uTime: { value: 0 } };
+// Shared by every pond, and fed from the sky each frame
+const waterUniforms = {
+  uTime: { value: 0 },
+  uSky: { value: new THREE.Color(0xcfeaff) },
+  uTint: { value: new THREE.Color(0xffffff) },
+  uLightDir: { value: new THREE.Vector3(0.5, 0.8, 0.3) },
+  uLightColor: { value: new THREE.Color(0xffffff) },
+};
 
 function buildWater(world) {
   const group = new THREE.Group();
@@ -77,7 +84,7 @@ function buildWater(world) {
       fog: true,
       uniforms: THREE.UniformsUtils.merge([
         THREE.UniformsLib.fog,
-        { uColor: { value: new THREE.Color(world.biome.water) }, uSky: { value: new THREE.Color(world.biome.skyHorizon) } },
+        { uColor: { value: new THREE.Color(world.biome.water) } },
       ]),
       vertexShader: /* glsl */`
         varying vec3 vWorld;
@@ -92,6 +99,9 @@ function buildWater(world) {
       fragmentShader: /* glsl */`
         uniform vec3 uColor;
         uniform vec3 uSky;
+        uniform vec3 uTint;
+        uniform vec3 uLightDir;
+        uniform vec3 uLightColor;
         uniform float uTime;
         varying vec3 vWorld;
         #include <fog_pars_fragment>
@@ -102,12 +112,16 @@ function buildWater(world) {
           float glint = smoothstep(1.25, 1.6, w + sin(p.x * 2.3 - uTime * 2.0) * 0.4);
           vec3 view = normalize(cameraPosition - vWorld);
           float fresnel = pow(1.0 - clamp(view.y, 0.0, 1.0), 3.0);
-          vec3 col = mix(uColor, uSky, fresnel * 0.65) + w * 0.025 + glint * 0.35;
+          vec3 col = mix(uColor * uTint, uSky, fresnel * 0.65) + (w * 0.025 + glint * 0.35) * uTint;
+          // The sun (or moon) lays a broken path of light across the water
+          vec3 ripple = normalize(vec3(sin(p.x * 1.7 + uTime * 1.6) * 0.07, 1.0, sin(p.y * 1.9 - uTime * 1.3) * 0.07));
+          float path = pow(max(dot(reflect(-view, ripple), uLightDir), 0.0), 140.0);
+          col += uLightColor * path * (0.5 + glint);
           gl_FragColor = vec4(col, 0.86);
           #include <fog_fragment>
         }`,
     });
-    material.uniforms.uTime = waterUniforms.uTime;
+    Object.assign(material.uniforms, waterUniforms);
     const mesh = new THREE.Mesh(new THREE.CircleGeometry(p.r * 1.65, 36).rotateX(-Math.PI / 2), material);
     mesh.position.set(p.x, p.level, p.z);
     group.add(mesh);
@@ -133,11 +147,11 @@ function buildFlag(world) {
   group.add(hole, rim);
 
   const stick = new THREE.Group();
-  const poleMat = new THREE.MeshLambertMaterial({ color: 0xfff6d8, transparent: true });
+  const poleMat = new THREE.MeshLambertMaterial({ color: 0xfff6d8, emissive: 0xfff6d8, emissiveIntensity: 0, transparent: true });
   const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 3.4, 6).translate(0, 1.7, 0), poleMat);
   pole.castShadow = true;
   const clothGeo = new THREE.PlaneGeometry(1.25, 0.8, 8, 3).translate(0.625, 0, 0);
-  const clothMat = new THREE.MeshLambertMaterial({ color: 0xff3b3b, side: THREE.DoubleSide, transparent: true });
+  const clothMat = new THREE.MeshLambertMaterial({ color: 0xff3b3b, emissive: 0xff3b3b, emissiveIntensity: 0, side: THREE.DoubleSide, transparent: true });
   const cloth = new THREE.Mesh(clothGeo, clothMat);
   cloth.position.y = 2.95;
   cloth.castShadow = true;
@@ -238,6 +252,63 @@ function buildGroundCover(world, rng, lowDetail) {
   return group;
 }
 
+// --- Fireflies ----------------------------------------------------------------
+
+const fireflyUniforms = { uTime: { value: 0 }, uNight: { value: 0 }, uScale: { value: 300 } };
+
+/** Sparks that come out among the trees and the long grass after dark. */
+function buildFireflies(world, rng, lowDetail) {
+  const count = lowDetail ? 70 : 140;
+  const pos = new Float32Array(count * 3);
+  const seed = new Float32Array(count);
+  const { spec } = world;
+  let n = 0;
+  for (let tries = 0; tries < count * 8 && n < count; tries++) {
+    let x, z;
+    if (world.trees.length && rng() < 0.6) {
+      const t = world.trees[Math.floor(rng() * world.trees.length)];
+      x = t.x + (rng() - 0.5) * 14; z = t.z + (rng() - 0.5) * 14;
+    } else {
+      const p = pointAlongPath(spec.path, rng() * world.length);
+      const across = (rng() < 0.5 ? -1 : 1) * (spec.fairwayHalf + 2 + rng() * 22);
+      x = p.x - p.dirZ * across; z = p.z + p.dirX * across;
+    }
+    if (Math.abs(x) > world.half || Math.abs(z) > world.half || world.surfaceAt(x, z) !== 'rough') continue;
+    pos[n * 3] = x; pos[n * 3 + 1] = world.heightAt(x, z) + 0.5 + rng() * 2.6; pos[n * 3 + 2] = z;
+    seed[n++] = rng();
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(pos.subarray(0, n * 3), 3));
+  geometry.setAttribute('aSeed', new THREE.BufferAttribute(seed.subarray(0, n), 1));
+  const points = new THREE.Points(geometry, new THREE.ShaderMaterial({
+    uniforms: fireflyUniforms,
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+    vertexShader: /* glsl */`
+      attribute float aSeed;
+      uniform float uTime, uNight, uScale;
+      varying float vGlow;
+      void main() {
+        float t = uTime * (0.25 + aSeed * 0.3) + aSeed * 60.0;
+        vec3 p = position + vec3(sin(t * 1.3) * 1.6, sin(t * 2.1 + aSeed * 9.0) * 0.5, cos(t * 1.1) * 1.6);
+        // Each one blinks to its own slow rhythm
+        vGlow = uNight * smoothstep(0.15, 0.9, sin(uTime * (0.9 + aSeed * 1.4) + aSeed * 40.0) * 0.5 + 0.5);
+        vec4 mv = modelViewMatrix * vec4(p, 1.0);
+        gl_Position = projectionMatrix * mv;
+        gl_PointSize = clamp(uScale * (0.5 + aSeed * 0.5) / -mv.z, 1.5, 22.0);
+      }`,
+    fragmentShader: /* glsl */`
+      varying float vGlow;
+      void main() {
+        float d = length(gl_PointCoord - 0.5) * 2.0;
+        float a = (smoothstep(1.0, 0.0, d) * 0.55 + smoothstep(0.35, 0.0, d)) * vGlow;
+        gl_FragColor = vec4(vec3(0.85, 1.0, 0.35) * a, a);
+      }`,
+  }));
+  points.frustumCulled = false;
+  points.visible = false;
+  return points;
+}
+
 function buildBackdrop(world, rng) {
   const group = new THREE.Group();
   const { biome } = world;
@@ -289,6 +360,8 @@ export function buildScenery(world, { lowDetail = false } = {}) {
   group.name = 'scenery';
   const flag = buildFlag(world);
   const backdrop = buildBackdrop(world, rng);
+  // Own stream: adding fireflies must not reshuffle the rest of the dressing
+  const fireflies = buildFireflies(world, createGameRng(`${world.spec.seed}:fireflies-${world.spec.number}`).rng, lowDetail);
   group.add(
     buildTrees(world, rng),
     buildWater(world),
@@ -296,13 +369,32 @@ export function buildScenery(world, { lowDetail = false } = {}) {
     buildTeeMarkers(world),
     buildGroundCover(world, rng, lowDetail),
     backdrop,
+    fireflies,
   );
-  return { group, flag, clouds: backdrop.userData.clouds };
+  return { group, flag, clouds: backdrop.userData.clouds, fireflies };
 }
 
-export function updateScenery(scenery, time, dt) {
+/** Point sprites are sized in device pixels: tell them how tall the canvas is. */
+export function setSceneryViewport(heightPx) {
+  fireflyUniforms.uScale.value = heightPx * 0.3;
+}
+
+export function updateScenery(scenery, time, dt, sky) {
   waterUniforms.uTime.value = time;
   scenery.clouds.rotation.y += dt * 0.004;
+  if (!sky) return;
+  // Everything that is not lit by the scene lights takes its cue from the sky
+  waterUniforms.uSky.value.copy(sky.look.horizon);
+  waterUniforms.uTint.value.copy(sky.tint);
+  waterUniforms.uLightDir.value.copy(sky.lightDir);
+  waterUniforms.uLightColor.value.copy(sky.lightColor).multiplyScalar(0.25 + 0.75 * sky.dim);
+  scenery.clouds.material.emissive.copy(sky.look.cloud);
+  fireflyUniforms.uTime.value = time;
+  fireflyUniforms.uNight.value = sky.night;
+  scenery.fireflies.visible = sky.night > 0.02;
+  // After dark the pin carries a little light of its own, so it can be found
+  const { poleMat, clothMat } = scenery.flag.userData;
+  poleMat.emissiveIntensity = clothMat.emissiveIntensity = sky.night * 0.45;
 }
 
 export function disposeGroup(group) {

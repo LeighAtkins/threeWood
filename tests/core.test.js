@@ -78,3 +78,17 @@ test('a tidy bot finishes all 18 holes at a believable score', () => {
   }
   assert.ok(strokes > 50 && strokes < 85, `bot shot ${strokes}`);
 });
+
+test('the soundtrack keeps a two-step backbeat and saves the snare for the round', async () => {
+  const { drumStep, bassStep, SCENE_LEVEL } = await import('../src/core/dnbPattern.js');
+  for (let bar = 0; bar < 8; bar++) {
+    for (const level of [1, 2]) {
+      assert.equal(drumStep(bar, 0, level).kick, 1, 'kick on the one');
+      assert.equal(drumStep(bar, 4, level).snare, 1, 'snare on two');
+    }
+    for (let step = 0; step < 16; step++) assert.equal(drumStep(bar, step, 0).snare, 0);
+    assert.ok(bassStep(bar, 0), 'bass lands on every downbeat');
+  }
+  assert.equal(SCENE_LEVEL.title, 0);
+  assert.equal(SCENE_LEVEL.flight, 2);
+});

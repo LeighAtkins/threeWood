@@ -1,8 +1,10 @@
 /**
  * Biomes — the look and the weather of each third of the round.
- * A round walks parkland (morning) -> links (afternoon) -> pines (sunset),
- * so the back nine never looks like the front. Pure data: colours are hex
- * ints, consumed by the terrain mesher, scenery and lighting.
+ * A round walks parkland -> links -> pines, so the back nine never looks
+ * like the front. The time of day is not theirs to set: the sky follows the
+ * player's own sun (render/sky.js), and a biome only colours the air under
+ * it. Pure data: colours are hex ints, consumed by the terrain mesher,
+ * scenery and lighting.
  */
 export const BIOMES = {
   parkland: {
@@ -13,10 +15,9 @@ export const BIOMES = {
     // Ground palette
     rough: 0x4a8a3a, fairway: 0x7bc552, fringe: 0x8fd35e, green: 0xa9e66f,
     tee: 0x93d862, sand: 0xf0deaa, bed: 0x3d6b5a, deepRough: 0x3d7634,
-    // Sky + light
-    skyTop: 0x4aa3ee, skyHorizon: 0xcfeaff, fog: 0xcfe6f5,
-    sun: 0xfff1d6, sunIntensity: 2.3, sunDir: [0.55, 0.75, 0.35],
-    hemiSky: 0xbfdcff, hemiGround: 0x86a85a, hemiIntensity: 1.0,
+    // Air: daytime haze tint and how strongly it takes, high-cloud cover
+    // range, and the colour the ground throws back up into the shadows
+    haze: 0xcfe6f5, hazeAmount: 0, cloud: [0.3, 0.55], hemiGround: 0x86a85a,
     water: 0x3c9cc4,
     // Scenery
     treeKind: 'round', treeCount: 74,
@@ -31,9 +32,7 @@ export const BIOMES = {
     base: 1.4, amp1: 1.0, amp2: 0.85, greenUndulation: 0.22,
     rough: 0xb8a55a, fairway: 0x8fbf55, fringe: 0x9fd062, green: 0xb2e274,
     tee: 0x9fd062, sand: 0xf6e7b8, bed: 0x4a7f86, deepRough: 0xa08c48,
-    skyTop: 0x5b9fd8, skyHorizon: 0xf3ecd8, fog: 0xe9e6d6,
-    sun: 0xfff6e0, sunIntensity: 2.5, sunDir: [-0.35, 0.85, 0.4],
-    hemiSky: 0xd6e6f5, hemiGround: 0xb5a868, hemiIntensity: 1.05,
+    haze: 0xe9e6d6, hazeAmount: 0.75, cloud: [0.45, 0.7], hemiGround: 0xb5a868,
     water: 0x2f8fae,
     treeKind: 'scrub', treeCount: 16,
     canopy: [0x6f8f42, 0x7d9a45, 0x5f7f3a],
@@ -46,9 +45,7 @@ export const BIOMES = {
     base: 1.9, amp1: 2.2, amp2: 0.4, greenUndulation: 0.19,
     rough: 0x3f7a40, fairway: 0x6fb650, fringe: 0x82c95b, green: 0x9fde6a,
     tee: 0x86cc5e, sand: 0xf2d9a0, bed: 0x35596a, deepRough: 0x336636,
-    skyTop: 0x4f7fd0, skyHorizon: 0xffc98a, fog: 0xf6c99a,
-    sun: 0xffd29a, sunIntensity: 3.0, sunDir: [0.7, 0.55, -0.45],
-    hemiSky: 0xc4d4ff, hemiGround: 0x8a9a60, hemiIntensity: 1.5,
+    haze: 0xc2dadc, hazeAmount: 0.6, cloud: [0.2, 0.45], hemiGround: 0x8a9a60,
     water: 0x3a7fb0,
     treeKind: 'pine', treeCount: 110,
     canopy: [0x2f6b3a, 0x2a5f38, 0x3a7a44, 0x246040],

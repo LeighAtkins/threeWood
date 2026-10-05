@@ -12,7 +12,8 @@
   "dependencies": {
     "@tweenjs/tween.js": "^25.0.0",
     "simplex-noise": "^4.0.3",
-    "three": "^0.160.0"
+    "three": "^0.160.0",
+    "tone": "^15.1.22"
   },
   "devDependencies": {
     "vite": "^5.0.8"

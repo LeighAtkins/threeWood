@@ -20,6 +20,13 @@ const el = (tag, cls, html) => {
 };
 
 const vsPar = (n) => (n === 0 ? 'E' : n > 0 ? `+${n}` : `${n}`);
+const skyLabel = (mode) => `SKY · ${mode.toUpperCase()}`;
+const musicLabel = (on) => (on ? '♪ MUSIC ON' : '♪ MUSIC OFF');
+/** The first switch-on downloads the band, so the label waits for the outcome. */
+const toggleMusic = (button, onMusic) => {
+  button.textContent = '♪ MUSIC …';
+  onMusic().then((on) => { button.textContent = musicLabel(on); });
+};
 
 export function scoreName(strokes, par) {
   if (strokes === 1) return 'HOLE IN ONE!';
@@ -310,7 +317,7 @@ export class Hud {
 
   clearLayer() { this.layer.innerHTML = ''; }
 
-  showTitle({ saved, best, daily, seed }) {
+  showTitle({ saved, best, daily, seed, music, sky }) {
     this.clearLayer();
     const node = el('div', 'title', `
       <div class="logo">
@@ -324,11 +331,13 @@ export class Hud {
           <button class="btn ghost" data-a="daily">DAILY${daily ? ` · ${vsPar(daily.score)}` : ''}</button>
           <button class="btn ghost" data-a="9">QUICK 9</button>
         </div>
-        <div class="title-foot">${best ? `BEST ROUND ${vsPar(best.score)} · ★ ${best.points.toLocaleString()}<br>` : ''}COURSE ${seed}</div>
+        <div class="title-foot">${best ? `BEST ROUND ${vsPar(best.score)} · ★ ${best.points.toLocaleString()}<br>` : ''}COURSE ${seed}${sky ? `<br>${sky}` : ''}</div>
+        <button class="music-toggle" data-a="music">${musicLabel(music)}</button>
       </div>`);
     node.addEventListener('click', (e) => {
       const a = e.target.closest('[data-a]')?.dataset.a;
-      if (a) this.h.onStart(a);
+      if (a === 'music') toggleMusic(e.target, this.h.onMusic);
+      else if (a) this.h.onStart(a);
     });
     this.layer.appendChild(node);
   }
@@ -381,7 +390,7 @@ export class Hud {
     this.layer.appendChild(node);
   }
 
-  showMenu({ muted, card, onResume, onMute, onQuit, onHelp }) {
+  showMenu({ muted, music, sky, card, onResume, onMute, onMusic, onSky, onQuit, onHelp }) {
     this.clearLayer();
     const node = el('div', 'overlay dim', `
       <div class="card">
@@ -389,7 +398,11 @@ export class Hud {
         ${scorecardHtml(card)}
         <button class="btn" data-a="resume">RESUME</button>
         <div class="btn-row">
-          <button class="btn ghost" data-a="mute">${muted ? 'SOUND OFF' : 'SOUND ON'}</button>
+          <button class="btn ghost" data-a="mute">${muted ? 'SFX OFF' : 'SFX ON'}</button>
+          <button class="btn ghost" data-a="music">${musicLabel(music)}</button>
+        </div>
+        <div class="btn-row">
+          <button class="btn ghost" data-a="sky">${skyLabel(sky)}</button>
           <button class="btn ghost" data-a="help">HOW TO PLAY</button>
         </div>
         <button class="btn ghost" data-a="quit">QUIT TO TITLE</button>
@@ -397,7 +410,9 @@ export class Hud {
     node.addEventListener('click', (e) => {
       const a = e.target.closest('[data-a]')?.dataset.a;
       if (a === 'resume') onResume();
-      if (a === 'mute') e.target.textContent = onMute() ? 'SOUND OFF' : 'SOUND ON';
+      if (a === 'mute') e.target.textContent = onMute() ? 'SFX OFF' : 'SFX ON';
+      if (a === 'music') toggleMusic(e.target, onMusic);
+      if (a === 'sky') e.target.textContent = skyLabel(onSky());
       if (a === 'help') onHelp();
       if (a === 'quit') onQuit();
     });

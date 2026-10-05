@@ -14,12 +14,14 @@ import { designHole, roundHoles, ARCHETYPES, ROUND_PLAN } from './course/holeDes
 import { buildWorld, aimTarget } from './course/courseWorld.js';
 import { BIOMES } from './course/biomes.js';
 import { buildTerrainMesh } from './render/terrainMesh.js';
-import { buildScenery, updateScenery, updateFlag, disposeGroup } from './render/scenery.js';
+import { buildScenery, updateScenery, updateFlag, disposeGroup, setSceneryViewport } from './render/scenery.js';
 import { Effects } from './render/effects.js';
+import { Sky } from './render/sky.js';
 import { CameraRig } from './render/cameraRig.js';
 import { ClubRig } from './render/club.js';
 import { Hud, scoreName } from './ui/hud.js';
 import { Audio } from './audio.js';
+import { Music } from './music.js';
 
 const SAVE_KEY = 'threewood.save.v2';
 const BEST_KEY = 'threewood.best.v2';
@@ -60,17 +62,20 @@ export class Game {
     this.rig = new CameraRig(this.camera);
     this.initRenderer();
     this.initLights();
+    this.sky = new Sky({ scene: this.scene, renderer: this.renderer, sun: this.sun, hemi: this.hemi, lowDetail: this.coarse });
 
     this.effects = new Effects(this.scene);
     this.clubRig = new ClubRig(this.scene);
     this.follow = null; // follow-through animation after a strike
     this.audio = new Audio();
+    this.music = new Music(this.audio);
     this.hud = new Hud({
       onSwingDown: () => this.swingDown(),
       onSwingUp: () => this.swingUp(),
       onClub: (dir) => this.cycleClub(dir),
       onMenu: () => this.openMenu(),
       onStart: (choice) => this.startFromTitle(choice),
+      onMusic: () => this.toggleMusic(),
     });
     this.initBall();
     this.initInput();
@@ -130,41 +135,15 @@ export class Game {
     const size = this.coarse ? 1024 : 2048;
     this.sun.shadow.mapSize.set(size, size);
     const cam = this.sun.shadow.camera;
-    cam.near = 20; cam.far = 520;
+    cam.near = 20; cam.far = 700;
     cam.left = -95; cam.right = 95; cam.top = 95; cam.bottom = -95;
     this.sun.shadow.bias = -0.0006;
     this.sun.shadow.normalBias = 0.35;
     this.scene.add(this.sun, this.sun.target);
     this.hemi = new THREE.HemisphereLight(0xffffff, 0x88aa66, 1);
     this.scene.add(this.hemi);
-    this.sunDir = new THREE.Vector3(0.5, 0.8, 0.3).normalize();
+    // Colours, direction and fog distances all belong to the sky
     this.scene.fog = new THREE.Fog(0xffffff, 150, 640);
-  }
-
-  applyBiome(biome) {
-    this.sun.color.setHex(biome.sun);
-    this.sun.intensity = biome.sunIntensity;
-    this.sunDir.set(...biome.sunDir).normalize();
-    this.hemi.color.setHex(biome.hemiSky);
-    this.hemi.groundColor.setHex(biome.hemiGround);
-    this.hemi.intensity = biome.hemiIntensity;
-    this.scene.fog.color.setHex(biome.fog);
-
-    const canvas = document.createElement('canvas');
-    canvas.width = 4; canvas.height = 256;
-    const ctx = canvas.getContext('2d');
-    const grad = ctx.createLinearGradient(0, 0, 0, 256);
-    const hex = (n) => `#${n.toString(16).padStart(6, '0')}`;
-    grad.addColorStop(0, hex(biome.skyTop));
-    grad.addColorStop(0.5, hex(biome.skyHorizon));
-    grad.addColorStop(0.56, hex(biome.fog));
-    grad.addColorStop(1, hex(biome.fog));
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, 4, 256);
-    this.scene.background?.dispose?.();
-    const tex = new THREE.CanvasTexture(canvas);
-    tex.colorSpace = THREE.SRGBColorSpace;
-    this.scene.background = tex;
   }
 
   initBall() {
@@ -216,7 +195,7 @@ export class Game {
     c.addEventListener('pointerup', end);
     c.addEventListener('pointercancel', end);
     for (const type of ['pointerdown', 'touchend', 'click']) {
-      document.addEventListener(type, () => this.audio.unlock(), { capture: true, passive: true });
+      document.addEventListener(type, () => { this.audio.unlock(); this.music.wake(); }, { capture: true, passive: true });
     }
 
     this.keys = {};
@@ -242,6 +221,7 @@ export class Game {
     this.renderer.setSize(w, h);
     this.rig.setAspect(w / h);
     this.effects.resize(w, h, this.pixelRatio);
+    setSceneryViewport(h * this.pixelRatio);
   }
 
   // ===========================================================================
@@ -250,6 +230,7 @@ export class Game {
 
   showTitle() {
     this.state = 'title';
+    this.music.setScene('title');
     this.round = null;
     this.hud.setPlayVisible(false);
     this.loadWorld(designHole(this.seed, 1));
@@ -261,6 +242,8 @@ export class Game {
       best: store.get(BEST_KEY),
       daily: store.get(DAILY_KEY)?.[dailySeed()] ?? null,
       seed: this.seed,
+      music: this.music.enabled,
+      sky: this.sky.describe(),
     });
     this.rig.cut();
   }
@@ -317,7 +300,7 @@ export class Game {
     this.terrain = buildTerrainMesh(this.world);
     this.scenery = buildScenery(this.world, { lowDetail: this.coarse });
     this.scene.add(this.terrain, this.scenery.group);
-    this.applyBiome(this.world.biome);
+    this.sky.setHole(this.world);
     this.rig.setWorld(this.world);
     this.effects.hideAim();
     this.effects.beads.hide();
@@ -397,6 +380,7 @@ export class Game {
   setState(state) {
     this.state = state;
     this.stateTime = 0;
+    this.music.setScene(state);
   }
 
   // ===========================================================================
@@ -1031,6 +1015,7 @@ export class Game {
     this.effects.endTrail();
     this.hud.setCarry(null);
     this.audio.cup();
+    this.music.accent();
     this.sink = 0.001;
     this.timeScale = 1;
     this.effects.confetti(world.cup.x, world.cup.y, world.cup.z, 70 + Math.max(0, par - this.strokes) * 50);
@@ -1161,12 +1146,21 @@ export class Game {
     this.audio.tap();
     this.hud.showMenu({
       muted: this.audio.muted,
+      music: this.music.enabled,
       card: this.cardData(),
       onResume: () => this.closeMenu(),
       onMute: () => { this.audio.setMuted(!this.audio.muted); return this.audio.muted; },
+      sky: this.sky.mode,
+      onSky: () => this.sky.cycleMode(),
+      onMusic: () => this.toggleMusic(),
       onHelp: () => this.hud.showHelp(() => this.openMenuAgain()),
       onQuit: () => { this.paused = false; this.hud.clearLayer(); this.showTitle(); },
     });
+  }
+
+  toggleMusic() {
+    this.audio.unlock();
+    return this.music.setEnabled(!this.music.enabled);
   }
 
   openMenuAgain() { this.paused = false; this.openMenu(); }
@@ -1194,6 +1188,7 @@ export class Game {
     const raw = this.clock.getDelta();
     const dt = Math.min(raw, 0.05);
     this.adaptQuality(raw);
+    this.music.setMuffled(this.paused);
     if (!this.paused) this.update(dt);
     this.updateVisuals(dt);
     this.renderer.render(this.scene, this.camera);
@@ -1317,10 +1312,12 @@ export class Game {
     // Sun follows the action so one shadow map covers it
     const fx = Math.round(this.rig.look.x / 8) * 8, fz = Math.round(this.rig.look.z / 8) * 8;
     this.sun.target.position.set(fx, 0, fz);
-    this.sun.position.set(fx + this.sunDir.x * 260, this.sunDir.y * 260, fz + this.sunDir.z * 260);
+    this.sky.update(dt, this.time);
+    const light = this.sky.lightDir;
+    this.sun.position.set(fx + light.x * 260, light.y * 260, fz + light.z * 260);
 
     this.updateClub(dt);
-    updateScenery(this.scenery, this.time, dt);
+    updateScenery(this.scenery, this.time, dt, this.sky);
     const onGreen = this.round && (this.putting || ball.surface === 'green') && this.state !== 'intro' && this.state !== 'title';
     updateFlag(this.scenery.flag, this.time, onGreen && this.state !== 'holed' && this.state !== 'result');
     this.effects.update(dt, this.time);
