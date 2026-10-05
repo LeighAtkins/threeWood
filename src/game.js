@@ -148,9 +148,30 @@ export class Game {
 
   initBall() {
     this.ball = createBall();
+    // A proper ball: round, dimpled, and marked so you can see it spin
+    const skin = document.createElement('canvas');
+    skin.width = 256; skin.height = 128;
+    const ctx = skin.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, 256, 128);
+    ctx.fillStyle = '#dfe3e6';
+    for (let row = 0; row < 9; row++) {
+      const v = (row + 0.5) / 9, count = Math.max(4, Math.round(22 * Math.sin(v * Math.PI)));
+      for (let i = 0; i < count; i++) {
+        ctx.beginPath();
+        ctx.ellipse(((i + (row % 2) * 0.5) / count) * 256, v * 128, 3.4 / Math.max(0.35, Math.sin(v * Math.PI)), 3.4, 0, 0, 7);
+        ctx.fill();
+      }
+    }
+    ctx.fillStyle = '#ff4d4d';
+    ctx.fillRect(96, 60, 64, 8);            // alignment stripe
+    ctx.fillStyle = '#ffd23f';
+    ctx.fillRect(220, 52, 14, 24);          // a second mark, so every spin axis shows
+    const map = new THREE.CanvasTexture(skin);
+    map.colorSpace = THREE.SRGBColorSpace;
     this.ballMesh = new THREE.Mesh(
-      new THREE.IcosahedronGeometry(BALL_R, 2),
-      new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.35, flatShading: true, emissive: 0x777777 }));
+      new THREE.SphereGeometry(BALL_R, 24, 16),
+      new THREE.MeshStandardMaterial({ map, roughness: 0.4, emissive: 0xffffff, emissiveMap: map, emissiveIntensity: 0.42 }));
     this.ballMesh.castShadow = true;
     this.scene.add(this.ballMesh);
     // Blob shadow: the depth cue that makes ball flight readable
@@ -301,10 +322,10 @@ export class Game {
     this.scenery = buildScenery(this.world, { lowDetail: this.coarse });
     this.scene.add(this.terrain, this.scenery.group);
     this.sky.setHole(this.world);
-    this.rig.setWorld(this.world);
+    this.rig.setWorld(this.world, this.scenery.placed);
     this.effects.hideAim();
     this.effects.beads.hide();
-    this.effects.endTrail();
+    this.effects.clearTrail();
     this.env = { windX: spec.wind.x, windZ: spec.wind.z };
   }
 
@@ -737,6 +758,7 @@ export class Game {
       landTime: landTime ?? b.time,
       time: t,
       restX: b.x, restZ: b.z,
+      landX: b.landed ? b.landX : b.x, landZ: b.landed ? b.landZ : b.z,
       holed: b.mode === 'holed',
       lipout: events.some((e) => e.type === 'lipout'),
     };
@@ -824,7 +846,6 @@ export class Game {
       this.simAccumulator -= SIM_DT;
       steps++;
     }
-    if (ball.mode === 'air' && !ball.landed) this.effects.addTrailPoint(ball.x, ball.y, ball.z);
 
     if (shot.replan && ball.mode === 'air') {
       shot.replan = false;
@@ -856,8 +877,8 @@ export class Game {
       this.rig.putt(ball, (world.cup.x - ball.x) / d, (world.cup.z - ball.z) / d, Math.max(1.2, cupDist), 0.9 + cupDist * 0.07);
       this.rig.stiffness = 2.2;
     } else if (shot.chase) {
-      if (ball.time > plan.landTime - 1.25 || ball.mode !== 'air') {
-        this.rig.landing(ball, plan.restX, plan.restZ, shot.fromX, shot.fromZ);
+      if (ball.time > plan.landTime - 1.05 || ball.mode !== 'air') {
+        this.rig.landing(ball, plan, shot.fromX, shot.fromZ);
       } else {
         this.rig.chase(ball);
       }
@@ -873,9 +894,6 @@ export class Game {
         if (this.hints.spin < 4) this.hud.hint(null);
         fx.puff(e.x, e.y, e.z, e.surface, Math.min(1.6, e.speed / 18));
         this.audio.bounce(e.speed * 0.5, e.surface);
-        break;
-      case 'roll':
-        fx.endTrail();
         break;
       case 'bounce':
         fx.puff(e.x, e.y, e.z, e.surface, Math.min(1, e.speed / 12));
@@ -1238,7 +1256,7 @@ export class Game {
         this.updateFlight(dt);
         break;
       case 'settle':
-        if (this.shot?.putt) this.rig.watch(ball); else if (this.rig.mode === 'landing') this.rig.landing(ball, this.plan.restX, this.plan.restZ, this.shot.fromX, this.shot.fromZ);
+        if (this.shot?.putt) this.rig.watch(ball); else if (this.rig.mode === 'landing') this.rig.landing(ball, this.plan, this.shot.fromX, this.shot.fromZ);
         if (this.stateTime > this.settleFor) this.afterSettle();
         break;
       case 'holed':
@@ -1280,13 +1298,16 @@ export class Game {
 
     // Ball: drawn a little larger with distance so it never becomes a pixel
     const camDist = Math.hypot(camera.position.x - ball.x, camera.position.y - ball.y, camera.position.z - ball.z);
-    const want = Math.max(1.4, Math.min(18, camDist / (this.rig.portrait ? 6 : 8)));
+    // (only enough to stay visible: beyond that it must grow and shrink with
+    // distance like a real thing, or a ball flying at the camera looks wrong)
+    const want = Math.max(1.4, Math.min(12, camDist / (this.rig.portrait ? 8.5 : 11)));
     // Shrink at once (camera cuts), grow smoothly (ball flying away)
     this.ballScale = want < this.ballScale ? want : this.ballScale + (want - this.ballScale) * Math.min(1, dt * 8);
     const s = this.ballScale;
     const ground = world.heightAt(ball.x, ball.z);
     const lift = Math.max(0, ball.y - BALL_R - ground);
-    let y = ground + lift + BALL_R * s;
+    // Centred on the real ball in the air; resting on the turf when it is down
+    let y = Math.max(ball.y, ground + BALL_R * s);
     if (this.sink > 0) {
       this.sink = Math.min(1, this.sink + dt * 3.2);
       y -= this.sink * 0.42;
@@ -1305,6 +1326,14 @@ export class Game {
         this.ballMesh.rotateOnWorldAxis(this._axis, (speed * dt * this.timeScale) / (BALL_R * s));
       }
     }
+    // Trail: laid from where the ball is drawn, so it can never come adrift
+    const inFlight = this.state === 'flight' && this.shot && !this.shot.putt;
+    const pace = Math.hypot(ball.vx, ball.vy, ball.vz);
+    const airborne = ball.mode === 'air';
+    this.effects.comet.update(
+      this.ballMesh.position, this.time, camera, BALL_R * s,
+      airborne ? 0.6 : 0.28,
+      inFlight ? (airborne ? 1 : Math.min(1, Math.max(0, (pace - 2) / 8))) : 0);
     this.blob.position.set(this.ballMesh.position.x, ground + 0.03, this.ballMesh.position.z);
     this.blob.scale.setScalar(BALL_R * s * (1.25 + lift * 0.04));
     this.blob.material.opacity = this.sink > 0 ? 0 : Math.max(0.1, 0.34 - lift * 0.006);
@@ -1319,7 +1348,7 @@ export class Game {
     this.updateClub(dt);
     updateScenery(this.scenery, this.time, dt, this.sky);
     const onGreen = this.round && (this.putting || ball.surface === 'green') && this.state !== 'intro' && this.state !== 'title';
-    updateFlag(this.scenery.flag, this.time, onGreen && this.state !== 'holed' && this.state !== 'result');
+    updateFlag(this.scenery.flag, this.time, onGreen && this.state !== 'holed' && this.state !== 'result', camera);
     this.effects.update(dt, this.time);
 
     if (!this.round) return;

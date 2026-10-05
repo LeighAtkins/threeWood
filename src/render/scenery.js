@@ -91,15 +91,28 @@ function buildFlag(world) {
   const { cup } = world;
   group.position.set(cup.x, cup.y, cup.z);
 
-  const hole = new THREE.Mesh(
-    new THREE.CircleGeometry(CUP_R, 28).rotateX(-Math.PI / 2),
-    new THREE.MeshBasicMaterial({ color: 0x10140f }));
-  hole.position.y = 0.012;
-  const rim = new THREE.Mesh(
-    new THREE.RingGeometry(CUP_R, CUP_R * 1.16, 28).rotateX(-Math.PI / 2),
-    new THREE.MeshBasicMaterial({ color: 0xffffff }));
-  rim.position.y = 0.014;
-  group.add(hole, rim);
+  // The cup is a decal, not a real hole in the mesh, so it must lie exactly
+  // on the green: tipped to the slope under it, and biased toward the camera
+  // so no part of it sinks into the turf. Three layers fake the depth: the
+  // soil wall, a dark floor that slides toward the viewer (leaving a crescent
+  // of far wall showing), and the white lip on top.
+  const grad = [0, 0];
+  world.gradAt(cup.x, cup.z, grad);
+  const lie = new THREE.Group();
+  lie.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(-grad[0], 1, -grad[1]).normalize());
+  const decal = (geometry, color, order) => {
+    const mesh = new THREE.Mesh(geometry.rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({
+      color, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -8,
+    }));
+    mesh.position.y = 0.02;
+    mesh.renderOrder = order;
+    return mesh;
+  };
+  const wall = decal(new THREE.CircleGeometry(CUP_R, 28), 0x7a6548, 1);
+  const floor = decal(new THREE.CircleGeometry(CUP_R * 0.86, 28), 0x0c0f0b, 1.1);
+  const rim = decal(new THREE.RingGeometry(CUP_R * 0.97, CUP_R * 1.15, 32), 0xffffff, 1.2);
+  lie.add(wall, floor, rim);
+  group.add(lie);
 
   const stick = new THREE.Group();
   const poleMat = new THREE.MeshLambertMaterial({ color: 0xfff6d8, emissive: 0xfff6d8, emissiveIntensity: 0, transparent: true });
@@ -118,12 +131,26 @@ function buildFlag(world) {
   stick.rotation.y = w.speed > 0 ? -Math.atan2(w.z, w.x) : 0;
 
   const rest = clothGeo.attributes.position.array.slice();
-  group.userData = { stick, cloth, rest, poleMat, clothMat, windSpeed: w.speed, fade: 1 };
+  group.userData = { stick, cloth, rest, poleMat, clothMat, windSpeed: w.speed, fade: 1, floor, lie };
   return group;
 }
 
-export function updateFlag(flag, time, hidden) {
+const _toCam = new THREE.Vector3();
+
+export function updateFlag(flag, time, hidden, camera) {
   const u = flag.userData;
+  if (camera) {
+    // Slide the cup floor toward the viewer: the lower the camera, the more
+    // of the far wall shows — which is what makes it read as a hole
+    _toCam.copy(camera.position).sub(flag.position);
+    const flat = Math.hypot(_toCam.x, _toCam.z) || 1;
+    const low = flat / Math.hypot(flat, _toCam.y);
+    u.lie.worldToLocal(_toCam.add(flag.position));
+    const len = Math.hypot(_toCam.x, _toCam.z) || 1;
+    const slide = CUP_R * 0.12 * (0.25 + 0.75 * low);
+    u.floor.position.x = (_toCam.x / len) * slide;
+    u.floor.position.z = (_toCam.z / len) * slide;
+  }
   const pos = u.cloth.geometry.attributes.position;
   const amp = 0.05 + Math.min(0.2, u.windSpeed * 0.014);
   const rate = 3 + u.windSpeed * 0.5;
@@ -392,7 +419,7 @@ export function buildScenery(world, { lowDetail = false } = {}) {
     fireflies,
   );
   if (ambient) group.add(ambient);
-  return { group, flag, clouds: backdrop.userData.clouds, fireflies, ambient, glow: props.glow };
+  return { group, flag, clouds: backdrop.userData.clouds, fireflies, ambient, glow: props.glow, placed: props.placed };
 }
 
 /** Point sprites are sized in device pixels: tell them how tall the canvas is. */

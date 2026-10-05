@@ -29,7 +29,26 @@ export class CameraRig {
     this._v = new THREE.Vector3();
   }
 
-  setWorld(world) { this.world = world; }
+  /** `placed`: big set pieces from the scenery, which can block a camera just as a tree can. */
+  setWorld(world, placed = []) {
+    this.world = world;
+    this.blockers = [
+      ...world.trees.map((t) => ({ x: t.x, y: t.cy, z: t.z, r: t.cr + 0.6 })),
+      ...placed.filter((p) => p.type === 'feature').map((p) => ({ x: p.x, y: p.y + p.h * 0.4, z: p.z, r: p.r })),
+    ];
+  }
+
+  /** Is the straight line from a to b free of trees and set pieces? */
+  clearLine(ax, ay, az, bx, by, bz) {
+    const dx = bx - ax, dy = by - ay, dz = bz - az;
+    const len2 = dx * dx + dy * dy + dz * dz || 1;
+    for (const o of this.blockers) {
+      const t = Math.max(0, Math.min(1, ((o.x - ax) * dx + (o.y - ay) * dy + (o.z - az) * dz) / len2));
+      const px = ax + dx * t - o.x, py = ay + dy * t - o.y, pz = az + dz * t - o.z;
+      if (px * px + py * py + pz * pz < o.r * o.r) return false;
+    }
+    return true;
+  }
 
   setAspect(aspect) {
     this.portrait = aspect < 1;
@@ -98,22 +117,50 @@ export class CameraRig {
     this.wantLook.set(ball.x + dx * 6, ball.y - height * 0.15, ball.z + dz * 6);
   }
 
-  /** Park beyond where the ball will finish and watch it come in. */
-  landing(ball, restX, restZ, fromX, fromZ) {
+  /**
+   * The reverse angle: down by the landing area, looking back up the flight
+   * as the ball comes in, pitches a few yards in front of the lens and runs
+   * out. Placed off the landing point (not the finish), so the ball is big in
+   * frame when it lands however far it then rolls, and moved if a tree or a
+   * building would be in the way.
+   */
+  landing(ball, plan, fromX, fromZ) {
     if (this.mode !== 'landing') {
       this.mode = 'landing';
-      let dx = restX - fromX, dz = restZ - fromZ;
+      let dx = plan.landX - fromX, dz = plan.landZ - fromZ;
       const len = Math.hypot(dx, dz) || 1;
       dx /= len; dz /= len;
-      const px = restX + dx * 8 - dz * 4.5;
-      const pz = restZ + dz * 8 + dx * 4.5;
-      this.pos.set(px, this.ground(px, pz) + 2.6, pz);
+      const roll = Math.hypot(plan.restX - plan.landX, plan.restZ - plan.landZ);
+      const ahead = Math.max(6, Math.min(13, 5 + roll * 0.55));
+      const ly = this.ground(plan.landX, plan.landZ) + 0.6;
+      let best = null;
+      for (const [side, up] of [[3.6, 1.7], [-3.6, 1.7], [5.5, 4.5], [-5.5, 4.5], [0, 9]]) {
+        const px = plan.landX + dx * ahead - dz * side;
+        const pz = plan.landZ + dz * ahead + dx * side;
+        const py = this.ground(px, pz) + up;
+        best = best || [px, py, pz];
+        // Clear to where it lands, and to where the ball is right now
+        if (this.clearLine(px, py, pz, plan.landX, ly, plan.landZ) && this.clearLine(px, py, pz, ball.x, ball.y, ball.z)) {
+          best = [px, py, pz];
+          break;
+        }
+      }
+      this.pos.set(best[0], best[1], best[2]);
       this.wantPos.copy(this.pos);
-      this.look.set(ball.x, ball.y + 1.3, ball.z);
+      this.look.set(ball.x, ball.y, ball.z);
     }
-    this.stiffness = 9;
-    // Look a touch above the ball so it sits in the lower half of the frame
-    this.wantLook.set(ball.x, ball.y + 1.3, ball.z);
+    // Tight on the ball in the air, a little looser once it is running
+    this.stiffness = ball.mode === 'air' ? 14 : 6;
+    this.wantLook.set(ball.x, ball.y + 0.25, ball.z);
+    // A long run-out: truck along behind it rather than watch it shrink
+    if (ball.mode !== 'air') {
+      const dx = this.pos.x - ball.x, dz = this.pos.z - ball.z;
+      const d = Math.hypot(dx, dz);
+      if (d > 5.5) {
+        const x = ball.x + (dx / d) * 5.5, z = ball.z + (dz / d) * 5.5;
+        this.wantPos.set(x, this.ground(x, z) + 1.4, z);
+      }
+    }
   }
 
   /** Hold position, keep the ball in frame. */

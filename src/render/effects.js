@@ -43,6 +43,131 @@ class Ribbon {
   resize(w, h) { this.material.resolution.set(w, h); }
 }
 
+// --- Comet trail -----------------------------------------------------------------
+
+const COMET_MAX = 72;
+
+/**
+ * The ball's trail: a camera-facing ribbon that is widest and brightest at
+ * the ball and tapers to nothing behind it. Points age out by time, so the
+ * tail shortens by itself when the ball slows and is gone when it stops.
+ * It is fed the position the ball is DRAWN at, every frame, so the head of
+ * the trail is always exactly on the ball from any camera.
+ */
+class Comet {
+  constructor(scene) {
+    this.pts = [];           // { x, y, z, t }
+    this.color = new THREE.Color(0xffffff);
+    this.live = false;
+    this.pos = new Float32Array(COMET_MAX * 2 * 3);
+    this.col = new Float32Array(COMET_MAX * 2 * 4);
+    this.edge = new Float32Array(COMET_MAX * 2);
+    const index = [];
+    for (let i = 0; i < COMET_MAX - 1; i++) {
+      const a = i * 2;
+      index.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+      this.edge[a] = -1; this.edge[a + 1] = 1;
+    }
+    this.edge[(COMET_MAX - 1) * 2] = -1; this.edge[(COMET_MAX - 1) * 2 + 1] = 1;
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(this.pos, 3));
+    geometry.setAttribute('aColor', new THREE.BufferAttribute(this.col, 4));
+    geometry.setAttribute('aEdge', new THREE.BufferAttribute(this.edge, 1));
+    geometry.setIndex(index);
+    this.mesh = new THREE.Mesh(geometry, new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false, side: THREE.DoubleSide,
+      vertexShader: /* glsl */`
+        attribute vec4 aColor;
+        attribute float aEdge;
+        varying vec4 vColor;
+        varying float vEdge;
+        void main() {
+          vColor = aColor; vEdge = aEdge;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }`,
+      fragmentShader: /* glsl */`
+        varying vec4 vColor;
+        varying float vEdge;
+        void main() {
+          // Soft across its width: a hot core with feathered edges
+          float soft = 1.0 - smoothstep(0.35, 1.0, abs(vEdge));
+          gl_FragColor = vec4(vColor.rgb, vColor.a * soft);
+          #include <colorspace_fragment>
+        }`,
+    }));
+    this.mesh.frustumCulled = false;
+    this.mesh.renderOrder = 5;
+    this.mesh.visible = false;
+    scene.add(this.mesh);
+    this._t = new THREE.Vector3();
+    this._v = new THREE.Vector3();
+    this._s = new THREE.Vector3();
+  }
+
+  begin(color) {
+    this.pts.length = 0;
+    this.color.set(color);
+    this.live = true;
+  }
+
+  /** Stop laying trail; what is already there fades out on its own. */
+  end() { this.live = false; }
+
+  /**
+   * @param {THREE.Vector3} head  where the ball is drawn this frame
+   * @param {number} time  game clock
+   * @param {THREE.Camera} camera
+   * @param {number} radius  drawn radius of the ball
+   * @param {number} life  seconds a point lasts
+   * @param {number} strength  0..1 overall brightness (fades with speed)
+   */
+  update(head, time, camera, radius, life, strength) {
+    const pts = this.pts;
+    if (this.live && strength > 0.02) {
+      const last = pts[pts.length - 1];
+      if (!last || Math.hypot(head.x - last.x, head.y - last.y, head.z - last.z) > radius * 0.3) {
+        pts.push({ x: head.x, y: head.y, z: head.z, t: time });
+        if (pts.length > COMET_MAX) pts.shift();
+      } else {
+        last.t = time;
+      }
+    }
+    while (pts.length && time - pts[0].t > life) pts.shift();
+    const n = pts.length;
+    if (n < 2) { this.mesh.visible = false; return; }
+
+    const cam = camera.position;
+    const headDist = Math.hypot(cam.x - head.x, cam.y - head.y, cam.z - head.z) || 1;
+    for (let i = 0; i < n; i++) {
+      const p = pts[i], a = pts[Math.max(0, i - 1)], b = pts[Math.min(n - 1, i + 1)];
+      // Stand the ribbon up to face the camera
+      this._t.set(b.x - a.x, b.y - a.y, b.z - a.z);
+      this._v.set(cam.x - p.x, cam.y - p.y, cam.z - p.z);
+      const dist = this._v.length() || 1;
+      this._s.crossVectors(this._t, this._v);
+      if (this._s.lengthSq() < 1e-10) this._s.set(1, 0, 0); else this._s.normalize();
+      const age = Math.min(1, (time - p.t) / life);       // 0 at the ball, 1 at the tail
+      // Width matches the ball on screen at the head, then tapers
+      const half = radius * 0.85 * (dist / headDist) * Math.pow(1 - age, 0.75);
+      const o = i * 6;
+      this.pos[o] = p.x - this._s.x * half; this.pos[o + 1] = p.y - this._s.y * half; this.pos[o + 2] = p.z - this._s.z * half;
+      this.pos[o + 3] = p.x + this._s.x * half; this.pos[o + 4] = p.y + this._s.y * half; this.pos[o + 5] = p.z + this._s.z * half;
+      const alpha = Math.pow(1 - age, 1.6) * 0.8 * strength;
+      for (let k = 0; k < 2; k++) {
+        const c = (i * 2 + k) * 4;
+        this.col[c] = this.color.r; this.col[c + 1] = this.color.g; this.col[c + 2] = this.color.b; this.col[c + 3] = alpha;
+      }
+    }
+    const g = this.mesh.geometry;
+    g.attributes.position.needsUpdate = true;
+    g.attributes.aColor.needsUpdate = true;
+    g.setDrawRange(0, (n - 1) * 6);
+    this.mesh.visible = true;
+  }
+
+  hide() { this.pts.length = 0; this.live = false; this.mesh.visible = false; }
+}
+
 // --- Particles -------------------------------------------------------------------
 
 const MAX_PARTICLES = 420;
@@ -210,7 +335,7 @@ export class Effects {
     this.scene = scene;
     this.aimArc = new Ribbon(scene, { color: 0xffffff, width: 3.5, dashed: true, opacity: 0.9, depthTest: false });
     this.puttLine = new Ribbon(scene, { color: 0xffffff, width: 4.5, opacity: 0.95, depthTest: false, vertexColors: true });
-    this.trail = new Ribbon(scene, { color: 0xffffff, width: 5, opacity: 0.9, vertexColors: true });
+    this.comet = new Comet(scene);
     this.particles = new Particles(scene);
     this.beads = new SlopeBeads(scene);
     this.tmpColor = new THREE.Color();
@@ -229,14 +354,11 @@ export class Effects {
     this.ring.visible = false;
     scene.add(this.ring);
 
-    this.trailPts = [];
-    this.trailColor = new THREE.Color(0xffffff);
   }
 
   resize(w, h, pixelRatio) {
     this.aimArc.resize(w, h);
     this.puttLine.resize(w, h);
-    this.trail.resize(w, h);
     this.particles.material.uniforms.uScale.value = h * pixelRatio * 0.9;
   }
 
@@ -270,30 +392,13 @@ export class Effects {
   }
 
   // Trail --------------------------------------------------------------------
-  startTrail(color) {
-    this.trailPts.length = 0;
-    this.trailColor.set(color);
-    this.trail.hide();
-  }
+  startTrail(color) { this.comet.begin(color); }
 
-  addTrailPoint(x, y, z) {
-    const p = this.trailPts;
-    p.push(x, y, z);
-    if (p.length > 90 * 3) p.splice(0, 3);
-    const n = p.length / 3;
-    if (n < 2) return;
-    const colors = new Float32Array(n * 3);
-    for (let i = 0; i < n; i++) {
-      const t = Math.pow(i / (n - 1), 1.5);
-      colors[i * 3] = this.trailColor.r * t;
-      colors[i * 3 + 1] = this.trailColor.g * t;
-      colors[i * 3 + 2] = this.trailColor.b * t;
-    }
-    this.trail.set(p, colors);
-    this.trail.material.blending = THREE.AdditiveBlending;
-  }
+  /** Stop laying trail (it fades by itself). */
+  endTrail() { this.comet.end(); }
 
-  endTrail() { this.trail.hide(); }
+  /** Remove the trail at once (hole change, penalty drop). */
+  clearTrail() { this.comet.hide(); }
 
   // Bursts -------------------------------------------------------------------
   puff(x, y, z, surface, strength = 1) {

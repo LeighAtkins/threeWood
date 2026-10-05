@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { pathInfo, pointAlongPath } from '../course/shapes.js';
+import { pathInfo, pointAlongPath, greenDistance } from '../course/shapes.js';
 
 /**
  * Props — every tree, rock, hut, shrine and far-off volcano in the game,
@@ -658,13 +658,19 @@ const LANDMARKS = {
   },
 };
 
+const EDGE = 352; // nothing on the horizon may reach inside this radius
+
 function buildBackdrop(b, world) {
   const { biome, spec } = world;
   const { style, color, cap, capAt = 0.6, capGlow, height: [lo, hi] } = biome.backdrop;
   const ground = biome.base - biome.amp1 - 6;
   const n = style === 'islands' ? 12 : 22;
   for (let i = 0; i < n; i++) {
-    const a = (i / n) * TAU + R(0, 0.2), r = R(430, 580), h = R(lo, hi), w = R(90, 200);
+    const a = (i / n) * TAU + R(0, 0.2), h = R(lo, hi);
+    // Their feet must stay off the course: the tile's corners are ~340 out
+    const spread = { peaks: 0.96, mesas: 0.98, dunes: 1.6, islands: 1.1 }[style] ?? 1.5;
+    const w = Math.min(R(90, 200), (620 - EDGE) / spread);
+    const r = Math.max(R(430, 580), EDGE + w * spread);
     b.place(Math.cos(a) * r, ground, Math.sin(a) * r, R(0, TAU));
     const o = { seg: 6 + Math.floor(R(0, 3)), sx: 1.5, shade: R(0.88, 1.08) };
     if (style === 'peaks') {
@@ -691,7 +697,7 @@ function buildBackdrop(b, world) {
   const ahead = Math.atan2(to.z - from.z, to.x - from.x);
   biome.landmarks.forEach((kind, i) => {
     const a = ahead + (i ? R(1.6, 2.6) * (chance(0.5) ? 1 : -1) : R(-0.35, 0.35));
-    const r = 400;
+    const r = 480;
     b.lx = Math.cos(a) * r; b.ly = ground + 4; b.lz = Math.sin(a) * r;
     // Turned to face the course (their fronts are +z)
     b.place(b.lx, b.ly, b.lz, Math.atan2(-b.lx, -b.lz), 0.82);
@@ -701,9 +707,36 @@ function buildBackdrop(b, world) {
 
 // --- Assembly ------------------------------------------------------------------------
 
-/** Free ground beside the hole, thickest just off the fairway where it will be seen. */
-function scatterSpots(world, count, { clear, reach, apart, taken }) {
+function segmentDistance(x, z, a, b) {
+  const dx = b.x - a.x, dz = b.z - a.z;
+  const len2 = dx * dx + dz * dz || 1;
+  const t = Math.max(0, Math.min(1, ((x - a.x) * dx + (z - a.z) * dz) / len2));
+  return Math.hypot(x - a.x - dx * t, z - a.z - dz * t);
+}
+
+/**
+ * Lines a ball is likely to be hit along that are NOT the fairway: straight
+ * across each corner of a dogleg, and tee to pin. Nothing big may stand on
+ * them, or a brave line would fly straight through a cottage.
+ */
+function shortCuts(world) {
+  const path = world.spec.path, lines = [];
+  for (let i = 0; i + 2 < path.length; i++) lines.push([path[i], path[i + 2]]);
+  if (path.length > 2) lines.push([path[0], path[path.length - 1]]);
+  return lines;
+}
+
+/**
+ * Free ground beside the hole, thickest just off the fairway where it will be
+ * seen — but never where it would get in the way: not crowding the tee (the
+ * camera sits behind it), not ringing the green (chips and the putting view
+ * need it open), and for big pieces not on any short cut.
+ *   clear: yards off the fairway edge   tee: yards from the tee
+ *   green: multiples of the green's size   cut: yards off the short-cut lines
+ */
+function scatterSpots(world, count, { clear, reach, apart, taken, tee, green, cut = 0 }) {
   const { spec } = world, spots = [];
+  const cuts = cut ? shortCuts(world) : [];
   for (let tries = 0; tries < count * 30 && spots.length < count; tries++) {
     const p = pointAlongPath(spec.path, R(-30, world.length + 45));
     const across = (chance(0.5) ? -1 : 1) * (spec.fairwayHalf + clear + rnd() * rnd() * reach);
@@ -711,6 +744,9 @@ function scatterSpots(world, count, { clear, reach, apart, taken }) {
     if (Math.abs(x) > world.half * 0.96 || Math.abs(z) > world.half * 0.96) continue;
     if (pathInfo(spec.path, x, z).dist < spec.fairwayHalf + clear) continue;
     if (world.surfaceAt(x, z) !== 'rough') continue;
+    if (Math.hypot(x - world.tee.x, z - world.tee.z) < tee) continue;
+    if (greenDistance(spec.green, x, z) < green) continue;
+    if (cuts.some(([a, b]) => segmentDistance(x, z, a, b) < cut)) continue;
     if (taken.some((t) => Math.hypot(x - t.x, z - t.z) < apart + (t.r || 0))) continue;
     spots.push({ x, z, y: world.heightAt(x, z) });
   }
@@ -732,6 +768,7 @@ export function buildProps(world, rng, { lowDetail = false } = {}) {
     return mesh;
   };
   const glowParts = [];
+  const placed = []; // where everything stands: camera blockers, and the clearance audit
 
   // Trees: the colliders already exist; give each one its own body
   const trees = new Builder();
@@ -746,16 +783,22 @@ export function buildProps(world, rng, { lowDetail = false } = {}) {
   const props = new Builder();
   const taken = world.trees.map((t) => ({ x: t.x, z: t.z, r: 0 }));
   for (const [kind, count] of biome.features) {
-    const spots = scatterSpots(world, Math.ceil(count * 1.5), { clear: 20, reach: 95, apart: 10, taken });
+    const spots = scatterSpots(world, Math.ceil(count * 1.5), {
+      clear: 20, reach: 95, apart: 10, taken, tee: 36, green: 2.4, cut: world.spec.fairwayHalf + 16,
+    });
     for (const s of spots) {
       taken.push({ x: s.x, z: s.z, r: 9 });
+      placed.push({ x: s.x, y: s.y, z: s.z, r: 7, h: 12, type: 'feature', kind });
       props.place(s.x, s.y - 0.4, s.z, R(0, TAU), R(1.3, 1.8));
       FEATURES[kind](props, biome);
     }
   }
   for (const [kind, count] of biome.props) {
-    const spots = scatterSpots(world, Math.ceil(count * (lowDetail ? 0.9 : 1.5)), { clear: 4, reach: 80, apart: 3, taken });
+    const spots = scatterSpots(world, Math.ceil(count * (lowDetail ? 0.9 : 1.5)), {
+      clear: 4, reach: 80, apart: 3, taken, tee: 13, green: 1.5,
+    });
     for (const s of spots) {
+      placed.push({ x: s.x, y: s.y, z: s.z, r: 1.5, h: 3, type: 'prop', kind });
       props.place(s.x, s.y - 0.1, s.z, R(0, TAU), R(1.2, 2.0));
       PROPS[kind](props, biome);
     }
@@ -775,5 +818,5 @@ export function buildProps(world, rng, { lowDetail = false } = {}) {
 
   const propsMesh = finish(props, 'props', true);
   propsMesh.receiveShadow = true;
-  return { trees: finish(trees, 'trees', true), props: propsMesh, backdrop: finish(backdrop, 'backdrop', false), glow };
+  return { trees: finish(trees, 'trees', true), props: propsMesh, backdrop: finish(backdrop, 'backdrop', false), glow, placed };
 }
