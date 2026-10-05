@@ -9,7 +9,7 @@ await page.evaluate(() => localStorage.clear());
 await page.locator('[data-a="18"]').tap();
 const shots = [];
 for (const [club, dist] of [['driver', 0], ['iron7', 120], ['putter', 4]]) {
-  for (const view of ['behind', 'front', 'top-swing']) {
+  for (const view of ['behind', 'front', 'top-swing', 'player']) {
     await page.evaluate(({ club, dist, view }) => {
       const g = window.THREEWOOD;
       g.manual = true;
@@ -25,7 +25,12 @@ for (const [club, dist] of [['driver', 0], ['iron7', 120], ['putter', 4]]) {
       // behind: where the player looks from; front: looking back at the face
       const s = view === 'front' ? 1 : -1;
       cam.clearViewOffset(); cam.fov = 40; cam.updateProjectionMatrix();
-      if (view === 'top-swing') {
+      if (view === 'player') {
+        // Roughly what the putting camera sees, zoomed
+        cam.position.set(b.x - dx * 2.2, b.y + 1.5, b.z - dz * 2.2);
+        cam.lookAt(b.x, b.y + 0.2, b.z);
+        cam.fov = 22; cam.updateProjectionMatrix();
+      } else if (view === 'top-swing') {
         cam.position.set(b.x - dx * 0.5 - dz * 3.2, b.y + 1.6, b.z - dz * 0.5 + dx * 3.2);
         cam.lookAt(b.x - dx * 0.6, b.y + 1.3, b.z - dz * 0.6);
       } else {

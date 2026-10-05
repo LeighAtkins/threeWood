@@ -89,19 +89,41 @@ function buildIron(mat) {
 
 function buildPutter(mat) {
   const group = new THREE.Group();
-  const blade = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.07, 0.3), mat.steel);
-  blade.position.set(-0.022, 0.04, 0.14);
-  const face = new THREE.Mesh(new THREE.BoxGeometry(0.008, 0.06, 0.26), mat.face);
-  face.position.set(0.003, 0.04, 0.14);
-  // Mallet flange with a sight line down the middle
-  const flangeGeo = new THREE.CylinderGeometry(0.13, 0.13, 0.035, 12, 1, false, Math.PI / 2, Math.PI);
-  const flange = new THREE.Mesh(flangeGeo, mat.crown);
-  flange.position.set(-0.04, 0.022, 0.14);
-  const sight = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.008, 0.014), mat.accent);
-  sight.position.set(-0.09, 0.044, 0.14);
-  // Heel-shafted: slide the head so the shaft meets the blade near the heel
-  for (const part of [blade, face, flange, sight]) { part.position.z += 0.02; part.position.x += 0.02; }
-  group.add(blade, face, flange, sight, hosel(mat.steel, 0.018, 0.16));
+  const W = 0.2, D = 0.11, H = 0.05;   // heel-to-toe, face-to-back, tall
+
+  // Mallet body: flat face in front, a smooth rounded back (a "D" from above)
+  const outline = new THREE.Shape();
+  outline.moveTo(0, 0);
+  outline.lineTo(0, -W);
+  outline.bezierCurveTo(-D * 0.75, -W * 1.02, -D, -W * 0.8, -D, -W * 0.5);
+  outline.bezierCurveTo(-D, -W * 0.2, -D * 0.75, W * 0.02, 0, 0);
+  const bodyGeo = new THREE.ExtrudeGeometry(outline, {
+    depth: H, bevelEnabled: true, bevelThickness: 0.008, bevelSize: 0.008, bevelSegments: 1, curveSegments: 8,
+  });
+  bodyGeo.rotateX(-Math.PI / 2); // extrusion becomes height; outline lies on the turf
+  const body = new THREE.Mesh(bodyGeo, mat.graphite);
+  body.position.y = 0.012;
+
+  // Bright milled face insert — the part that meets the ball
+  const face = new THREE.Mesh(new THREE.BoxGeometry(0.008, H * 0.8, W * 0.86), mat.face);
+  face.position.set(0.004, 0.012 + H * 0.5, W * 0.5);
+
+  // One clean sight line down the middle, and a top-line along the face
+  const sight = new THREE.Mesh(new THREE.BoxGeometry(D * 0.8, 0.006, 0.012), mat.white);
+  sight.position.set(-D * 0.48, 0.012 + H + 0.009, W * 0.5);
+  const topLine = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.006, W * 0.9), mat.steel);
+  topLine.position.set(-0.008, 0.012 + H + 0.009, W * 0.5);
+
+  // The shaft runs straight down into the heel through a short steel sleeve
+  const head = new THREE.Group();
+  head.add(body, face, sight, topLine);
+  head.position.set(0.035, 0, -0.035);
+  const sleeve = hosel(mat.steel, 0.017, 0.24);
+  const collar = hosel(mat.white, 0.021, 0.03);
+  collar.position.y += 0.2 * Math.cos(LIE);
+  collar.position.z -= 0.2 * Math.sin(LIE);
+  group.add(collar);
+  group.add(head, sleeve);
   return group;
 }
 
@@ -121,6 +143,8 @@ export class ClubRig {
       face: std({ color: 0xcfd6dc, roughness: 0.5, metalness: 0.3, emissive: 0x3a3f45 }),
       accent: std({ color: 0xffd23f, roughness: 0.5, emissive: 0x5a4300 }),
       dark: std({ color: 0x2a2f36, roughness: 0.8 }),
+      graphite: std({ color: 0x3a4250, roughness: 0.45, metalness: 0.35, emissive: 0x161b22 }),
+      white: std({ color: 0xffffff, roughness: 0.6, emissive: 0x8a8a8a }),
     };
     this.materials = Object.values(mat);
 
@@ -173,7 +197,7 @@ export class ClubRig {
 
     const f = this._f.set(dirX, 0, dirZ);
     // The shaft tip (the heel) sits on the turf just behind and inside the ball
-    const heel = (kind === 'putter' ? 0.14 : 0.15) * size;
+    const heel = (kind === 'putter' ? 0.065 : 0.15) * size;
     const tipX = ball.x - dirX * HEAD_BACK * size + dirZ * heel;
     const tipZ = ball.z - dirZ * HEAD_BACK * size - dirX * heel;
     const tipY = ball.y - 0.05;
