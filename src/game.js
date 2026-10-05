@@ -10,7 +10,7 @@ import {
 import {
   buildLaunch, previewShot, previewPutt, puttSpeedFor, puttMeterMax, puttSpeedAt, slopeAlong,
 } from './core/shotPlanner.js';
-import { designHole, roundHoles, ARCHETYPES, ROUND_PLAN } from './course/holeDesigner.js';
+import { designHole, roundHoles, ARCHETYPES, ROUND_PLAN, GIMMICKS } from './course/holeDesigner.js';
 import { buildWorld, aimTarget } from './course/courseWorld.js';
 import { BIOMES } from './course/biomes.js';
 import { buildTerrainMesh } from './render/terrainMesh.js';
@@ -32,6 +32,7 @@ import { CamperUi } from './ui/camperUi.js';
 import { loadCamp, bump } from './core/camp.js';
 import { NetPlay } from './net/netplay.js';
 import { buildNightGlow, updateNightGlow } from './render/nightGlow.js';
+import { Gimmicks } from './render/gimmicks.js';
 import { Audio } from './audio.js';
 import { Music } from './music.js';
 
@@ -102,6 +103,7 @@ export class Game {
     this.newOutfits = [];
     this._pivot = new THREE.Vector3();
     this.net = new NetPlay(this);
+    this.gimmicks = new Gimmicks(this.scene);
     this.cookHud = new CookHud(this.hud.root, this.hud.layer, () => this.eatFish());
     this.initBall();
     this.initInput();
@@ -386,6 +388,7 @@ export class Game {
     if (this.nightGlow) { this.scene.remove(this.nightGlow); disposeGroup(this.nightGlow); }
     this.nightGlow = buildNightGlow(this.world);
     this.scene.add(this.nightGlow);
+    this.gimmicks?.load(this.world);
     this.sky.setHole(this.world);
     this.rig.setWorld(this.world, this.scenery.placed);
     this.effects.hideAim();
@@ -456,6 +459,7 @@ export class Game {
       wind: spec.wind.speed,
       tip: caddieTip(round.index, this.level),
       challenge: this.challenge,
+      toy: spec.gimmick ? GIMMICKS[spec.gimmick.kind] : null,
     };
   }
 
@@ -824,6 +828,8 @@ export class Game {
       this.landing = { x: preview.landX, y: preview.landY, z: preview.landZ };
       const camDist = Math.hypot(preview.landX - this.camera.position.x, preview.landZ - this.camera.position.z);
       this.effects.showAim(preview.points, preview.landX, world.heightAt(preview.landX, preview.landZ), preview.landZ, camDist);
+      // Sky rings hang along the first tee shot the caddie lines up
+      if (this.strokes === 0 && this.state === 'aim' && this.round) this.gimmicks.hangRings(preview.points);
       if (this.state === 'aim') { this.hud.hideMeter(); this.hud.setAction('swing', this.fullPower); }
     }
     this.planDirty = false;
@@ -1103,6 +1109,7 @@ export class Game {
       stepBall(ball, world, this.env, SIM_DT, this.events);
       this.simAccumulator -= SIM_DT;
       steps++;
+      if (this.gimmicks.rings.length) this.checkRings(); // every step: a fast ball must not skip a hoop
     }
 
     if (shot.replan && ball.mode === 'air') {
@@ -1145,8 +1152,58 @@ export class Game {
     }
   }
 
+  /** Mushrooms: anything that touches down on one springs away. */
+  boing(e) {
+    const { ball, shot } = this;
+    if (shot.putt || (e.type !== 'land' && e.type !== 'bounce' && e.type !== 'roll')) return;
+    const pad = this.gimmicks.padAt(ball.x, ball.z);
+    if (!pad) return;
+    this.gimmicks.bouncePad(pad);
+    const speed = Math.hypot(ball.vx, ball.vz);
+    const k = speed > 0.5 ? Math.max(1, 9 / speed) : 0; // always leaves with some pace
+    ball.vx *= k; ball.vz *= k;
+    if (!k) { ball.vx = this.dirX * 9; ball.vz = this.dirZ * 9; }
+    ball.vy = 13;
+    ball.y = Math.max(ball.y, pad.top + 0.1);
+    ball.mode = 'air';
+    shot.replan = true;
+    this.hud.callout('BOING!', 'gold');
+    this.award('Mushroom bounce', 100, true);
+    this.audio.bounce(18, 'green');
+    this.effects.puff(ball.x, ball.y, ball.z, 'green', 1.4);
+  }
+
+  /** Sky rings: points for each, more for a run, and a kick of speed for all three. */
+  checkRings() {
+    const { ball, shot } = this;
+    if (shot.putt || ball.mode !== 'air') return;
+    for (const ring of this.gimmicks.ringsHit(ball)) {
+      shot.rings = (shot.rings || 0) + 1;
+      this.hud.callout(shot.rings > 1 ? `RING ×${shot.rings}` : 'RING!', 'gold small');
+      this.award(`Sky ring ×${shot.rings}`, 150 * shot.rings, true);
+      this.effects.strikeFlash(ring.p.x, ring.p.y, ring.p.z, true);
+      if (this.gimmicks.ringsDone) {
+        ball.vx *= 1.06; ball.vz *= 1.06;
+        shot.replan = true;
+        this.hud.callout('RING MASTER!', 'gold');
+        this.award('All three rings', 500, true);
+        this.audio.fanfare(2);
+      }
+    }
+  }
+
   handleBallEvent(e) {
     const fx = this.effects;
+    this.boing(e);
+    if (e.type === 'land' && this.shot.fromSurface === 'tee' && !this.shot.bull) {
+      this.shot.bull = true;
+      const hit = this.gimmicks.bullseye(e.x, e.z);
+      if (hit) {
+        this.hud.callout(hit === 3 ? 'BULLSEYE!' : hit === 2 ? 'ON TARGET' : 'TARGET', hit === 3 ? 'gold' : 'gold small');
+        this.award(hit === 3 ? 'Bullseye' : 'On the target', [0, 100, 250, 500][hit], true);
+        if (hit === 3) this.audio.fanfare(2);
+      }
+    }
     switch (e.type) {
       case 'land':
         if (this.hints.spin < 4) this.hud.demo(null);
@@ -1876,6 +1933,7 @@ export class Game {
     // After dark: the course, the ball and the campers carry their own light
     const night = this.sky.night;
     updateNightGlow(this.nightGlow, night, this.time);
+    this.gimmicks.update(dt, this.time);
     this.ballMesh.material.emissiveIntensity = 0.42 + night * 0.9;
     this.ballLight.intensity = this.ballMesh.visible ? night * 7 : 0;
     this.ballLight.position.set(this.ballMesh.position.x, this.ballMesh.position.y + 0.7, this.ballMesh.position.z);

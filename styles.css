@@ -697,3 +697,6 @@ button { font: inherit; color: inherit; border: 0; background: none; padding: 0;
 .card .board { margin: 8px 0; display: grid; gap: 4px; }
 .card .board div { display: flex; justify-content: space-between; padding: 6px 12px; border-radius: 10px; background: rgba(255, 255, 255, 0.08); font-weight: 700; }
 .card .board .me { background: rgba(255, 210, 63, 0.18); color: var(--gold); }
+
+.intro .toy { display: inline-block; margin-top: 8px; padding: 6px 12px; border-radius: 12px; background: rgba(255, 210, 63, 0.92); color: #4a3200; font-size: 13px; font-weight: 600; }
+.intro .toy b { margin-right: 4px; letter-spacing: 1px; }

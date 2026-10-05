@@ -33,6 +33,22 @@ export const ARCHETYPES = {
   potBunkers:    { label: 'Postage Stamp', blurb: 'A tiny target ringed with sand.' },
   dunes:         { label: 'The Gauntlet',  blurb: 'Bunkers staggered all the way home.' },
   islandGreen:   { label: 'The Island',    blurb: 'Nothing but green and water. Good luck.' },
+  // Holes shaped by the land itself (spec.shape, built in courseWorld.js)
+  lookout:       { label: 'The Lookout',   blurb: 'Tee off from the cliff top. It hangs for ever.' },
+  skiJump:       { label: 'Ski Jump',      blurb: 'Downhill all the way. Let it fly.' },
+  ascent:        { label: 'The Ascent',    blurb: 'Every yard is uphill. Take more club.' },
+  halfpipe:      { label: 'The Half-Pipe', blurb: 'Banked sides feed the ball back to the middle.' },
+  hogsback:      { label: "Hog's Back",    blurb: 'The fairway is a ridge. Miss it and the ball runs away.' },
+  terraces:      { label: 'The Terraces',  blurb: 'Three shelves down the hill. Land on one.' },
+  gorge:         { label: 'The Gorge',     blurb: 'A ravine cuts the fairway. Carry it or lay up.' },
+  punchbowl:     { label: 'The Punchbowl', blurb: 'Hit the bowl and it feeds to the flag.' },
+};
+
+/** Toys on the hole: something to aim at besides the flag (render/gimmicks.js). */
+export const GIMMICKS = {
+  rings:    { label: 'Sky Rings',  blurb: 'Fly the ball through the rings. Swipe to steer.' },
+  bullseye: { label: 'Bullseye',   blurb: 'Land the tee shot on the target.' },
+  boing:    { label: 'Mushrooms',  blurb: 'Land on a mushroom. Boing!' },
 };
 
 // Par -> [min, max] hole length
@@ -44,24 +60,24 @@ export const PAR_BANDS = { 3: [100, 165], 4: [255, 320], 5: [350, 400] };
  * each three-hole stretch is played in comes from the seed (biomes.js).
  */
 export const ROUND_PLAN = [
-  { par: 4, archetypes: ['straight'] },
-  { par: 4, archetypes: ['doglegR', 'doglegL'] },
-  { par: 3, archetypes: ['overWater'] },
-  { par: 5, archetypes: ['doglegL', 'doglegR'] },
+  { par: 4, archetypes: ['straight'], gimmick: 'bullseye' },
+  { par: 4, archetypes: ['skiJump'], gimmick: 'rings' },
+  { par: 3, archetypes: ['lookout'] },
+  { par: 5, archetypes: ['halfpipe'], gimmick: 'boing' },
   { par: 4, archetypes: ['bottleneck'] },
-  { par: 3, archetypes: ['elevatedGreen'] },
-  { par: 4, archetypes: ['lakeside'] },
-  { par: 5, archetypes: ['dunes'] },
-  { par: 4, archetypes: ['elevatedGreen', 'dunes'] },
-  { par: 4, archetypes: ['doglegL', 'doglegR'] },
-  { par: 3, archetypes: ['potBunkers'] },
-  { par: 5, archetypes: ['lakeside', 'cape'] },
-  { par: 4, archetypes: ['bottleneck', 'straight'] },
-  { par: 4, archetypes: ['waterApproach'] },
-  { par: 5, archetypes: ['doubleDogleg'] },
-  { par: 4, archetypes: ['cape'] },
+  { par: 3, archetypes: ['punchbowl'] },
+  { par: 4, archetypes: ['lakeside'], gimmick: 'rings' },
+  { par: 5, archetypes: ['terraces'] },
+  { par: 4, archetypes: ['hogsback'], gimmick: 'bullseye' },
+  { par: 4, archetypes: ['doglegL', 'doglegR'], gimmick: 'boing' },
+  { par: 3, archetypes: ['potBunkers', 'overWater'], gimmick: 'rings' },
+  { par: 5, archetypes: ['cape', 'lakeside'] },
+  { par: 4, archetypes: ['gorge'] },
+  { par: 4, archetypes: ['waterApproach'], gimmick: 'bullseye' },
+  { par: 5, archetypes: ['doubleDogleg'], gimmick: 'rings' },
+  { par: 4, archetypes: ['ascent'], gimmick: 'boing' },
   { par: 3, archetypes: ['islandGreen'] },
-  { par: 4, archetypes: ['lakeside', 'waterApproach'] },
+  { par: 4, archetypes: ['halfpipe', 'skiJump'], gimmick: 'rings' },
 ];
 
 /** Which course holes make up a round of the given length. */
@@ -85,6 +101,9 @@ function layoutHole(rng, plan) {
   if (archetype === 'islandGreen') totalLen = rng.range(100, 125);
   if (archetype === 'potBunkers') totalLen = rng.range(95, 120);
   if (archetype === 'overWater') totalLen = rng.range(120, 150);
+  if (archetype === 'lookout') totalLen = rng.range(135, 160);
+  if (archetype === 'punchbowl') totalLen = rng.range(125, 150);
+  if (archetype === 'ascent') totalLen = rng.range(255, 285);
 
   const tee = { x: 0, z: 0 };
   const at = (len, ang, from = tee) => ({ x: from.x + Math.cos(ang) * len, z: from.z + Math.sin(ang) * len });
@@ -150,6 +169,20 @@ function layoutHole(rng, plan) {
   const greenside = () => {
     if (rng.rng() < 0.75) addBunker(totalLen - rng.range(2, 8), rng.sign() * (green.size + 5), rng.range(4.5, 6));
   };
+
+  // The lie of the land, for the holes that are about it
+  let shape = null;
+  switch (archetype) {
+    case 'lookout': shape = { kind: 'drop', h: rng.range(13, 17) }; greenside(); greenside(); break;
+    case 'skiJump': shape = { kind: 'drop', h: rng.range(10, 13) }; addBunker(totalLen * 0.72, rng.sign() * (fairwayHalf + 5), rng.range(6, 8)); greenside(); break;
+    case 'ascent': shape = { kind: 'climb', h: rng.range(7, 9.5) }; addBunker(totalLen * 0.6, rng.sign() * (fairwayHalf + 5), rng.range(6, 7)); greenside(); break;
+    case 'halfpipe': shape = { kind: 'halfpipe', h: rng.range(3, 3.8) }; greenside(); break;
+    case 'hogsback': shape = { kind: 'hogsback', h: rng.range(2, 2.6) }; addBunker(totalLen * 0.66, fairwayHalf + 9, rng.range(6, 8)); addBunker(totalLen * 0.7, -(fairwayHalf + 9), rng.range(6, 8)); break;
+    case 'terraces': shape = { kind: 'terraces', h: rng.range(9, 11), steps: 3 }; greenside(); break;
+    case 'gorge': shape = { kind: 'gorge', h: rng.range(6, 8), at: rng.range(0.6, 0.66), w: rng.range(13, 16) }; greenside(); break;
+    case 'punchbowl': shape = { kind: 'punchbowl', h: rng.range(2.4, 3) }; break;
+    default: break;
+  }
 
   switch (archetype) {
     case 'straight': {
@@ -325,6 +358,8 @@ function layoutHole(rng, plan) {
     pin,
     fairwayHalf,
     fairwayStart,
+    shape,
+    gimmick: plan.gimmick ? buildGimmick(plan.gimmick, rng, { pathPts, totalLen, fairwayHalf, green, par, water, bunkers }) : null,
     bunkers,
     water,
     trees,
@@ -333,6 +368,34 @@ function layoutHole(rng, plan) {
   };
   spec.carryRequired = computeCarry(spec);
   return spec;
+}
+
+/** Where a hole's toys stand (already in tile coordinates). Rings are hung at the tee, from the shot itself. */
+function buildGimmick(kind, rng, { pathPts, totalLen, fairwayHalf, green, par, water, bunkers }) {
+  const clear = (p, m) => !water.some((w) => blobCovers(w, p.x, p.z, m)) && !bunkers.some((b) => blobCovers(b, p.x, p.z, m));
+  const off = (along, across) => {
+    const p = pointAlongPath(pathPts, along);
+    return { x: p.x - p.dirZ * across, z: p.z + p.dirX * across };
+  };
+  if (kind === 'bullseye') {
+    // Where a good drive finishes; on a short hole, short of the green
+    for (const along of par > 3 ? [178, 168, 158, 188] : [totalLen - green.size * 2.6]) {
+      const p = off(Math.min(along, totalLen - green.size * 2.4), rng.range(-3, 3));
+      if (clear(p, 13)) return { kind, x: p.x, z: p.z };
+    }
+    return null;
+  }
+  if (kind === 'boing') {
+    const pads = [];
+    const tries = [[150, fairwayHalf + 5], [172, -(fairwayHalf + 5)], [totalLen - green.size * 2.2 - 14, rng.sign() * 7], [120, -(fairwayHalf + 4)]];
+    for (const [along, across] of tries) {
+      if (along < 60 || along > totalLen - green.size * 1.8) continue;
+      const p = off(along, across);
+      if (clear(p, 6) && pads.length < 3) pads.push({ x: p.x, z: p.z, r: 2.6 });
+    }
+    return pads.length ? { kind, pads } : null;
+  }
+  return { kind };
 }
 
 /** Longest stretch of water the play line crosses. */
@@ -400,7 +463,7 @@ export function designHole(seedString, holeNumber, request = {}) {
   let best = null;
   for (let attempt = 0; attempt < 60; attempt++) {
     const rng = holeRng.fork(`attempt-${attempt}`);
-    const spec = layoutHole(rng, { seed: seedString, number: holeNumber, par, archetype, biome });
+    const spec = layoutHole(rng, { seed: seedString, number: holeNumber, par, archetype, biome, gimmick: request.gimmick ?? plan.gimmick });
     const fitness = evaluateFitness(spec);
     spec.fitness = { ...fitness, attempts: attempt + 1 };
     if (fitness.pass) return spec;

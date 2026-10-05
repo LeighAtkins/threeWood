@@ -33,8 +33,47 @@ export function buildWorld(spec) {
   const low = (x, z) => biome.base + biome.amp1 * noise(x * 0.006, z * 0.006);
   const detail = (x, z) => biome.amp2 * noise(x * 0.024 + 50, z * 0.024 - 50);
 
-  const teeY = low(spec.tee.x, spec.tee.z) + 0.4;
-  const greenY = Math.max(0.6, low(green.x, green.z)) + green.elev;
+  // --- The lie of the land: big shapes that make a hole play differently ------
+  // (spec.shape, from the designer). Everything here is smooth, so the grid,
+  // the mesh and the physics all inherit it without knowing.
+  const shape = spec.shape || null;
+  const lift = (info, x, z) => {
+    if (!shape) return 0;
+    const t = Math.max(0, Math.min(1, info.along / totalLen));
+    const half = spec.fairwayHalf;
+    switch (shape.kind) {
+      case 'drop':      // tee on the cliff top, the hole falls away below
+        return shape.h * (1 - smoothstep(0.04, 0.6, t));
+      case 'climb':     // every yard uphill
+        return shape.h * smoothstep(0.25, 0.95, t);
+      case 'halfpipe': { // banks either side feed the ball to the middle
+        const along = smoothstep(0.08, 0.2, t) * (1 - smoothstep(0.82, 0.94, t));
+        return shape.h * smoothstep(half * 0.45, half + 15, info.dist) * along;
+      }
+      case 'hogsback': { // the fairway is the crown of a ridge
+        const along = smoothstep(0.1, 0.25, t) * (1 - smoothstep(0.75, 0.9, t));
+        return shape.h * (1 - smoothstep(half * 0.3, half + 12, info.dist)) * along;
+      }
+      case 'terraces': { // shelves stepping down to the green
+        const n = shape.steps, f = t * n, k = Math.floor(f);
+        return shape.h * (n - (k + smoothstep(0.72, 1, f - k))) / n * (1 - smoothstep(0.9, 1, t));
+      }
+      case 'gorge': {   // a ravine across the line of play
+        const u = (info.along - shape.at * totalLen) / shape.w;
+        return -shape.h * Math.exp(-u * u);
+      }
+      case 'punchbowl': { // a rim of high ground all round the green
+        const gd = greenDistance(green, x, z);
+        return shape.h * smoothstep(1.15, 2.1, gd) * (1 - smoothstep(2.6, 4.2, gd));
+      }
+      default:
+        return 0;
+    }
+  };
+  const infoAt = (p) => pathInfo(path, p.x, p.z);
+
+  const teeY = low(spec.tee.x, spec.tee.z) + lift(infoAt(spec.tee), spec.tee.x, spec.tee.z) + 0.4;
+  const greenY = Math.max(0.6, low(green.x, green.z)) + lift(infoAt(green), green.x, green.z) + green.elev;
   const tiltX = Math.cos(green.tiltAngle) * green.tilt;
   const tiltZ = Math.sin(green.tiltAngle) * green.tilt;
   const greenBlend = 0.32 + green.elev * 0.14;
@@ -50,7 +89,7 @@ export function buildWorld(spec) {
     const d = detail(x, z);
     const half = fairwayHalfAt(info.along);
     const w = info.along < spec.fairwayStart - 6 ? 0 : 1 - smoothstep(half, half + 14, info.dist);
-    return l + d * lerp(1, 0.2, w);
+    return l + d * lerp(1, 0.2, w) + lift(info, x, z);
   };
 
   const ponds = spec.water.map((w) => {
@@ -81,7 +120,9 @@ export function buildWorld(spec) {
     }
 
     const teeD = Math.hypot(x - spec.tee.x, z - spec.tee.z);
-    if (teeD < TEE_RADIUS * 2.2) h = lerp(teeY, h, smoothstep(TEE_RADIUS, TEE_RADIUS * 2.2, teeD));
+    // A cliff-top tee is a proper platform, not a pimple
+    const teeOut = shape?.kind === 'drop' ? 5 : 2.2;
+    if (teeD < TEE_RADIUS * teeOut) h = lerp(teeY, h, smoothstep(TEE_RADIUS, TEE_RADIUS * teeOut, teeD));
 
     const gd = greenDistance(green, x, z);
     if (gd < FRINGE_EDGE + greenBlend) {
