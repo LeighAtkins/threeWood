@@ -1004,7 +1004,7 @@ export class Game {
       hint: this.hints.fish < 6,
       sounds: {
         drop: () => a.whoosh(),
-        hooked: () => a.tap(),
+        hooked: () => a.tap(), bump: () => a.bounce(6, 'rough'),
         catch: () => { a.reward(4); a.vibrate?.(30); },
         fish: () => a.reward(0),
         miss: () => a.penalty(),
@@ -1330,7 +1330,7 @@ export class Game {
       color: this.world.biome.liquid === 'lava' ? 0x3c9cc4 : this.world.biome.water,
       hint: true,
       sounds: {
-        drop: () => a.whoosh(), hooked: () => a.tap(),
+        drop: () => a.whoosh(), hooked: () => a.tap(), bump: () => a.bounce(6, 'rough'),
         catch: () => a.reward(4), fish: () => a.reward(0), miss: () => a.penalty(),
       },
       onDone: next,

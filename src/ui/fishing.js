@@ -7,10 +7,15 @@
  * the ball. Three games take turns, one per trip into the water:
  *
  *   drop   the hook swings by itself; one tap drops the line (timing)
- *   steer  the hook sinks by itself; drag to steer it past the fish
- *   gold   drag to place the hook, let go to drop it on a golden ball that
- *          darts about. Offered after two lost balls in a row: it forgives
- *          this stroke and gives those two back
+ *   steer  the hook is yours: drag it down through the fish to the ball on
+ *          the bottom, then bring the ball back up through them. A fish
+ *          knocks the hook back to the top and the ball off it
+ *   gold   the same, after a golden ball that will not keep still. Offered
+ *          after two lost balls in a row: it forgives this stroke and gives
+ *          those two back
+ *
+ * The drag games run against the clock (the bar along the bottom), long
+ * enough that where you steer is what decides it.
  *
  * Drags are relative (the hook moves as far as the finger does), so the finger
  * never has to cover the ball. Over in a few seconds either way. Driven by the game clock (update(dt)), drawn on a
@@ -55,14 +60,14 @@ export class Fishing {
     this.node.addEventListener('pointerdown', (e) => {
       e.preventDefault();
       try { this.node.setPointerCapture?.(e.pointerId); } catch { /* synthetic pointer */ }
-      this.finger = { id: e.pointerId, x: e.clientX };
+      this.finger = { id: e.pointerId, x: e.clientX, y: e.clientY };
       this.press();
     });
     this.node.addEventListener('pointermove', (e) => {
       if (!this.finger || this.finger.id !== e.pointerId) return;
-      const width = this.canvas.getBoundingClientRect().width || 1;
-      this.drag((e.clientX - this.finger.x) / width);
-      this.finger.x = e.clientX;
+      const box = this.canvas.getBoundingClientRect();
+      this.drag((e.clientX - this.finger.x) / (box.width || 1), (e.clientY - this.finger.y) / (box.height || 1));
+      this.finger.x = e.clientX; this.finger.y = e.clientY;
     });
     const up = (e) => {
       if (!this.finger || this.finger.id !== e.pointerId) return;
@@ -102,35 +107,39 @@ export class Fishing {
     this.sounds = sounds;
     this.color = hex(color);
     this.t = 0;
-    this.phase = 'swing'; // swing -> drop -> reel -> done
+    this.phase = mode === 'drop' ? 'swing' : 'play'; // drop: swing -> drop -> reel -> done; drag games: play -> done
     this.result = null;
     this.endT = 0;
     this.catchR = 0.1 - 0.035 * level;
     this.sweep = 1.5 + 0.9 * level;          // hook swing, rad/s
-    this.sinkFor = (mode === 'drop' ? 5.2 : 6.4) - 1.2 * level; // seconds for the ball to reach the bed
-    this.wander = mode === 'gold' ? 0.2 + 0.06 * level : 0.05;  // how far the ball strays sideways
-    this.wanderRate = mode === 'gold' ? 1.9 + 0.6 * level : 1.3;
+    this.sinkFor = 5.2 - 1.2 * level;        // drop: seconds for the ball to reach the bed
+    this.limit = (mode === 'gold' ? 14 : 12) - 3 * level; // drag games: seconds on the clock
+    this.wander = mode === 'gold' ? 0.26 + 0.06 * level : 0.05;  // how far the ball strays sideways
+    this.wanderRate = mode === 'gold' ? 1.0 + 0.5 * level : 1.3;
+    this.restY = mode === 'gold' ? 0.66 : BED - BALL_R;        // where a loose ball ends up
     this.targetX = 0.5;                      // where a drag has asked the hook to be
-    // steer: the ball is never straight under the hook, so doing nothing loses
-    this.ballX0 = mode === 'steer' ? (rng() < 0.5 ? 0.14 + rng() * 0.14 : 0.72 + rng() * 0.14) : 0.3 + rng() * 0.4;
+    this.targetY = SURFACE - 0.04;
+    this.stun = 0;                           // a fish has knocked the hook: no control
+    this.moved = 0;
+    this.ballX0 = 0.3 + rng() * 0.4;
     this.ballPhase = rng() * 6.28;
     this.hookPhase = rng() * 6.28;
     this.hook = { x: 0.5, y: SURFACE - 0.04 };
     this.ball = { x: this.ballX0, y: SURFACE + 0.08 };
     this.carry = null; // what is on the hook: 'ball' | fish object
-    const count = (mode === 'steer' ? 3 : 2) + Math.round(level * 2);
+    const count = (mode === 'drop' ? 2 : mode === 'steer' ? 4 : 5) + Math.round(level * 2);
     this.fish = [];
     for (let i = 0; i < count; i++) {
       const dir = rng() < 0.5 ? -1 : 1;
       this.fish.push({
-        x: rng(), y: SURFACE + 0.2 + (i / count) * 0.42 + rng() * 0.06,
+        x: rng(), y: SURFACE + (mode === 'drop' ? 0.2 : 0.14) + (i / count) * (mode === 'drop' ? 0.42 : 0.5) + rng() * 0.05,
         v: dir * (0.1 + rng() * 0.12 + level * 0.06), size: 0.05 + rng() * 0.025,
         hue: FISH_HUES[i % FISH_HUES.length], wag: rng() * 6.28, hooked: false,
       });
     }
     this.bubbles = [];
     this.weeds = Array.from({ length: 7 }, (_, i) => ({ x: 0.06 + i * 0.15 + rng() * 0.05, h: 0.07 + rng() * 0.09, p: rng() * 6.28 }));
-    this.setCue(hint ? (mode === 'drop' ? 'tap' : 'drag') : null);
+    this.setCue(hint ? (mode === 'drop' ? 'tap' : 'shape') : null);
     this.verdict.classList.add('hidden');
     this.node.classList.remove('hidden', 'won', 'lost', 'gold');
     this.node.classList.toggle('gold', mode === 'gold');
@@ -161,26 +170,52 @@ export class Fishing {
   }
 
   /** Button or key: drops the line in the games that have a drop. */
-  tap() { return this.mode === 'steer' ? false : this.dropLine(); }
+  tap() { return this.mode === 'drop' ? this.dropLine() : false; }
 
   press() {
     if (!this.active) return;
     this.held = true;
     if (this.mode === 'drop') this.dropLine();
-    else if (this.mode === 'gold' && this.phase === 'swing' && this.hint) this.setCue('release');
   }
 
-  /** dx: finger travel as a fraction of the pond's width. */
-  drag(dx) {
-    if (!this.active || this.mode === 'drop') return;
+  /** dx, dy: finger travel as a fraction of the pond's width and height. */
+  drag(dx, dy = 0) {
+    if (!this.active || this.mode === 'drop' || this.phase !== 'play' || this.stun > 0) return;
     this.targetX = Math.max(0.05, Math.min(0.95, this.targetX + dx));
-    if (this.mode === 'steer' && Math.abs(dx) > 0) this.setCue(null);
+    this.targetY = Math.max(SURFACE - 0.04, Math.min(BED - 0.03, this.targetY + dy));
+    this.moved += Math.abs(dx) + Math.abs(dy);
+    if (this.moved > 0.25) this.setCue(null); // they have got it
   }
 
-  release() {
-    if (!this.active || !this.held) return;
-    this.held = false;
-    if (this.mode === 'gold') this.dropLine();
+  release() { this.held = false; }
+
+  /** The drag games: the hook goes where the finger sends it, at its own pace. */
+  updateDrag(dt) {
+    const { hook, ball } = this;
+    if (this.t >= this.limit) { this.finish('miss'); return; }
+    if (this.stun > 0) {
+      // Knocked by a fish: the hook shoots back to the top
+      this.stun -= dt;
+      hook.y = Math.max(SURFACE - 0.04, hook.y - 1.6 * dt);
+      this.targetX = hook.x; this.targetY = hook.y;
+    } else {
+      const max = (this.carry ? 0.6 : 0.85) * dt; // a loaded hook is slower
+      hook.x += Math.max(-max, Math.min(max, this.targetX - hook.x));
+      hook.y += Math.max(-max, Math.min(max, this.targetY - hook.y));
+      const fish = this.fish.find((f) => Math.abs(f.x - hook.x) < f.size * 0.95 && Math.abs(f.y - hook.y) < f.size * 0.6);
+      if (fish) {
+        this.stun = 0.5;
+        if (this.carry) { this.carry = null; this.ballX0 = hook.x; this.ballPhase = -this.t * this.wanderRate; }
+        this.sounds.bump?.();
+      } else if (!this.carry && Math.abs(hook.x - ball.x) < this.catchR * 0.75 && Math.abs(hook.y - ball.y) < 0.055) {
+        this.carry = 'ball';
+        this.sounds.hooked?.();
+      }
+    }
+    if (this.carry) {
+      ball.x = hook.x; ball.y = hook.y + 0.035;
+      if (hook.y <= SURFACE) this.finish(this.mode === 'gold' ? 'gold' : 'ball');
+    }
   }
 
   finish(result) {
@@ -202,8 +237,14 @@ export class Fishing {
 
     // The ball sinks, wandering a little, until something has it
     if (this.carry !== 'ball' && this.phase !== 'done') {
-      const f = Math.min(1, this.t / this.sinkFor);
-      ball.y = SURFACE + 0.08 + (BED - BALL_R - SURFACE - 0.08) * f;
+      if (this.mode === 'drop') {
+        const f = Math.min(1, this.t / this.sinkFor);
+        ball.y = SURFACE + 0.08 + (BED - BALL_R - SURFACE - 0.08) * f;
+      } else {
+        // Loose in a drag game: it sinks to where it rests (gold bobs there)
+        const rest = this.restY + (this.mode === 'gold' ? Math.sin(this.t * 1.7) * 0.1 : 0);
+        ball.y = Math.min(rest, ball.y + 0.3 * dt);
+      }
       ball.x = Math.max(0.08, Math.min(0.92, this.ballX0 + Math.sin(this.t * this.wanderRate + this.ballPhase) * this.wander));
       if (Math.random() < dt * 5) this.bubbles.push({ x: ball.x, y: ball.y - BALL_R, r: 0.006 + Math.random() * 0.008, v: 0.12 + Math.random() * 0.1 });
     }
@@ -217,25 +258,18 @@ export class Fishing {
       if (f.x < -0.15) f.x = 1.15;
     }
 
-    // Dragged hooks chase the finger at a limited pace, so steering takes thought
-    const chase = () => {
-      const d = this.targetX - hook.x, max = 1.1 * dt;
-      hook.x += Math.max(-max, Math.min(max, d));
-    };
-    if (this.phase === 'swing') {
+    if (this.phase === 'play') {
+      this.updateDrag(dt);
+    } else if (this.phase === 'swing') {
       hook.y = SURFACE - 0.04;
-      if (this.mode === 'drop') hook.x = 0.5 + Math.sin(this.t * this.sweep + this.hookPhase) * 0.4;
-      else chase();
-      // steer: the line goes down by itself after a moment to look
-      if (this.mode === 'steer' && this.t > 0.9) { this.phase = 'drop'; this.sounds.drop?.(); }
+      hook.x = 0.5 + Math.sin(this.t * this.sweep + this.hookPhase) * 0.4;
       // Never dropped: the ball is on the bottom and gone
       if (this.t >= this.sinkFor + 0.3) this.finish('miss');
     } else if (this.phase === 'drop') {
-      if (this.mode === 'steer') chase();
       // Swept test: whatever the hook passed through this step counts, so a
       // slow frame cannot carry it straight past the ball
       const from = hook.y - 0.03;
-      hook.y += (this.mode === 'steer' ? 0.34 : 1.5) * dt;
+      hook.y += 1.5 * dt;
       const reached = (y) => y >= from && y <= hook.y + 0.03;
       const fish = this.fish
         .filter((f) => !f.hooked && Math.abs(f.x - hook.x) < f.size * 0.9 && reached(f.y))
@@ -251,14 +285,14 @@ export class Fishing {
         this.carry = 'ball';
         this.phase = 'reel';
         this.sounds.hooked?.();
-      } else if (hook.y >= BED - 0.02 || (this.mode === 'steer' && hook.y > ball.y + 0.07)) {
+      } else if (hook.y >= BED - 0.02) {
         this.phase = 'reel';
       }
     } else if (this.phase === 'reel') {
       hook.y -= 1.1 * dt;
       if (this.carry === 'ball') { ball.x += (hook.x - ball.x) * Math.min(1, dt * 14); ball.y = hook.y + 0.035; }
       else if (this.carry) { this.carry.x = hook.x; this.carry.y = hook.y + 0.04; }
-      if (hook.y <= SURFACE - 0.02) this.finish(this.carry === 'ball' ? (this.mode === 'gold' ? 'gold' : 'ball') : this.carry ? 'fish' : 'miss');
+      if (hook.y <= SURFACE - 0.02) this.finish(this.carry === 'ball' ? 'ball' : this.carry ? 'fish' : 'miss');
     } else if (this.phase === 'done' && this.t - this.endT > 1.0) {
       const { result, onDone } = this;
       this.stop();
@@ -343,7 +377,7 @@ export class Fishing {
 
     // The ball, with a ring showing how close is close enough
     const bx = this.ball.x * W, by = this.ball.y * H;
-    if (this.phase === 'swing' || this.phase === 'drop') {
+    if (this.phase === 'swing' || this.phase === 'drop' || (this.phase === 'play' && !this.carry)) {
       ctx.strokeStyle = 'rgba(255,255,255,0.5)';
       ctx.lineWidth = 0.006 * u;
       ctx.beginPath(); ctx.ellipse(bx, by, this.catchR * W, BALL_R * 1.5 * u, 0, 0, 6.3); ctx.stroke();
@@ -379,8 +413,8 @@ export class Fishing {
     ctx.beginPath(); ctx.arc(hx - 0.022 * u, hy, 0.022 * u, 0, Math.PI * 0.95); ctx.stroke();
 
     // Time left: the bar along the bottom drains as the ball sinks
-    if (this.phase === 'swing') {
-      const left = Math.max(0, 1 - this.t / this.sinkFor);
+    if (this.phase === 'swing' || this.phase === 'play') {
+      const left = Math.max(0, 1 - this.t / (this.phase === 'play' ? this.limit : this.sinkFor));
       ctx.fillStyle = 'rgba(0,0,0,0.3)';
       ctx.fillRect(0, H - 0.02 * u, W, 0.02 * u);
       ctx.fillStyle = left < 0.3 ? '#ff5a3c' : '#ffd23f';
