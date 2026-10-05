@@ -218,4 +218,12 @@ export class ClubRig {
   }
 
   hide() { this.group.visible = false; }
+
+  /** Where the hands are: the point the club swings about. Same maths as pose(). */
+  static pivot(ball, dirX, dirZ, kind, size, out) {
+    const heel = (kind === 'putter' ? 0.065 : 0.15) * size;
+    const tipX = ball.x - dirX * HEAD_BACK * size + dirZ * heel;
+    const tipZ = ball.z - dirZ * HEAD_BACK * size - dirX * heel;
+    return out.set(tipX + dirZ * HANDS_IN * size, ball.y - 0.05 + HANDS_UP * size, tipZ - dirX * HANDS_IN * size);
+  }
 }

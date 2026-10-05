@@ -26,6 +26,10 @@ import { Hud, scoreName } from './ui/hud.js';
 import { Fishing } from './ui/fishing.js';
 import { CookHud } from './ui/cookHud.js';
 import { Grill } from './render/grill.js';
+import { Camper, GRIP } from './render/camper.js';
+import { buildCampsite } from './render/campsite.js';
+import { CamperUi } from './ui/camperUi.js';
+import { loadCamp, bump } from './core/camp.js';
 import { Audio } from './audio.js';
 import { Music } from './music.js';
 
@@ -33,6 +37,7 @@ const SAVE_KEY = 'threewood.save.v2';
 const BEST_KEY = 'threewood.best.v2';
 const HINT_KEY = 'threewood.hints.v2';
 const DAILY_KEY = 'threewood.daily.v1';
+const CAMP_KEY = 'threewood.camp.v1';
 
 /** Everyone gets the same course each day. */
 function dailySeed() {
@@ -84,6 +89,16 @@ export class Game {
     });
     this.fishing = new Fishing(this.hud.root, this.hud.layer);
     this.grill = new Grill(this.scene);
+    // The player's camper, the things they have earned, and somewhere to sit
+    this.camp = loadCamp(store.get(CAMP_KEY));
+    this.camper = new Camper(this.camp.look);
+    this.camper.group.visible = false;
+    this.campsite = buildCampsite();
+    this.campsite.visible = false;
+    this.scene.add(this.camper.group, this.campsite);
+    this.camperUi = new CamperUi(this.hud.root, this.hud.layer);
+    this.newOutfits = [];
+    this._pivot = new THREE.Vector3();
     this.cookHud = new CookHud(this.hud.root, this.hud.layer, () => this.eatFish());
     this.initBall();
     this.initInput();
@@ -214,6 +229,9 @@ export class Game {
         if (drag.moved > 14) this.hud.demo(null); // they have got it
       } else if (this.state === 'flight' && !this.paused) {
         this.afterTouch(dx, e.clientY - prevY);
+      } else if (this.state === 'creator') {
+        // Turn the camper round to look at the back of the outfit
+        this.camper.group.rotation.y += dx * 0.012;
       } else if (this.state === 'cook') {
         this.grill.turn(dx / Math.max(320, Math.min(window.innerWidth, 900)));
         if (this.grill.spin > 0.3) this.cookHud.hideCue();
@@ -262,8 +280,7 @@ export class Game {
   // ===========================================================================
 
   showTitle() {
-    this.state = 'title';
-    this.music.setScene('title');
+    this.setState('title');
     this.round = null;
     this.hud.setPlayVisible(false);
     this.loadWorld(designHole(this.seed, 1));
@@ -286,6 +303,7 @@ export class Game {
     this.audio.tap();
     if (choice === 'fishing') { this.practiceFishing(() => this.showTitle()); return; }
     if (choice === 'grill') { this.startCooking(() => this.showTitle()); return; }
+    if (choice === 'camper') { this.openCreator(); return; }
     const saved = store.get(SAVE_KEY);
     if (choice === 'continue' && saved) {
       this.seed = saved.seed;
@@ -430,7 +448,8 @@ export class Game {
 
   setState(state) {
     if (state !== 'fishing' && this.fishing?.active) this.fishing.stop();
-    if (state !== 'cook' && this.grill?.active) { this.grill.stop(); this.cookHud.hide(); }
+    if (state !== 'cook' && state !== 'summary' && this.grill?.active) { this.grill.stop(); this.cookHud.hide(); }
+    if (state !== 'summary' && this.campsite) { this.campsite.visible = false; this.camperUi.hidePoses(); }
     this.state = state;
     this.stateTime = 0;
     this.music.setScene(state);
@@ -452,7 +471,9 @@ export class Game {
     const { ball } = this;
     // Drawn large enough to read from the tee camera
     const camDist = Math.hypot(this.camera.position.x - ball.x, this.camera.position.y - ball.y, this.camera.position.z - ball.z);
-    const size = Math.max(1.15, Math.min(2.3, camDist / 4.6));
+    // (smaller than it once was: there is a camper holding it now, and they
+    // have to fit on a phone screen beside the ball)
+    const size = Math.max(1.15, Math.min(2.3, camDist / 4.6)) * 0.55;
     if (this.follow) {
       // Through the ball and up, then fade away
       const f = this.follow;
@@ -488,7 +509,149 @@ export class Game {
       }
     }
     this.clubSize = size;
+    this.clubTheta = theta;
+    // The club arrives with the camper: nothing floats at the ball while they walk up
+    if (this.walkIn) { this.clubRig.hide(); return; }
     this.clubRig.pose(ball, dirX, dirZ, theta, this.clubKind(), size, 1);
+  }
+
+  // ===========================================================================
+  // The camper
+  // ===========================================================================
+
+  /** Count something toward the outfits; announce any that it earns. */
+  earn(stat, by = 1) {
+    const got = bump(this.camp, stat, by);
+    store.set(CAMP_KEY, this.camp);
+    for (const fit of got) {
+      this.newOutfits.push(fit.name);
+      this.hud.callout(`NEW OUTFIT · ${fit.name.toUpperCase()}`, 'gold small');
+      this.audio.reward(6);
+    }
+  }
+
+  /** Where the camper stands to hold the club at the ball. */
+  addressSpot() {
+    const { ball, world } = this;
+    const dirX = Math.cos(this.aimAngle), dirZ = Math.sin(this.aimAngle);
+    const p = ClubRig.pivot(ball, dirX, dirZ, this.clubKind(), this.clubSize || 1.3, this._pivot);
+    // The golfer's side of the ball, facing it
+    const nx = dirZ, nz = -dirX;
+    let scale = (p.y - world.heightAt(p.x, p.z)) / GRIP.y, x = p.x, z = p.z, y = 0;
+    for (let i = 0; i < 2; i++) {
+      x = p.x + nx * GRIP.z * scale; z = p.z + nz * GRIP.z * scale;
+      y = world.heightAt(x, z);
+      scale = Math.max(1.2, Math.min(7, (p.y - y) / GRIP.y));
+    }
+    return { x, y, z, scale, yaw: Math.atan2(-nx, -nz), dirX, dirZ, nx, nz };
+  }
+
+  /** Stand a camper at a point given in another object's local space. */
+  placeCamper(parent, lx, lz, yaw, scale, lift = 0) {
+    const g = this.camper.group;
+    parent.updateMatrixWorld();
+    const v = this._pivot.set(lx, 0, lz).applyMatrix4(parent.matrixWorld);
+    g.position.set(v.x, this.world.heightAt(v.x, v.z) + lift, v.z);
+    g.rotation.y = yaw + parent.rotation.y;
+    g.scale.setScalar(scale);
+  }
+
+  updateCamper(dt) {
+    const c = this.camper, g = c.group, { world, ball } = this;
+    const s = this.state;
+    let pose = 'idle', twist = 0, show = true;
+    if (s === 'creator') {
+      pose = 'idle';
+    } else if (s === 'cook' || s === 'summary') {
+      pose = this.campPose || 'warm';
+    } else if (!this.round || s === 'title' || s === 'intro' || s === 'fishing') {
+      show = false;
+    } else if (s === 'aim' || s === 'swing') {
+      const spot = this.addressSpot();
+      const w = this.walkIn;
+      if (w && s === 'aim' && w.t < w.dur) {
+        if (w.x === undefined) {
+          // Walk in from behind the ball, past the camera
+          w.x = spot.x - spot.dirX * 2.6 * spot.scale + spot.nx * 0.4 * spot.scale;
+          w.z = spot.z - spot.dirZ * 2.6 * spot.scale + spot.nz * 0.4 * spot.scale;
+        }
+        w.t += dt;
+        const k = Math.min(1, w.t / w.dur);
+        const x = w.x + (spot.x - w.x) * k, z = w.z + (spot.z - w.z) * k;
+        g.position.set(x, world.heightAt(x, z), z);
+        g.rotation.y = Math.atan2(spot.x - w.x, spot.z - w.z);
+        g.scale.setScalar(spot.scale);
+        pose = 'walk';
+      } else {
+        this.walkIn = null;
+        g.position.set(spot.x, spot.y, spot.z);
+        g.rotation.y = spot.yaw;
+        g.scale.setScalar(spot.scale);
+        pose = 'address';
+        twist = Math.max(-1, Math.min(1, (this.clubTheta || 0) / 2.2));
+      }
+    } else if (s === 'flight' || s === 'settle') {
+      // Hold the finish, then watch it go
+      if (this.follow) { pose = 'address'; twist = 1; }
+    } else if (s === 'holed' || s === 'result') {
+      if (!this.cheerSpot) {
+        const a = (this.celebrateAngle || 0) + 0.75;
+        const x = world.cup.x + Math.cos(a) * 2.1, z = world.cup.z + Math.sin(a) * 2.1;
+        this.cheerSpot = { x, z };
+        g.position.set(x, world.heightAt(x, z), z);
+        g.scale.setScalar(1.9);
+      }
+      g.rotation.y = Math.atan2(this.camera.position.x - g.position.x, this.camera.position.z - g.position.z);
+      pose = this.strokes <= world.spec.par ? 'cheer' : 'wave';
+    }
+    g.visible = show;
+    if (show) c.update(dt, pose, { twist });
+  }
+
+  /** The camper creator: build your golfer, try on what you have earned. */
+  openCreator() {
+    const { world } = this;
+    const spot = Grill.place(world, this.scenery.placed);
+    const y = world.heightAt(spot.x, spot.z);
+    this.creatorView = { x: spot.x, y, z: spot.z, angle: Math.atan2(world.cup.z - spot.z, world.cup.x - spot.x) };
+    this.hud.clearLayer();
+    this.setState('creator');
+    const g = this.camper.group;
+    g.position.set(spot.x, y, spot.z);
+    g.scale.setScalar(1.75);
+    g.rotation.y = Math.atan2(Math.cos(this.creatorView.angle), Math.sin(this.creatorView.angle));
+    this.camper.setLook(this.camp.look);
+    this.camperUi.open(this.camp, (look) => this.camper.setLook(look), (look) => {
+      this.camp.look = look;
+      this.camp.made = true;
+      store.set(CAMP_KEY, this.camp);
+      this.camper.setLook(look);
+      this.showTitle();
+    });
+  }
+
+  /** The end of the round: pitch camp by the last green and sit by the fire. */
+  pitchCamp() {
+    const { world } = this;
+    const spot = Grill.place(world, this.scenery.placed);
+    const y = world.heightAt(spot.x, spot.z);
+    const view = Math.atan2(world.cup.z - spot.z, world.cup.x - spot.x);
+    const facing = Math.atan2(-Math.cos(view), -Math.sin(view));
+    this.campView = { x: spot.x, y, z: spot.z, angle: view };
+    this.grill.start({ x: spot.x, y, z: spot.z, facing, fish: false });
+    this.campsite.position.set(spot.x, y, spot.z);
+    this.campsite.rotation.y = facing + Math.PI; // its front faces the camera
+    this.campsite.visible = true;
+    this.setCampPose('sit');
+  }
+
+  setCampPose(pose) {
+    const seated = pose === 'sit' || pose === 'warm';
+    // On the log they perch, knees bent, rather than sit flat on the ground
+    this.campPose = pose === 'sit' ? 'perch' : pose === 'warm' ? 'perchWarm' : pose;
+    const at = this.campsite.userData[seated ? 'seat' : 'stand'];
+    const scale = 1.75;
+    this.placeCamper(this.campsite, at.x, at.z, at.yaw, scale, seated ? at.y - 0.45 * scale : 0);
   }
 
   beginAim() {
@@ -525,6 +688,8 @@ export class Game {
     this.updateScoreHud();
     this.rig.cut();
     this.ballScale = 1.4;
+    this.walkIn = { t: 0, dur: 1.0 };
+    this.cheerSpot = null;
     this.showHint();
   }
 
@@ -656,6 +821,7 @@ export class Game {
     if (this.state === 'intro') { if (this.stateTime > 0.5) this.endIntro(); return; }
     if (this.state === 'flight') { this.fastForward = true; return; }
     if (this.state === 'aim') {
+      this.walkIn = null; // swinging already: the camper is at the ball
       this.coachHeld = null;
       if (this.planDirty) this.updatePlan();
       if (this.putting) {
@@ -1026,6 +1192,7 @@ export class Game {
         if (result === 'gold') {
           // The golden ball: no stroke this time, and the last two are refunded
           this.round.gold = (this.round.gold || 0) + 1;
+          this.earn('gold');
           this.round.stats.fished = (this.round.stats.fished || 0) + 1;
           this.hud.callout('GOLDEN BALL!', 'gold');
           this.hud.callout('3 STROKES SAVED', 'gold small');
@@ -1043,6 +1210,7 @@ export class Game {
           if (result === 'fish') {
             // Dinner: it goes on the fire once the hole is finished
             this.round.fish = (this.round.fish || 0) + 1;
+            this.earn('fish');
             this.hud.callout('A FISH!', 'small');
             this.award('Caught a fish', 50, true);
           }
@@ -1119,6 +1287,7 @@ export class Game {
         this.holeLog.longestDrive = Math.round(carried);
         if (surface === 'fairway') {
           this.holeLog.fairway = true;
+          this.earn('fairways');
           round.stats.fairways += 1;
           this.hud.callout('FAIRWAY!', '');
           this.award('Fairway hit', 100, true);
@@ -1218,6 +1387,8 @@ export class Game {
       facing: Math.atan2(-Math.cos(view), -Math.sin(view)),
       level: this.assists?.level ?? 0.3,
     });
+    this.campPose = 'warm';
+    this.placeCamper(this.grill.group, 1.3, -0.35, Math.atan2(-1.3, 0.35), 1.6);
     this.cookHud.show(this.hints.cook < 3);
     this.cookHud.update(this.grill);
     this.audio.whoosh();
@@ -1236,7 +1407,7 @@ export class Game {
     const scoring = !!this.round;
     if (grade === 'perfect') {
       this.hud.callout('PERFECT YAKIZAKANA!', 'gold');
-      if (scoring) this.award('Perfect yakizakana', 600, true);
+      if (scoring) { this.award('Perfect yakizakana', 600, true); this.earn('perfectGrill'); }
       this.audio.fanfare(2);
     } else if (grade === 'cooked') {
       this.hud.callout('TASTY!', '');
@@ -1265,6 +1436,8 @@ export class Game {
     const par = world.spec.par;
     const log = this.holeLog;
     log.strokes = this.strokes; log.putts = this.putts;
+    this.earn('holes');
+    if (log.holed && this.strokes < par) this.earn('birdies');
     const won = !!this.challenge.test(log);
     if (won) {
       this.award(`★ ${this.challenge.text}`, this.challenge.points);
@@ -1327,10 +1500,19 @@ export class Game {
     this.wakeLock?.release?.().catch(() => {});
     this.setState('summary');
     this.audio.fanfare(total <= 0 ? 3 : 1);
+    this.earn('rounds');
+    this.hud.setPlayVisible(false);
+    this.pitchCamp();
     const card = this.cardData();
     card.holes.forEach((h) => { h.current = false; });
-    this.hud.showSummary({
-      total, par, strokes, points: round.points, best, seed: round.seed, card,
+    const outfits = this.newOutfits;
+    this.newOutfits = [];
+    const showCard = () => this.hud.showSummary({
+      total, par, strokes, points: round.points, best, seed: round.seed, card, outfits,
+      onCamp: () => {
+        this.hud.clearLayer();
+        this.camperUi.showPoses((pose) => this.setCampPose(pose), () => { this.setCampPose('sit'); showCard(); });
+      },
       stats: [
         { label: 'FAIRWAYS', value: `${st.fairways}/${st.fairwayChances}` },
         { label: 'GREENS IN REG', value: `${st.gir}/${round.holes.length}` },
@@ -1355,6 +1537,7 @@ export class Game {
         } catch { /* cancelled */ }
       },
     });
+    showCard();
   }
 
   endIntro() {
@@ -1456,6 +1639,19 @@ export class Game {
     const { ball, world } = this;
 
     switch (this.state) {
+      case 'creator': {
+        const v = this.creatorView;
+        this.rig.orbit(v.x, v.y + 0.62, v.z, 2.9, 0.55, v.angle);
+        break;
+      }
+      case 'summary': {
+        const v = this.campView;
+        if (v) {
+          this.rig.orbit(v.x, v.y + 0.5, v.z, 5.4, 1.2, v.angle + Math.sin(this.time * 0.25) * 0.22);
+          this.grill.update(dt);
+        }
+        break;
+      }
       case 'title': {
         const g = world.spec.green;
         this.rig.orbit(g.x, world.cup.y, g.z, 34, 11, this.time * 0.12);
@@ -1629,6 +1825,7 @@ export class Game {
     this.sun.position.set(fx + light.x * 260, light.y * 260, fz + light.z * 260);
 
     this.updateClub(dt);
+    this.updateCamper(dt);
     updateScenery(this.scenery, this.time, dt, this.sky);
     const onGreen = this.round && (this.putting || ball.surface === 'green') && this.state !== 'intro' && this.state !== 'title';
     updateFlag(this.scenery.flag, this.time, onGreen && this.state !== 'holed' && this.state !== 'result', camera);

@@ -396,6 +396,7 @@ export class Hud {
         </div>
         <div class="title-foot">${best ? `BEST ROUND ${vsPar(best.score)} · ★ ${best.points.toLocaleString()}<br>` : ''}COURSE ${seed}${sky ? `<br>${sky}` : ''}</div>
         <button class="music-toggle" data-a="music">${musicLabel(music)}</button>
+        <button class="music-toggle" data-a="camper">MY CAMPER</button>
         <button class="music-toggle" data-a="fishing">PRACTICE FISHING</button>
         <button class="music-toggle" data-a="grill">PRACTICE GRILL</button>
       </div>`);
@@ -443,7 +444,7 @@ export class Hud {
     this.layer.appendChild(node);
   }
 
-  showSummary({ total, par, strokes, points, stats, card, best, seed, onAgain, onShare }) {
+  showSummary({ total, par, strokes, points, stats, card, best, seed, outfits = [], onAgain, onShare, onCamp }) {
     this.clearLayer();
     const node = el('div', 'overlay dim', `
       <div class="card">
@@ -452,9 +453,12 @@ export class Hud {
         <div class="result-score">${strokes} strokes · par ${par} · ★ ${points.toLocaleString()}${best ? ' · <b class="gold">NEW BEST!</b>' : ''}</div>
         ${scorecardHtml(card)}
         <div class="stats">${stats.map((s) => `<div class="stat"><b>${s.value}</b><span>${s.label}</span></div>`).join('')}</div>
-        <button class="btn" data-a="again">NEW COURSE</button>
+        ${outfits.map((name) => `<div class="new-fit">NEW OUTFIT · ${name.toUpperCase()}</div>`).join('')}
+        <button class="btn" data-a="camp">SIT BY THE FIRE</button>
+        <button class="btn ghost" data-a="again">NEW COURSE</button>
         <button class="btn ghost" data-a="share">CHALLENGE A FRIEND · ${seed}</button>
       </div>`);
+    node.querySelector('[data-a="camp"]').addEventListener('click', onCamp);
     node.querySelector('[data-a="again"]').addEventListener('click', onAgain);
     node.querySelector('[data-a="share"]').addEventListener('click', (e) => onShare(e.currentTarget));
     this.layer.appendChild(node);

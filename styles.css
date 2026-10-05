@@ -626,3 +626,38 @@ button { font: inherit; color: inherit; border: 0; background: none; padding: 0;
 .cook-eat.ready { background: #7bd152; }
 .cook-eat.best { background: var(--gold); animation: pulse 0.7s infinite; }
 .cook.over .cook-eat { display: none; }
+
+/* ---- Camper creator and campfire poses ------------------------------------------ */
+.camper-ui { position: absolute; inset: 0; pointer-events: none !important; display: flex; align-items: flex-end; justify-content: center; }
+.camper-ui .panel {
+  pointer-events: auto; width: min(430px, 100%); margin: 0 10px calc(var(--sab) + 10px);
+  padding: 12px 14px; border-radius: 22px; background: var(--panel-solid);
+  box-shadow: 0 8px 0 rgba(0, 0, 0, 0.25), 0 20px 50px rgba(0, 0, 0, 0.4);
+}
+.camper-ui .row { display: flex; align-items: center; gap: 10px; margin: 7px 0; }
+.camper-ui .row > span { flex: none; width: 58px; font-size: 11px; font-weight: 700; letter-spacing: 1px; opacity: 0.7; }
+.camper-ui button { font: inherit; color: var(--cream); cursor: pointer; }
+.camper-ui .seg { gap: 8px; }
+.camper-ui .seg button { flex: 1; padding: 9px; border-radius: 12px; background: rgba(255, 255, 255, 0.1); font-weight: 700; letter-spacing: 1px; border: 2px solid transparent; }
+.camper-ui .seg button.on { background: var(--gold); color: #4a3200; }
+.camper-ui .sws { display: flex; gap: 8px; flex-wrap: wrap; }
+.camper-ui .sw { width: 30px; height: 30px; border-radius: 50%; border: 3px solid rgba(255, 255, 255, 0.25); }
+.camper-ui .sw.on { border-color: var(--gold); transform: scale(1.15); }
+.camper-ui .step { flex: 1; display: flex; align-items: center; gap: 6px; }
+.camper-ui .step b { flex: 1; text-align: center; font-size: 15px; }
+.camper-ui .step button { width: 40px; height: 36px; border-radius: 12px; background: rgba(255, 255, 255, 0.12); font-size: 20px; font-weight: 700; border: 0; }
+.camper-ui .lock { min-height: 18px; font-size: 12px; text-align: center; color: var(--gold); }
+.camper-ui .lock i { display: inline-block; width: 11px; height: 9px; margin-right: 6px; border-radius: 2px; background: var(--gold); box-shadow: 0 -6px 0 -3px var(--panel-solid), 0 -6px 0 -1px var(--gold); }
+.camper-ui .name { flex: 1; min-width: 0; padding: 8px 10px; border-radius: 12px; border: 0; background: rgba(255, 255, 255, 0.12); color: var(--cream); font: inherit; font-size: 15px; font-weight: 700; }
+.camper-ui .btn { margin-top: 8px; }
+.card .new-fit { margin-top: 8px; padding: 7px; border-radius: 10px; background: rgba(255, 210, 63, 0.16); color: var(--gold); font-size: 13px; font-weight: 700; letter-spacing: 1px; }
+.pose-bar {
+  position: absolute; left: 0; right: 0; bottom: calc(var(--sab) + 14px);
+  display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; padding: 0 10px;
+}
+.pose-bar button {
+  pointer-events: auto; font: inherit; font-size: 13px; font-weight: 700; letter-spacing: 1px; cursor: pointer;
+  padding: 11px 14px; border-radius: 14px; border: 0; background: rgba(16, 38, 26, 0.75); color: var(--cream);
+}
+.pose-bar button.on { background: var(--gold); color: #4a3200; }
+.pose-bar .back { background: rgba(255, 255, 255, 0.25); }

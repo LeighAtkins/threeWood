@@ -89,11 +89,13 @@ export class Grill {
       const post = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.028, 0.95, 5), stick);
       post.position.set(side * 0.68, 0.47, 0);
       g.add(post);
+      (this.rack ||= []).push(post);
     }
     // The spit: everything on it turns about its long (x) axis
     this.spit = new THREE.Group();
     this.spit.position.y = 0.92;
     g.add(this.spit);
+    this.rack.push(this.spit);
     const skewer = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, 1.5, 5), lambert(0xd8c9a8));
     skewer.rotation.z = Math.PI / 2;
     this.spit.add(skewer);
@@ -157,7 +159,10 @@ export class Grill {
    * @param {number} o.facing       yaw so the skewer lies across the camera's view
    * @param {number} o.level        0..1: hotter fire, more flare-ups
    */
-  start({ x, y, z, facing = 0, level = 0, rng = Math.random }) {
+  start({ x, y, z, facing = 0, level = 0, rng = Math.random, fish = true }) {
+    // fish: false is just a campfire to sit by — no spit, nothing cooking
+    this.cooking = fish;
+    for (const part of this.rack) part.visible = fish;
     this.group.position.set(x, y, z);
     this.group.rotation.y = facing;
     this.group.visible = true;
@@ -208,7 +213,9 @@ export class Grill {
     if (!this.active) return null;
     this.t += dt;
     let burnt = null;
-    if (!this.result) {
+    if (!this.cooking) {
+      this.flare += (0 - this.flare) * Math.min(1, dt * 4);
+    } else if (!this.result) {
       // Flare-ups: the fire roars for a second and cooks much faster
       this.nextFlare -= dt;
       if (this.nextFlare <= 0) { this.flareLeft = 1.1; this.nextFlare = this.flareEvery + this.rng() * 1.6; }
