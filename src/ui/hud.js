@@ -1,4 +1,5 @@
 import { SWING, markerToPercent } from '../core/swing.js';
+import { glyph, pips, tipIcon } from './glyphs.js';
 import { blobRadius, greenDistance } from '../course/shapes.js';
 
 /**
@@ -156,7 +157,7 @@ export class Hud {
 
   setPlayVisible(v) {
     for (const node of this.playEls) node.classList.toggle('hidden', !v);
-    if (!v) { this.meter.classList.add('hidden'); this.hintEl.classList.add('hidden'); }
+    if (!v) { this.meter.classList.add('hidden'); this.hintEl.classList.add('hidden'); this.demo(null); }
   }
 
   setControlsVisible(v) { this.bottom.classList.toggle('hidden', !v); }
@@ -215,8 +216,29 @@ export class Hud {
     this.pinTag.style.transform = `translate(${x}px, ${y}px) translate(-50%, -100%)`;
   }
 
-  setSwingButton(label, sub, mode) {
-    this.swingBtn.innerHTML = sub ? `${label}<small>${sub}</small>` : label;
+  /**
+   * The button shows the gesture it wants next, as a picture:
+   *   swing / power / strike  tap (the dots count the three taps)
+   *   wait     hands off, the bar is filling itself
+   *   hold     press and keep pressing      release  let go now
+   *   tap      one tap (tap-tap putting)
+   */
+  setAction(kind) {
+    const faces = {
+      swing:   [glyph('tap') + pips(0), 'ready', 'Tap to swing'],
+      power:   [glyph('tap') + pips(1), 'go', 'Tap to set power'],
+      wait:    [glyph('wait') + pips(1), 'disabled', 'Wait'],
+      strike:  [glyph('tap') + pips(2), 'go', 'Tap to strike'],
+      hold:    [glyph('hold'), 'ready', 'Hold to putt'],
+      release: [glyph('release'), 'go', 'Let go'],
+      tap:     [glyph('tap'), 'go', 'Tap to putt'],
+    };
+    const [html, mode, label] = faces[kind];
+    if (this.actionKind !== kind) {
+      this.actionKind = kind;
+      this.swingBtn.innerHTML = html;
+      this.swingBtn.setAttribute('aria-label', label);
+    }
     this.swingBtn.classList.toggle('pulse', mode === 'ready');
     this.swingBtn.classList.toggle('go', mode === 'go');
     this.swingBtn.classList.toggle('disabled', mode === 'disabled');
@@ -278,18 +300,24 @@ export class Hud {
     this.marker.style.left = `${power}%`;
   }
 
-  setMeterCaption(text) { this.meterCaption.textContent = text || ''; }
+  /** Only ever a symbol now: 'ok' shows a tick (the putt line is good). */
+  setMeterCaption(mark) { this.meterCaption.innerHTML = mark === 'ok' ? '<span class="ok">✓</span>' : ''; }
 
-  /** A "TAP HERE" pointer sitting on the bar at pct (null hides it). */
-  setMeterFlag(pct, text) {
+  /**
+   * A gesture glyph standing on the bar exactly where the tap (or the
+   * release) belongs. kind: 'tap' | 'release'; now = do it this instant.
+   */
+  setMeterFlag(pct, kind = 'tap', now = false) {
     this.meterFlag.classList.toggle('hidden', pct == null);
     if (pct == null) return;
-    this.meterFlag.textContent = text;
+    if (this.flagKind !== kind) { this.flagKind = kind; this.meterFlag.innerHTML = glyph(kind); }
+    this.meterFlag.classList.toggle('now', now);
     this.meterFlag.style.left = `${pct}%`;
   }
 
   /** Highlight which of the three swing taps comes next (null hides). */
   setMeterSteps(current) {
+    current = null; // the button's dots count the taps now
     this.meterSteps.classList.toggle('hidden', current == null);
     [...this.meterSteps.children].forEach((node, i) => {
       node.classList.toggle('done', current != null && i + 1 < current);
@@ -315,6 +343,22 @@ export class Hud {
     if (!text) return;
     const html = sub ? `${text}<small>${sub}</small>` : text;
     if (this.carryHtml !== html) { this.carryHtml = html; this.carry.innerHTML = html; }
+  }
+
+  /**
+   * A ghost hand over the course showing a drag. kind: 'drag' | 'shape' |
+   * null; warn adds a symbol above it (a tree in the way).
+   */
+  demo(kind, { high = false, warn = '' } = {}) {
+    if (!this.demoEl) {
+      this.demoEl = el('div', 'demo hidden');
+      this.root.insertBefore(this.demoEl, this.layer);
+    }
+    const key = kind ? `${kind}|${warn}` : '';
+    this.demoEl.classList.toggle('hidden', !kind);
+    this.demoEl.classList.toggle('high', high);
+    if (kind && this.demoKey !== key) this.demoEl.innerHTML = `${warn ? `<span class="warn">${warn}</span>` : ''}${glyph(kind)}`;
+    this.demoKey = key;
   }
 
   hint(text, high = false) {
@@ -363,8 +407,8 @@ export class Hud {
         <div class="cond"><span class="pips">${dots}</span> ${wind >= 1 ? `· WIND ${wind} MPH` : '· CALM'}</div>
         <div class="blurb">${blurb}</div>
         ${challenge ? `<div class="quest">☆ ${challenge.text} <b>+${challenge.points}</b></div>` : ''}
-        ${tip ? `<div class="tip"><b>CADDIE</b> ${tip}</div>` : ''}
-        <div class="skip">TAP TO TEE OFF</div>
+        ${tip ? `<div class="tip">${tipIcon(tip.icon)}<span>${tip.text}</span></div>` : ''}
+        <div class="skip">${glyph('tap')}</div>
       </div>`);
     this.layer.appendChild(node);
   }
@@ -436,17 +480,15 @@ export class Hud {
 
   showHelp(onClose) {
     this.clearLayer();
+    const row = (pic, title, text) => `<div class="help-row"><div class="pic">${pic}</div><div><b>${title}</b><span>${text}</span></div></div>`;
     const node = el('div', 'overlay dim', `
-      <div class="card" style="text-align:left">
-        <h2 style="text-align:center">HOW TO PLAY</h2>
-        <p><b class="gold">Aim</b> — drag left or right anywhere on the course.</p>
-        <p><b class="gold">Swing</b> — three taps. <b>1</b> starts the club back. <b>2</b> sets power: tap in the dashed box (when the target is out of range the bar fills itself — just wait). <b>3</b> strikes: tap as the marker crosses the white line, the moment the club meets the ball. Early pulls it left, late pushes it right.</p>
-        <p><b class="gold">Shape it</b> — after a good strike, swipe while the ball is in the air: sideways bends it, down adds backspin, up lets it run.</p>
-        <p><b class="gold">Club</b> — the caddie picks one. Use ‹ › to change it.</p>
-        <p><b class="gold">Putt</b> — the white dots show which way the green falls. Drag to move the line, then hold the button and let go on the dashed mark (or tap once to start the bar and again to putt).</p>
-        <p><b class="gold">Wind</b> — the arrow shows where it blows. The aim line does not allow for it. You must.</p>
-        <p style="opacity:.7;font-size:13px">Keyboard: ←/→ aim · ↑/↓ club · Space swing</p>
-        <button class="btn" data-a="close">GOT IT</button>
+      <div class="card">
+        <h2>HOW TO PLAY</h2>
+        ${row(glyph('drag'), 'Aim', 'Drag left or right')}
+        ${row(glyph('tap') + pips(0), 'Swing', 'Tap 3 times: start, power, hit')}
+        ${row(glyph('shape'), 'Curve', 'Good hit? Swipe while it flies')}
+        ${row(glyph('hold'), 'Putt', 'Hold, then let go on the mark')}
+        <button class="btn" data-a="close">OK</button>
       </div>`);
     node.querySelector('[data-a="close"]').addEventListener('click', onClose);
     this.layer.appendChild(node);

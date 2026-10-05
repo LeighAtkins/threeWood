@@ -260,6 +260,95 @@ button { font: inherit; color: inherit; border: 0; background: none; padding: 0;
 .intro .tip b { display: block; font-size: 10px; letter-spacing: 2px; opacity: 0.6; }
 .card .missed { font-size: 13px; opacity: 0.7; margin-top: 6px; }
 
+/* ---- Gesture glyphs (ui/glyphs.js) ------------------------------------------------ */
+.glyph { position: relative; display: inline-block; width: 52px; height: 52px; vertical-align: middle; }
+.glyph svg, .glyph i { position: absolute; }
+.g-hand { inset: 0; width: 100%; height: 100%; filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.25)); }
+.g-arrow { width: 34%; height: 34%; }
+.g-pips { display: flex; gap: 5px; justify-content: center; margin-top: 2px; }
+.g-pips i { width: 9px; height: 9px; border-radius: 50%; background: rgba(18, 38, 26, 0.25); }
+.g-pips i.done { background: #1b7a3a; }
+.g-pips i.now { background: #12261a; transform: scale(1.35); }
+
+/* tap: the finger dips, a ring spreads from the fingertip */
+.g-tap .g-hand { animation: gTap 0.9s infinite; }
+.g-ripple { left: 50%; top: 12%; width: 46%; height: 46%; margin: -23% 0 0 -23%; border-radius: 50%; border: 3px solid #fff8ec; box-shadow: 0 0 0 1.5px #12261a; animation: gRipple 0.9s infinite; }
+@keyframes gTap { 0%, 55%, 100% { transform: translateY(-7%); } 25% { transform: translateY(7%); } }
+@keyframes gRipple { 0%, 20% { transform: scale(0.2); opacity: 0; } 30% { opacity: 1; } 75%, 100% { transform: scale(1.5); opacity: 0; } }
+
+/* hold: finger stays down while the ring fills, then lifts */
+.g-hold .g-hand { animation: gHold 2.2s infinite; }
+.g-timer { inset: -12%; width: 124%; height: 124%; transform: rotate(-90deg); }
+.g-timer circle { fill: none; stroke: #12261a; stroke-width: 4.5; stroke-linecap: round; stroke-dasharray: 120; animation: gTimer 2.2s infinite linear; }
+@keyframes gHold { 0%, 100% { transform: translateY(-9%); } 10%, 72% { transform: translateY(6%); } 86% { transform: translateY(-9%); } }
+@keyframes gTimer { 0%, 10% { stroke-dashoffset: 120; } 72% { stroke-dashoffset: 0; } 73%, 100% { stroke-dashoffset: 120; } }
+
+/* release: the finger comes away */
+.g-release .g-hand { animation: gRelease 0.75s infinite; }
+.g-release .g-arrow-up { left: 33%; top: -30%; animation: gUp 0.75s infinite; }
+@keyframes gRelease { 0%, 20% { transform: translateY(8%); } 70%, 100% { transform: translateY(-10%); } }
+@keyframes gUp { 0%, 20% { opacity: 0; transform: translateY(40%); } 60%, 100% { opacity: 1; transform: translateY(0); } }
+
+/* drag: slide from side to side */
+.g-drag .g-hand, .g-shape .g-hand { animation: gDrag 1.5s infinite ease-in-out; }
+.g-arrow-left { left: -42%; top: 30%; transform: rotate(-90deg); }
+.g-arrow-right { right: -42%; top: 30%; transform: rotate(90deg); }
+.g-arrow-down { left: 33%; bottom: -38%; transform: rotate(180deg); }
+.g-shape .g-arrow-up { left: 33%; top: -38%; }
+@keyframes gDrag { 0%, 100% { transform: translateX(-22%); } 50% { transform: translateX(22%); } }
+
+/* wait: nothing to press */
+.g-spin { inset: 4%; width: 92%; height: 92%; animation: gSpin 1.1s infinite linear; }
+.g-spin circle { fill: none; stroke: #12261a; stroke-width: 5; stroke-linecap: round; stroke-dasharray: 60 60; opacity: 0.7; }
+.g-pause { left: 36%; top: 30%; width: 28%; height: 40%; border-left: 6px solid #12261a; border-right: 6px solid #12261a; opacity: 0.7; }
+@keyframes gSpin { to { transform: rotate(360deg); } }
+
+/* The button is a picture of what to do next */
+.swing-btn .glyph { width: 56px; height: 56px; display: block; margin: 0 auto; }
+.swing-btn small { margin-top: 1px; }
+.swing-btn.go .g-pips i { background: rgba(255, 255, 255, 0.35); }
+.swing-btn.go .g-pips i.done { background: #fff; }
+.swing-btn.go .g-pips i.now { background: #fff8ec; box-shadow: 0 0 0 2px #12261a; }
+
+/* On the meter: the glyph stands exactly where the tap belongs */
+.meter .flag { padding: 2px 5px; }
+.meter .flag .glyph { width: 26px; height: 26px; }
+.meter .flag.now { animation: flagNow 0.45s infinite; background: var(--gold); }
+.meter .flag.now::after { border-top-color: var(--gold); }
+@keyframes flagNow { 50% { transform: translate(-50%, -5px) scale(1.18); } }
+.meter .caption .ok { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: #1b9a4a; color: #fff; font-size: 17px; }
+
+/* Over the course: a ghost hand showing the drag */
+.demo {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  padding: 22px 46px; border-radius: 26px; background: rgba(16, 38, 26, 0.5);
+  animation: hintIn 0.3s;
+}
+.demo.high { top: calc(var(--sat) + 215px); }
+.demo .glyph { width: 66px; height: 66px; }
+.demo .warn { position: absolute; left: 50%; top: -18px; transform: translateX(-50%); font-size: 26px; }
+.intro .skip .glyph { width: 40px; height: 40px; }
+.intro .tip { display: flex; align-items: center; gap: 12px; text-align: left; }
+.intro .tip .glyph, .intro .tip .tip-pic { flex: none; width: 40px; height: 40px; }
+.intro .tip .tip-pic svg { width: 100%; height: 100%; }
+.intro .tip .tip-pic.stack { height: auto; }
+.intro .tip .tip-pic.stack .glyph { width: 34px; height: 34px; display: block; margin: 0 auto; }
+.intro .tip .g-pips i { width: 6px; height: 6px; }
+.help-row { display: flex; align-items: center; gap: 16px; padding: 10px 4px; border-bottom: 1px dashed rgba(255, 255, 255, 0.14); text-align: left; }
+.help-row .pic { flex: none; width: 96px; display: flex; align-items: center; justify-content: center; gap: 2px; }
+.help-row .pic .glyph { width: 40px; height: 40px; }
+.help-row .g-pips i { background: rgba(255, 255, 255, 0.3); }
+.help-row .g-pips i.now { background: #fff; }
+.help-row .g-timer circle { stroke: var(--gold); }
+.help-row b { display: block; color: var(--gold); font-size: 16px; }
+.help-row span { font-size: 13px; opacity: 0.85; }
+@media (orientation: landscape) and (max-height: 520px) {
+  .swing-btn .glyph { width: 46px; height: 46px; }
+  .demo { padding: 14px 40px; }
+  .demo .glyph { width: 50px; height: 50px; }
+  .help-row { padding: 5px 4px; }
+}
+
 /* ---- Callouts ----------------------------------------------------------------- */
 .callouts {
   position: absolute; left: 0; right: 0; top: 34%;

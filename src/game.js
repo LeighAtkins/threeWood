@@ -205,6 +205,7 @@ export class Game {
         const base = this.putting ? 0.0011 : 0.003;
         this.aimAngle += dx * base * (420 / Math.max(320, Math.min(window.innerWidth, 900)));
         this.planDirty = true;
+        if (drag.moved > 14) this.hud.demo(null); // they have got it
       } else if (this.state === 'flight' && !this.paused) {
         this.afterTouch(dx, e.clientY - prevY);
       }
@@ -552,11 +553,11 @@ export class Game {
     const lieText = this.onTee ? 'TEE' : penalty ? `${lie.name.toUpperCase()} −${penalty}%` : lie.name.toUpperCase();
     if (this.putting) {
       this.hud.setClub({ name: 'Putter', yards: `${feet(this.targetDist)} ft to hole`, lie: lieText, canChange: this.availableClubs().length > 1 });
-      this.hud.setSwingButton('HOLD', 'to putt', 'ready');
+      this.hud.setAction('hold');
     } else {
       const max = Math.round(distanceAt(this.club, 100, lie.speedFactor));
       this.hud.setClub({ name: this.club.name, yards: `${max}y max`, lie: lieText, lieBad: penalty > 0, canChange: true });
-      this.hud.setSwingButton('SWING', '', 'ready');
+      this.hud.setAction('swing');
     }
   }
 
@@ -579,11 +580,9 @@ export class Game {
       this.effects.showPutt(preview.points.slice(0, keep * 3), a.confirmLine && preview.holed);
       this.landing = null;
       this.hud.showPuttMeter(this.idealPct);
-      this.hud.setMeterCaption(
-        a.confirmLine
-          ? (preview.holed ? 'GOOD LINE! HOLD THE BUTTON, LET GO ON THE MARK' : 'DRAG ON THE GREEN TO MOVE THE LINE')
-          : 'READ THE DOTS · DRAG TO SET YOUR LINE');
-      this.hud.setMeterFlag(this.idealPct, 'LET GO HERE');
+      // A tick when the read is right (while that help lasts)
+      this.hud.setMeterCaption(a.confirmLine && preview.holed ? 'ok' : '');
+      this.hud.setMeterFlag(this.idealPct, 'release');
       this.hud.setMeterSteps(null);
     } else {
       const reach = distanceAt(this.club, 100, this.lie.speedFactor);
@@ -597,7 +596,7 @@ export class Game {
         this.blocked = preview.blocked;
         this.effects.aimArc.material.color.setHex(preview.blocked ? 0xff5a3c : 0xffffff);
         if (this.state === 'aim') {
-          if (preview.blocked) this.hud.hint('Tree in the way — aim around it');
+          if (preview.blocked) this.hud.demo('drag', { warn: '🌲' });
           else this.showHint();
         }
       }
@@ -612,9 +611,9 @@ export class Game {
 
   showHint() {
     if (this.putting) {
-      this.hud.hint(this.hints.putt < 3 ? 'Drag to line it up. Then HOLD the button and let go on the dashed mark' : null, true);
+      this.hud.demo(this.hints.putt < 3 ? 'drag' : null, { high: true });
     } else {
-      this.hud.hint(this.hints.swing < 3 ? 'Drag to aim · then 3 taps: start, power, strike' : null);
+      this.hud.demo(this.hints.swing < 3 ? 'drag' : null);
     }
   }
 
@@ -646,10 +645,10 @@ export class Game {
         this.puttPower = 0;
         this.puttDir = 1;
         this.setState('swing');
-        this.hud.setSwingButton('LET GO', 'on the mark', 'go');
-        this.hud.setMeterFlag(this.idealPct, 'LET GO HERE');
+        this.hud.setAction('release');
+        this.hud.setMeterFlag(this.idealPct, 'release');
         this.hud.setMeterSteps(null);
-        this.hud.hint(null);
+        this.hud.demo(null);
       } else {
         startSwing(this.swing);
         this.lockGrace = 0;
@@ -660,16 +659,16 @@ export class Game {
         this.hud.showSwingMeter(this.idealPower, this.coach ? 1 : 1 / this.assists.tight);
         this.hud.setMeterSteps(2);
         if (this.idealPower) {
-          this.hud.setMeterCaption('TAP TO SET POWER');
-          this.hud.setMeterFlag(markerToPercent(this.idealPower), 'TAP HERE');
-          this.hud.setSwingButton('POWER', 'tap', 'go');
+          this.hud.setMeterCaption('');
+          this.hud.setMeterFlag(markerToPercent(this.idealPower), 'tap');
+          this.hud.setAction('power');
         } else {
           // Out of range: the bar fills itself, no second tap needed
-          this.hud.setMeterCaption('FULL POWER — WAIT FOR IT…');
+          this.hud.setMeterCaption('');
           this.hud.setMeterFlag(null);
-          this.hud.setSwingButton('WAIT', 'filling', 'disabled');
+          this.hud.setAction('wait');
         }
-        this.hud.hint(null);
+        this.hud.demo(null);
         this.audio.tap();
       }
     } else if (this.state === 'swing') {
@@ -683,8 +682,8 @@ export class Game {
       // A quick tap rather than a hold: keep the bar running and let the
       // next tap play the stroke, so both habits work.
       this.puttLatched = true;
-      this.hud.setSwingButton('TAP', 'on the mark', 'go');
-      this.hud.setMeterFlag(this.idealPct, 'TAP HERE');
+      this.hud.setAction('tap');
+      this.hud.setMeterFlag(this.idealPct, 'tap');
       return;
     }
     this.releasePutt();
@@ -710,9 +709,9 @@ export class Game {
     if (event.type === 'powerLocked') {
       this.lockGrace = 0.2;
       this.audio.powerLock(event.power);
-      this.hud.setSwingButton('HIT!', 'on the line', 'go');
-      this.hud.setMeterCaption(event.auto ? 'MAX POWER! NOW TAP THE WHITE LINE' : 'NOW TAP THE WHITE LINE');
-      this.hud.setMeterFlag(markerToPercent(SWING.LINE), 'TAP HERE');
+      this.hud.setAction('strike');
+      this.hud.setMeterCaption('');
+      this.hud.setMeterFlag(markerToPercent(SWING.LINE), 'tap');
       this.hud.setMeterSteps(3);
     } else if (event.type === 'strike') {
       this.hitShot(event.timing);
@@ -737,7 +736,7 @@ export class Game {
     shot.replan = true;
     if (!shot.shaped) {
       shot.shaped = true;
-      this.hud.hint(null);
+      this.hud.demo(null);
       if (this.hints.spin < 4) { this.hints.spin += 1; store.set(HINT_KEY, this.hints); }
     }
   }
@@ -764,7 +763,7 @@ export class Game {
     this.round.stats.swings += 1;
     this.updateScoreHud(`SHOT ${this.strokes}`);
     this.hud.hideMeter();
-    this.hud.hint(null);
+    this.hud.demo(null);
     this.hud.setControlsVisible(false);
     this.effects.hideAim();
     this.effects.beads.hide();
@@ -808,7 +807,7 @@ export class Game {
     // A decent strike can be worked in the air
     this.shot.shapeable = strike.grade === 'pure' || strike.grade === 'good';
     if (this.shot.shapeable && this.shot.chase && this.hints.spin < 4) {
-      this.hud.hint('Swipe ↔ to bend it · ↕ for spin');
+      this.hud.demo('shape');
     }
 
     const pure = strike.grade === 'pure';
@@ -922,7 +921,7 @@ export class Game {
     const fx = this.effects;
     switch (e.type) {
       case 'land':
-        if (this.hints.spin < 4) this.hud.hint(null);
+        if (this.hints.spin < 4) this.hud.demo(null);
         fx.puff(e.x, e.y, e.z, e.surface, Math.min(1.6, e.speed / 18));
         this.audio.bounce(e.speed * 0.5, e.surface);
         break;
@@ -1293,8 +1292,7 @@ export class Game {
               this.puttPower = this.idealPct;
               if (!this.coachHeld) {
                 this.coachHeld = true;
-                this.hud.setMeterCaption('PERFECT PACE — LET GO NOW!');
-                this.hud.setMeterFlag(this.idealPct, this.puttLatched ? 'TAP NOW' : 'LET GO NOW');
+                this.hud.setMeterFlag(this.idealPct, this.puttLatched ? 'tap' : 'release', true);
               }
             }
             if (this.puttPower >= 100) { this.puttPower = 100; this.puttDir = -1; }
@@ -1314,8 +1312,7 @@ export class Game {
               sw.marker = atPower ? this.idealPower : SWING.LINE;
               if (this.coachHeld !== sw.phase) {
                 this.coachHeld = sw.phase;
-                this.hud.setMeterCaption(atPower ? 'THAT IS YOUR POWER — TAP NOW!' : 'CLUB MEETS BALL — TAP NOW!');
-                this.hud.setMeterFlag(markerToPercent(sw.marker), 'TAP NOW');
+                this.hud.setMeterFlag(markerToPercent(sw.marker), 'tap', true);
               }
             }
           }

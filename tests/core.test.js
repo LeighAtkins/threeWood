@@ -164,5 +164,5 @@ test('the round ramps: course and assists both tighten, and heat follows results
   const log = { ...newHoleLog(4), fairway: true };
   assert.equal(easy.test(log), true);
   assert.equal(hard.test(log), false);
-  assert.ok(caddieTip(0, 0).includes('Three taps'));
+  assert.equal(caddieTip(0, 0).icon, 'tap3');
 });

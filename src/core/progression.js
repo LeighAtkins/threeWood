@@ -74,18 +74,20 @@ export function difficultyPips(courseD, level) {
 
 // --- Caddie tips: one new idea per early hole --------------------------------
 
+// Short, plain words and a picture each: they must work for someone reading
+// in their second language. icon names are drawn by ui/glyphs.js.
 const TIPS = [
-  'Three taps: start, power, strike. I will hold the meter still for your first swing.',
-  'See the wind arrow? The aim line ignores it. Aim off a little.',
-  'Catch one pure and you can swipe to bend it while it flies.',
-  'From here I only draw the start of your putt. Read the dots: they roll downhill.',
-  'Pins are getting tucked. The middle of the green is never a bad miss.',
-  'The meter is quicker now, and the sweet spot smaller. Stay smooth.',
+  { icon: 'tap3', text: 'Tap 3 times. This first time, the bar waits for you.' },
+  { icon: 'wind', text: 'Wind pushes the ball. Aim a little into it.' },
+  { icon: 'shape', text: 'Good hit? Swipe to curve the ball.' },
+  { icon: 'dots', text: 'The dots roll downhill. Your putt line is shorter now.' },
+  { icon: 'pin', text: 'The flag is near the edge. The middle is safe.' },
+  { icon: 'fast', text: 'The bar is faster now.' },
 ];
 
 export function caddieTip(index, level) {
   if (index < TIPS.length) return TIPS[index];
-  if (level > 0.85) return 'No more help from me. This is the real course.';
+  if (level > 0.85) return { icon: 'pin', text: 'No more help. Good luck!' };
   return null;
 }
 
@@ -99,21 +101,21 @@ export function caddieTip(index, level) {
  *   (rough, sand or a penalty at any point), h.longestPutt (feet holed)
  */
 const C = {
-  fairway:   { text: 'Find the fairway off the tee', points: 200, test: (h) => h.fairway },
-  onGreen:   { text: 'Hit the green from the tee', points: 300, test: (h) => h.onGreenIn === 1 },
-  inTwo:     { text: 'Be on the green in two', points: 300, test: (h) => h.onGreenIn !== null && h.onGreenIn <= 2 },
-  inThree:   { text: 'Be on the green in three', points: 250, test: (h) => h.onGreenIn !== null && h.onGreenIn <= 3 },
-  reachTwo:  { text: 'Reach the par 5 in two', points: 800, test: (h) => h.onGreenIn !== null && h.onGreenIn <= 2 },
-  pure:      { text: 'Pure a strike', points: 200, test: (h) => h.pures >= 1 },
-  twoPures:  { text: 'Pure two strikes', points: 400, test: (h) => h.pures >= 2 },
-  close:     { text: 'Land it inside 20 feet', points: 400, test: (h) => h.firstProximity !== null && h.firstProximity * 3 <= 20 },
-  closer:    { text: 'Land it inside 10 feet', points: 700, test: (h) => h.firstProximity !== null && h.firstProximity * 3 <= 10 },
-  twoPutt:   { text: 'No three-putts', points: 200, test: (h) => h.putts <= 2 && h.holed },
-  onePutt:   { text: 'One-putt the green', points: 400, test: (h) => h.putts <= 1 && h.holed },
-  bomb:      { text: 'Drive it 195 yards or more', points: 300, test: (h) => h.longestDrive >= 195 },
-  clean:     { text: 'Stay out of rough, sand and water', points: 400, test: (h) => !h.dirty && h.holed },
-  par:       { text: 'Make par or better', points: 300, test: (h) => h.holed && h.strokes <= h.par },
-  birdie:    { text: 'Make birdie', points: 700, test: (h) => h.holed && h.strokes < h.par },
+  fairway:   { text: 'Hit the fairway', points: 200, test: (h) => h.fairway },
+  onGreen:   { text: 'Hit the green in 1 shot', points: 300, test: (h) => h.onGreenIn === 1 },
+  inTwo:     { text: 'On the green in 2 shots', points: 300, test: (h) => h.onGreenIn !== null && h.onGreenIn <= 2 },
+  inThree:   { text: 'On the green in 3 shots', points: 250, test: (h) => h.onGreenIn !== null && h.onGreenIn <= 3 },
+  reachTwo:  { text: 'On the green in 2 shots', points: 800, test: (h) => h.onGreenIn !== null && h.onGreenIn <= 2 },
+  pure:      { text: '1 perfect hit', points: 200, test: (h) => h.pures >= 1 },
+  twoPures:  { text: '2 perfect hits', points: 400, test: (h) => h.pures >= 2 },
+  close:     { text: 'Land within 20 ft of the hole', points: 400, test: (h) => h.firstProximity !== null && h.firstProximity * 3 <= 20 },
+  closer:    { text: 'Land within 10 ft of the hole', points: 700, test: (h) => h.firstProximity !== null && h.firstProximity * 3 <= 10 },
+  twoPutt:   { text: '2 putts or fewer', points: 200, test: (h) => h.putts <= 2 && h.holed },
+  onePutt:   { text: 'Only 1 putt', points: 400, test: (h) => h.putts <= 1 && h.holed },
+  bomb:      { text: 'Drive 195 yards', points: 300, test: (h) => h.longestDrive >= 195 },
+  clean:     { text: 'No rough, sand or water', points: 400, test: (h) => !h.dirty && h.holed },
+  par:       { text: 'Par or better', points: 300, test: (h) => h.holed && h.strokes <= h.par },
+  birdie:    { text: 'Birdie', points: 700, test: (h) => h.holed && h.strokes < h.par },
 };
 
 // What is asked of each hole in turn, by par: early entries are the gentle
