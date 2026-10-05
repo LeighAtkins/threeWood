@@ -36,10 +36,17 @@ const EIGHTHS = 8;
 const BACKBEATS = [2, 6]; // the eighths a drummer puts the snare on
 
 // How often each move is made, by level: [stutter, misplaced snare, roll].
-// Sparingly: the drummer is the groove, the edits are seasoning.
-const MOVES = [[0, 0, 0], [0, 0, 0], [0.05, 0, 0.07]];
+// None at present: the drummer is the groove, and any roll that lands on the
+// tune just sounds busy. The only edit left is the fill below.
+const MOVES = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
 // How often an eighth comes from the bar the recording has reached, not a borrowed one
 const HOME = [1, 1, 1];
+
+const FILL_FROM = 12;
+/** The drummer's fill: the last beat of every 8th bar. The tune and the voice leave it clear. */
+export const isFill = (bar, step) => bar % 8 === 7 && step >= FILL_FROM;
+// A note may ring up to the fill, never into it
+const clearOfFill = (bar, step, steps) => (bar % 8 === 7 ? Math.min(steps, FILL_FROM - step) : steps);
 
 const bars = new Map();
 
@@ -67,9 +74,9 @@ function breakBar(bar, level) {
     last = slice;
   }
   // Every 8th bar ends on a short snare fill, falling in pitch
-  if (level > 0 && bar % 8 === 7) {
+  if (level > 0 && isFill(bar, FILL_FROM)) {
     const snare = home * EIGHTHS + BACKBEATS[0];
-    for (let s = 12; s < STEPS; s++) row[s] = { slice: snare, semis: 3 - (s - 12) };
+    for (let s = FILL_FROM; s < STEPS; s++) row[s] = { slice: snare, semis: 3 - (s - FILL_FROM) };
   }
   if (bars.size > 512) bars.clear();
   bars.set(key, row);
@@ -171,7 +178,7 @@ const TUNE = [
   [[0, 'Ab5', 4], [4, 'G5', 2], [6, 'F5', 4], [10, 'Eb5', 2], [12, 'C5', 4]],
   [[0, 'Eb5', 6], [6, 'C5', 2], [8, 'Ab4', 6]],
   [[0, 'Bb4', 2], [2, 'Db5', 2], [4, 'F5', 4], [8, 'Gb5', 4], [12, 'F5', 4]],
-  [[0, 'Eb5', 4], [4, 'C5', 4], [8, 'Bb4', 2], [10, 'C5', 6]],
+  [[0, 'Eb5', 4], [4, 'C5', 4], [8, 'Bb4', 2], [10, 'C5', 2]],
 ];
 
 // Who plays the tune on each pass through the form. The first pass has no
@@ -183,7 +190,7 @@ export function leadStep(bar, step) {
   const voice = LEAD_VOICES[sectionOf(bar)];
   if (!voice) return null;
   const hit = TUNE[bar % FORM_BARS].find((n) => n[0] === step);
-  return hit ? { note: hit[1], steps: hit[2], voice } : null;
+  return hit && !isFill(bar, step) ? { note: hit[1], steps: clearOfFill(bar, step, hit[2]), voice } : null;
 }
 
 // The hummed line: long notes that lean on the colour of each chord.
@@ -207,5 +214,6 @@ export function humStep(bar, step) {
   if (sectionOf(bar) % 2 === 1 && !isBreakdown(bar)) return null;
   const at = (bar % 2) * STEPS + step;
   const hit = HUM[Math.floor((bar % FORM_BARS) / 2)].find((n) => n[0] === at);
-  return hit ? { note: hit[1], steps: hit[2] } : null;
+  // Its notes start in the bar before the fill, so count the room left from there
+  return hit ? { note: hit[1], steps: bar % 8 === 6 ? Math.min(hit[2], STEPS + FILL_FROM - step) : clearOfFill(bar, step, hit[2]) } : null;
 }

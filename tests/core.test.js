@@ -113,6 +113,12 @@ test('the soundtrack keeps the drummer steady and passes the tune around', async
       if (lead) voices.add(lead.voice);
       assert.equal(!!lead && m.sectionOf(bar) === 0, false, 'the first pass has no lead');
       if (m.isBreakdown(bar) && bar % 2 === 0 && step === 0) assert.ok(m.humStep(bar, step), 'the voice sings every breakdown');
+      // Nothing melodic may sound while the drummer fills
+      for (const [note, from] of [[lead, bar * 16 + step], [m.humStep(bar, step), bar * 16 + step]]) {
+        if (!note) continue;
+        for (let s = from; s < from + note.steps; s++) assert.equal(m.isFill(Math.floor(s / 16), s % 16), false, `bar ${bar} step ${step} rings into the fill`);
+      }
+      assert.deepEqual(m.breakStep(bar, step, 2), m.breakStep(bar, step, 1), 'no extra cuts in flight');
     }
   }
   assert.deepEqual([...voices].sort(), ['bell', 'koto', 'synth']);

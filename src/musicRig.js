@@ -128,9 +128,9 @@ export class MusicRig {
 
     // The voice: two saws through three vowel formants ("ooh"), gliding
     // between notes with a slow vibrato, and sent almost entirely to the hall
-    const humOut = new Tone.Gain(0.22).connect(this.muffle);
+    const humOut = new Tone.Gain(0.3).connect(this.muffle);
     const humBus = new Tone.Filter(3000, 'lowpass').connect(humOut);
-    humBus.connect(new Tone.Gain(1.1).connect(hall));
+    humBus.connect(new Tone.Gain(1.5).connect(hall));
     const vibrato = new Tone.Vibrato(5.1, 0.1);
     for (const [frequency, Q, gain] of [[380, 4, 3.2], [860, 6, 1.6], [2500, 8, 0.5]]) {
       vibrato.connect(new Tone.Filter({ frequency, type: 'bandpass', Q }).connect(new Tone.Gain(gain).connect(humBus)));
