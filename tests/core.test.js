@@ -87,16 +87,26 @@ test('a tidy bot finishes all 18 holes at a believable score', () => {
   assert.ok(strokes > 50 && strokes < 85, `bot shot ${strokes}`);
 });
 
-test('the soundtrack keeps a two-step backbeat and saves the snare for the round', async () => {
-  const { drumStep, bassStep, SCENE_LEVEL } = await import('../src/core/dnbPattern.js');
-  for (let bar = 0; bar < 8; bar++) {
-    for (const level of [1, 2]) {
-      assert.equal(drumStep(bar, 0, level).kick, 1, 'kick on the one');
-      assert.equal(drumStep(bar, 4, level).snare, 1, 'snare on two');
+test('the soundtrack never cuts the break the same way twice, and always tiles the bar', async () => {
+  const { breakStep, bassStep, stabStep, BREAK_BARS, SCENE_LEVEL } = await import('../src/core/dnbPattern.js');
+  const cut = (bar, level) => Array.from({ length: 16 }, (_, step) => breakStep(bar, step, level));
+  const edits = new Set();
+  for (let bar = 0; bar < 64; bar++) {
+    for (const level of [0, 1, 2]) {
+      const row = cut(bar, level);
+      assert.equal(row[0].slice % 8, 0, 'every bar opens on a downbeat slice');
+      assert.equal(row.reduce((n, hit) => n + (hit?.steps ?? 0), 0), 16, 'slices tile the bar with no gaps');
+      for (const hit of row) assert.ok(!hit || (hit.slice >= 0 && hit.slice < BREAK_BARS * 8));
+      assert.deepEqual(row, cut(bar, level), 'a bar is cut the same way every time it is asked for');
     }
-    for (let step = 0; step < 16; step++) assert.equal(drumStep(bar, step, 0).snare, 0);
-    assert.ok(bassStep(bar, 0), 'bass lands on every downbeat');
+    // The lobby plays the recording as it was made
+    cut(bar, 0).forEach((hit, step) => assert.equal(hit?.slice, step % 2 ? undefined : (bar % BREAK_BARS) * 8 + step / 2));
+    edits.add(JSON.stringify(cut(bar, 2)));
+    assert.equal(!!bassStep(bar, 0), bar % 16 < 12, 'bass on the one, except in the breakdown');
+    for (let step = 0; step < 16; step++) assert.equal(stabStep(bar, step, 0), null);
   }
+  assert.ok(edits.size > 60, `only ${edits.size} distinct drop bars in 64`);
+  assert.ok(cut(7, 1)[8].semis > cut(7, 1)[15].semis, 'the 8th bar ends on a falling snare rush');
   assert.equal(SCENE_LEVEL.title, 0);
   assert.equal(SCENE_LEVEL.flight, 2);
 });

@@ -66,9 +66,10 @@ export class Music {
   async load() {
     try {
       const { MusicRig } = await import('./musicRig.js');
-      this.rig = new MusicRig(this.audio.ctx);
-      this.rig.setLevel(this.level);
-      this.rig.setMuffled(this.muffled);
+      const rig = await MusicRig.create(this.audio.ctx);
+      rig.setLevel(this.level);
+      rig.setMuffled(this.muffled);
+      this.rig = rig;
     } catch (err) {
       // Offline before the band was ever cached, most likely
       console.warn('Music unavailable', err);
