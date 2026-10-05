@@ -277,6 +277,7 @@ export class Game {
   startFromTitle(choice) {
     this.audio.unlock();
     this.audio.tap();
+    if (choice === 'fishing') { this.practiceFishing(() => this.showTitle()); return; }
     const saved = store.get(SAVE_KEY);
     if (choice === 'continue' && saved) {
       this.seed = saved.seed;
@@ -1288,7 +1289,7 @@ export class Game {
   // ===========================================================================
 
   openMenu() {
-    if (!this.round || this.paused || this.state === 'result' || this.state === 'summary') return;
+    if (!this.round || this.paused || this.state === 'result' || this.state === 'summary' || this.state === 'fishing') return;
     this.paused = true;
     this.audio.tap();
     this.hud.showMenu({
@@ -1301,6 +1302,7 @@ export class Game {
       onSky: () => this.sky.cycleMode(),
       onMusic: () => this.toggleMusic(),
       onHelp: () => this.hud.showHelp(() => this.openMenuAgain()),
+      onFishing: () => this.practiceFishing(() => this.openMenuAgain()),
       onQuit: () => { this.paused = false; this.hud.clearLayer(); this.showTitle(); },
     });
   }
@@ -1311,6 +1313,38 @@ export class Game {
   }
 
   openMenuAgain() { this.paused = false; this.openMenu(); }
+
+  /**
+   * Practice fishing: the three games in turn, for as long as you like, with
+   * nothing at stake. Runs on its own clock so it works from the title and
+   * from the pause menu, where the game itself is standing still.
+   */
+  practiceFishing(onClose) {
+    const a = this.audio;
+    const modes = ['drop', 'steer', 'gold'];
+    let i = 0, last = performance.now(), open = true;
+    this.hud.clearLayer();
+    const next = () => this.fishing.start({
+      mode: modes[i++ % modes.length],
+      level: 0.3,
+      color: this.world.biome.liquid === 'lava' ? 0x3c9cc4 : this.world.biome.water,
+      hint: true,
+      sounds: {
+        drop: () => a.whoosh(), hooked: () => a.tap(),
+        catch: () => a.reward(4), fish: () => a.reward(0), miss: () => a.penalty(),
+      },
+      onDone: next,
+      onClose: () => { open = false; onClose(); },
+    });
+    next();
+    const tick = (now) => {
+      if (!open) return;
+      this.fishing.update(Math.min(0.05, (now - last) / 1000));
+      last = now;
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }
 
   closeMenu() {
     this.paused = false;

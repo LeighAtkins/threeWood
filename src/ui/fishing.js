@@ -39,12 +39,17 @@ export class Fishing {
         <div class="stake"><s>+1</s><b><s>+3</s></b></div>
         <div class="verdict hidden"></div>
       </div>
-      <div class="cue"></div>`;
+      <div class="cue"></div>
+      <button class="btn ghost done hidden">DONE</button>`;
     root.insertBefore(this.node, before);
     this.canvas = this.node.querySelector('canvas');
     this.ctx = this.canvas.getContext('2d');
     this.cue = this.node.querySelector('.cue');
     this.verdict = this.node.querySelector('.verdict');
+    // Practice only: a way out. It must not count as a touch on the pond
+    this.doneBtn = this.node.querySelector('.done');
+    this.doneBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
+    this.doneBtn.addEventListener('click', () => { const { onClose } = this; this.stop(); onClose?.(); });
     this.active = false;
     this.finger = null;
     this.node.addEventListener('pointerdown', (e) => {
@@ -84,8 +89,11 @@ export class Fishing {
    * @param {'drop'|'steer'|'gold'} o.mode
    * @param {(result: 'ball'|'gold'|'fish'|'miss') => void} o.onDone
    * @param {{ drop?: Function, catch?: Function, fish?: Function, miss?: Function }} o.sounds
+   * @param {() => void} [o.onClose] practice: show a DONE button that calls this
    */
-  start({ mode = 'drop', level = 0, color = 0x3c9cc4, rng = Math.random, hint = true, onDone, sounds = {} }) {
+  start({ mode = 'drop', level = 0, color = 0x3c9cc4, rng = Math.random, hint = true, onDone, onClose = null, sounds = {} }) {
+    this.onClose = onClose;
+    this.doneBtn.classList.toggle('hidden', !onClose);
     this.mode = mode;
     this.hint = hint;
     this.held = false;

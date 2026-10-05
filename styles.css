@@ -580,3 +580,6 @@ button { font: inherit; color: inherit; border: 0; background: none; padding: 0;
 .fishing.gold .stake > s { display: none; }
 .fishing.gold .stake b { display: inline; }
 .fishing.gold .pond { border-color: var(--gold); }
+
+/* Practice: the way out sits under the cue */
+.fishing .done { width: auto; padding: 10px 26px; margin: 0; }
