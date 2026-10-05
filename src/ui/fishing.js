@@ -31,9 +31,9 @@ export class Fishing {
       <div class="pond">
         <canvas></canvas>
         <div class="stake"><s>+1</s></div>
-        <div class="cue">${glyph('tap')}</div>
         <div class="verdict hidden"></div>
-      </div>`;
+      </div>
+      <div class="cue">${glyph('tap')}</div>`;
     root.insertBefore(this.node, before);
     this.canvas = this.node.querySelector('canvas');
     this.ctx = this.canvas.getContext('2d');
