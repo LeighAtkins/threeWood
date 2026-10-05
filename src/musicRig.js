@@ -5,23 +5,25 @@
  * players who switch music on. One sixteenth-note callback reads the patterns
  * in core/dnbPattern.js and plays whatever falls on that step.
  *
- * The drums are one recorded breakbeat, sped up, sliced into eighth notes and
- * re-ordered; everything else is synthesised.
+ * The drums are one recorded breakbeat, sped up and sliced into eighth notes;
+ * everything else is synthesised: a sub, an electric piano, strings, three
+ * lead instruments that take turns with the tune, and a hummed voice (a saw
+ * through vowel formants, mostly reverb).
  *
  * Break: "Amen Break G (165 BPM)" by Kevcio, CC0 — https://freesound.org/s/321221/
  */
 import * as Tone from 'tone';
 import {
-  BPM, STEPS, BREAK_BPM, breakStep, bassStep, padStep, stabStep, isBreakdown, isReentry,
+  BPM, STEPS, BREAK_BPM, breakStep, bassStep, padStep, compStep, leadStep, humStep, isBreakdown, isReentry,
 } from './core/dnbPattern.js';
 
 const BREAK_URL = '/music/break-165.mp3';
 const SIXTEENTH = 60 / BPM / 4;
 const BREAK_EIGHTH = 60 / BREAK_BPM / 2;
 const BREAK_RATE = BPM / BREAK_BPM;
-const BREAK_GAIN = [0.6, 1, 1]; // by level
-const DRUM_CUTOFF = [700, 20000, 20000];
-const REESE_CUTOFF = [120, 260, 2600];
+const BREAK_GAIN = [0.5, 0.72, 0.8]; // by level
+const DRUM_CUTOFF = [900, 20000, 20000];
+const REESE_CUTOFF = [120, 180, 800];
 const MASTER_GAIN = 0.5;
 
 const up = (note, semis) => Tone.Frequency(note).transpose(semis).toFrequency();
@@ -49,11 +51,12 @@ export class MusicRig {
 
     // Shared space
     const reverb = new Tone.Reverb({ decay: 3.2, wet: 1 }).connect(this.muffle);
+    const hall = new Tone.Reverb({ decay: 7, preDelay: 0.03, wet: 1 }).connect(this.muffle);
     const echo = new Tone.FeedbackDelay({ delayTime: '8n.', feedback: 0.45, wet: 1 }).connect(this.muffle);
     echo.connect(reverb);
 
     // Drums: the break, driven a little, and a cymbal for the big moments
-    const drive = new Tone.Distortion({ distortion: 0.1, wet: 0.4 }).connect(this.muffle);
+    const drive = new Tone.Distortion({ distortion: 0.06, wet: 0.2 }).connect(this.muffle);
     this.drums = new Tone.Filter({ frequency: DRUM_CUTOFF[0], type: 'lowpass', Q: 1 }).connect(drive);
     this.drums.connect(new Tone.Gain(0.07).connect(reverb));
     const crashTone = new Tone.Filter(5000, 'highpass').connect(this.muffle);
@@ -64,40 +67,78 @@ export class MusicRig {
     }).connect(crashTone);
 
     // Bass: an 808-style sub that slides between notes, warmed up enough to
-    // survive small speakers, and a detuned-saw reese that only opens for the drop
+    // survive small speakers, and a detuned-saw layer an octave up that opens a little for the drop
     const warmth = new Tone.Distortion({ distortion: 0.18, wet: 0.5 }).connect(this.muffle);
     const subTone = new Tone.Filter(520, 'lowpass').connect(warmth);
     this.sub = new Tone.Synth({
       oscillator: { type: 'triangle' }, portamento: 0.07, volume: -9,
       envelope: { attack: 0.006, decay: 0.3, sustain: 0.85, release: 0.12 },
     }).connect(subTone);
-    const reeseLevel = new Tone.Gain(0.45).connect(this.muffle); // the distortion is loud whatever goes in
+    const reeseLevel = new Tone.Gain(0.3).connect(this.muffle);
     this.reeseCutoff = new Tone.Filter({ frequency: REESE_CUTOFF[0], type: 'lowpass', rolloff: -24 }).connect(reeseLevel);
-    const growl = new Tone.Distortion({ distortion: 0.35, wet: 0.6 }).connect(this.reeseCutoff);
-    const wobble = new Tone.Filter({ type: 'lowpass', Q: 3 }).connect(growl);
-    this.wobbleLfo = new Tone.LFO({ frequency: '2n', min: 350, max: 2600 }).connect(wobble.frequency).start();
     this.reese = new Tone.Synth({
-      oscillator: { type: 'fatsawtooth', count: 3, spread: 32 }, portamento: 0.07, volume: -16,
+      oscillator: { type: 'fatsawtooth', count: 3, spread: 24 }, portamento: 0.07, volume: -16,
       envelope: { attack: 0.015, decay: 0.2, sustain: 0.8, release: 0.1 },
-    }).connect(wobble);
+    }).connect(this.reeseCutoff);
 
-    // Atmosphere: slow dark pads, mostly reverb
-    const padTone = new Tone.Filter(1100, 'lowpass').connect(this.muffle);
+    // Strings: a soft bed under everything, mostly reverb
+    const padTone = new Tone.Filter(1700, 'lowpass').connect(new Tone.Gain(0.35).connect(this.muffle));
     padTone.connect(new Tone.Gain(0.8).connect(reverb));
     this.pad = new Tone.PolySynth(Tone.Synth, {
-      oscillator: { type: 'fatsawtooth', count: 2, spread: 22 }, volume: -21,
-      envelope: { attack: 0.9, decay: 0.5, sustain: 0.8, release: 1.6 },
+      oscillator: { type: 'fatsawtooth', count: 2, spread: 18 }, volume: -25,
+      envelope: { attack: 0.7, decay: 0.5, sustain: 0.8, release: 1.4 },
     }).connect(padTone);
-    this.pad.maxPolyphony = 8;
+    this.pad.maxPolyphony = 16;
 
-    // Rave stabs, thrown into the echo
-    const stabTone = new Tone.Filter({ frequency: 2400, type: 'lowpass', Q: 2 }).connect(this.muffle);
-    stabTone.connect(new Tone.Gain(0.6).connect(echo));
-    this.stab = new Tone.PolySynth(Tone.Synth, {
-      oscillator: { type: 'fatsawtooth', count: 3, spread: 40 }, volume: -18,
-      envelope: { attack: 0.003, decay: 0.16, sustain: 0, release: 0.08 },
-    }).connect(stabTone);
-    this.stab.maxPolyphony = 6;
+    // Electric piano: FM with a bark that fades, through a chorus
+    const chorus = new Tone.Chorus({ frequency: 0.8, delayTime: 4, depth: 0.5, wet: 0.5 }).connect(this.muffle).start();
+    chorus.connect(new Tone.Gain(0.25).connect(reverb));
+    this.keys = new Tone.PolySynth(Tone.FMSynth, {
+      harmonicity: 1, modulationIndex: 4.5, volume: -17,
+      oscillator: { type: 'sine' }, modulation: { type: 'sine' },
+      envelope: { attack: 0.004, decay: 1.2, sustain: 0.25, release: 0.3 },
+      modulationEnvelope: { attack: 0.002, decay: 0.3, sustain: 0.1, release: 0.3 },
+    }).connect(chorus);
+    this.keys.maxPolyphony = 24;
+
+    // The tune, on whichever instrument has it this time round
+    const leadBus = new Tone.Gain(1).connect(this.muffle);
+    leadBus.connect(new Tone.Gain(0.28).connect(echo));
+    leadBus.connect(new Tone.Gain(0.3).connect(reverb));
+    const synthTone = new Tone.Filter({ frequency: 2600, type: 'lowpass', Q: 1 }).connect(leadBus);
+    this.leads = {
+      // Glassy FM bell
+      bell: new Tone.PolySynth(Tone.FMSynth, {
+        harmonicity: 3.01, modulationIndex: 9, volume: -17,
+        envelope: { attack: 0.002, decay: 1.1, sustain: 0, release: 0.9 },
+        modulationEnvelope: { attack: 0.002, decay: 0.5, sustain: 0, release: 0.4 },
+      }).connect(leadBus),
+      // Warm gliding synth lead with a little vibrato
+      synth: new Tone.Synth({
+        oscillator: { type: 'fatsawtooth', count: 2, spread: 14 }, portamento: 0.04, volume: -19,
+        envelope: { attack: 0.02, decay: 0.25, sustain: 0.7, release: 0.25 },
+      }).chain(new Tone.Vibrato(5.5, 0.08), synthTone),
+      // Plucked string, koto-bright
+      koto: new Tone.PolySynth(Tone.FMSynth, {
+        harmonicity: 2, modulationIndex: 14, volume: -15,
+        envelope: { attack: 0.001, decay: 0.45, sustain: 0, release: 0.3 },
+        modulationEnvelope: { attack: 0.001, decay: 0.07, sustain: 0, release: 0.1 },
+      }).connect(leadBus),
+    };
+
+    // The voice: two saws through three vowel formants ("ooh"), gliding
+    // between notes with a slow vibrato, and sent almost entirely to the hall
+    const humOut = new Tone.Gain(0.22).connect(this.muffle);
+    const humBus = new Tone.Filter(3000, 'lowpass').connect(humOut);
+    humBus.connect(new Tone.Gain(1.1).connect(hall));
+    const vibrato = new Tone.Vibrato(5.1, 0.1);
+    for (const [frequency, Q, gain] of [[380, 4, 3.2], [860, 6, 1.6], [2500, 8, 0.5]]) {
+      vibrato.connect(new Tone.Filter({ frequency, type: 'bandpass', Q }).connect(new Tone.Gain(gain).connect(humBus)));
+    }
+    this.hum = new Tone.Synth({
+      oscillator: { type: 'fatsawtooth', count: 2, spread: 10 }, portamento: 0.11, volume: -12,
+      envelope: { attack: 0.22, decay: 0.4, sustain: 0.85, release: 0.9 },
+    }).connect(vibrato);
 
     this.transport.scheduleRepeat((time) => this.step(time), '16n');
   }
@@ -152,8 +193,12 @@ export class MusicRig {
       this.reese.triggerAttackRelease(up(bass.note, 12), dur, time);
     }
     const pad = padStep(bar, step);
-    if (pad) this.pad.triggerAttackRelease(pad.notes, pad.steps * SIXTEENTH * 0.9, time, isBreakdown(bar) ? 1 : 0.75);
-    const stab = stabStep(bar, step, level);
-    if (stab) this.stab.triggerAttackRelease(stab.map((n) => up(n, 12)), 0.12, time);
+    if (pad) this.pad.triggerAttackRelease(pad.notes, pad.steps * SIXTEENTH * 0.9, time, 0.8);
+    const comp = compStep(bar, step);
+    if (comp) this.keys.triggerAttackRelease(comp.notes, comp.steps * SIXTEENTH * 0.9, time, step === 0 ? 0.9 : 0.65);
+    const lead = leadStep(bar, step);
+    if (lead) this.leads[lead.voice].triggerAttackRelease(lead.note, lead.steps * SIXTEENTH * 0.92, time);
+    const hum = humStep(bar, step);
+    if (hum) this.hum.triggerAttackRelease(hum.note, hum.steps * SIXTEENTH * 0.95, time, isBreakdown(bar) ? 1 : 0.8);
   }
 }

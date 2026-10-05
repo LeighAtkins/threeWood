@@ -87,28 +87,38 @@ test('a tidy bot finishes all 18 holes at a believable score', () => {
   assert.ok(strokes > 50 && strokes < 85, `bot shot ${strokes}`);
 });
 
-test('the soundtrack never cuts the break the same way twice, and always tiles the bar', async () => {
-  const { breakStep, bassStep, stabStep, BREAK_BARS, SCENE_LEVEL } = await import('../src/core/dnbPattern.js');
-  const cut = (bar, level) => Array.from({ length: 16 }, (_, step) => breakStep(bar, step, level));
-  const edits = new Set();
+test('the soundtrack keeps the drummer steady and passes the tune around', async () => {
+  const m = await import('../src/core/dnbPattern.js');
+  const cut = (bar, level) => Array.from({ length: 16 }, (_, step) => m.breakStep(bar, step, level));
+  const voices = new Set();
   for (let bar = 0; bar < 64; bar++) {
     for (const level of [0, 1, 2]) {
       const row = cut(bar, level);
       assert.equal(row[0].slice % 8, 0, 'every bar opens on a downbeat slice');
       assert.equal(row.reduce((n, hit) => n + (hit?.steps ?? 0), 0), 16, 'slices tile the bar with no gaps');
-      for (const hit of row) assert.ok(!hit || (hit.slice >= 0 && hit.slice < BREAK_BARS * 8));
+      for (const hit of row) assert.ok(!hit || (hit.slice >= 0 && hit.slice < m.BREAK_BARS * 8));
       assert.deepEqual(row, cut(bar, level), 'a bar is cut the same way every time it is asked for');
     }
-    // The lobby plays the recording as it was made
-    cut(bar, 0).forEach((hit, step) => assert.equal(hit?.slice, step % 2 ? undefined : (bar % BREAK_BARS) * 8 + step / 2));
-    edits.add(JSON.stringify(cut(bar, 2)));
-    assert.equal(!!bassStep(bar, 0), bar % 16 < 12, 'bass on the one, except in the breakdown');
-    for (let step = 0; step < 16; step++) assert.equal(stabStep(bar, step, 0), null);
+    // Lobby and groove play the recording as it was made (bar the fill that ends every 8th bar)
+    for (const level of [0, 1]) {
+      cut(bar, level).forEach((hit, step) => {
+        if (level && bar % 8 === 7 && step >= 12) return;
+        assert.equal(hit?.slice, step % 2 ? undefined : (bar % m.BREAK_BARS) * 8 + step / 2);
+      });
+    }
+    assert.equal(!!m.bassStep(bar, 0), bar % 16 < 12, 'bass on the one, except in the breakdown');
+    assert.ok(m.compStep(bar, 0) && m.compStep(bar, 0).notes.length === 4, 'keys on every downbeat');
+    for (let step = 0; step < 16; step++) {
+      const lead = m.leadStep(bar, step);
+      if (lead) voices.add(lead.voice);
+      assert.equal(!!lead && m.sectionOf(bar) === 0, false, 'the first pass has no lead');
+      if (m.isBreakdown(bar) && bar % 2 === 0 && step === 0) assert.ok(m.humStep(bar, step), 'the voice sings every breakdown');
+    }
   }
-  assert.ok(edits.size > 60, `only ${edits.size} distinct drop bars in 64`);
-  assert.ok(cut(7, 1)[8].semis > cut(7, 1)[15].semis, 'the 8th bar ends on a falling snare rush');
-  assert.equal(SCENE_LEVEL.title, 0);
-  assert.equal(SCENE_LEVEL.flight, 2);
+  assert.deepEqual([...voices].sort(), ['bell', 'koto', 'synth']);
+  assert.ok(cut(7, 1)[12].semis > cut(7, 1)[15].semis, 'the 8th bar ends on a falling snare fill');
+  assert.equal(m.SCENE_LEVEL.title, 0);
+  assert.equal(m.SCENE_LEVEL.flight, 2);
 });
 
 test('the almanac puts the sun and moon where they belong', async () => {
