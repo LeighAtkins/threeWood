@@ -23,6 +23,7 @@ import {
   playerLevel, assistsFor, nextHeat, difficultyPips, caddieTip, challengeFor, newHoleLog,
 } from './core/progression.js';
 import { Hud, scoreName } from './ui/hud.js';
+import { Fishing } from './ui/fishing.js';
 import { Audio } from './audio.js';
 import { Music } from './music.js';
 
@@ -79,6 +80,7 @@ export class Game {
       onStart: (choice) => this.startFromTitle(choice),
       onMusic: () => this.toggleMusic(),
     });
+    this.fishing = new Fishing(this.hud.root, this.hud.layer);
     this.initBall();
     this.initInput();
 
@@ -90,7 +92,7 @@ export class Game {
     this.simAccumulator = 0;
     this.events = [];
     this.swing = createSwing();
-    this.hints = { swing: 0, putt: 0, spin: 0, ...(store.get(HINT_KEY) || {}) };
+    this.hints = { swing: 0, putt: 0, spin: 0, fish: 0, ...(store.get(HINT_KEY) || {}) };
 
     this.seedPinned = !!getSeedFromUrl();
     this.seed = getSeedFromUrl() || store.get(SAVE_KEY)?.seed || generateSeed();
@@ -418,6 +420,7 @@ export class Game {
   }
 
   setState(state) {
+    if (state !== 'fishing' && this.fishing?.active) this.fishing.stop();
     this.state = state;
     this.stateTime = 0;
     this.music.setScene(state);
@@ -639,6 +642,7 @@ export class Game {
 
   swingDown() {
     if (this.paused) return;
+    if (this.state === 'fishing') { this.fishing.tap(); return; }
     if (this.state === 'intro') { if (this.stateTime > 0.5) this.endIntro(); return; }
     if (this.state === 'flight') { this.fastForward = true; return; }
     if (this.state === 'aim') {
@@ -967,17 +971,65 @@ export class Game {
 
   penalty(label) {
     this.effects.endTrail();
-    this.strokes += 1;
     this.round.pureStreak = 0;
     this.holeLog.dirty = true;
     this.hud.setCarry(null);
     this.hud.callout(label, 'bad');
+    this.ballMesh.visible = this.blob.visible = false;
+    this.setState('settle');
+    if (label === 'WATER') {
+      // Water gives one chance to fish the ball out before the stroke is added
+      this.settleFor = 0.9;
+      this.afterSettle = () => this.goFishing();
+    } else {
+      this.takePenalty();
+    }
+  }
+
+  /** The fishing minigame: hook the sinking ball and the penalty is forgiven. */
+  goFishing() {
+    const a = this.audio;
+    this.setState('fishing');
+    this.fishing.start({
+      level: this.assists.level,
+      color: this.world.biome.water,
+      hint: this.hints.fish < 3,
+      sounds: {
+        drop: () => a.whoosh(),
+        hooked: () => a.tap(),
+        catch: () => { a.reward(4); a.vibrate?.(30); },
+        fish: () => a.reward(0),
+        miss: () => a.penalty(),
+      },
+      onDone: (result) => {
+        if (this.hints.fish < 3) { this.hints.fish += 1; store.set(HINT_KEY, this.hints); }
+        this.setState('settle');
+        if (result === 'ball') {
+          this.round.stats.fished = (this.round.stats.fished || 0) + 1;
+          this.hud.callout('SAVED!', 'gold');
+          this.hud.callout('NO PENALTY', 'gold small');
+          this.award('Fished it out', 150, true);
+          this.dropBall(1.1);
+        } else {
+          if (result === 'fish') { this.hud.callout('A FISH!', 'small'); this.award('Caught a fish', 50, true); }
+          this.takePenalty();
+        }
+      },
+    });
+  }
+
+  takePenalty() {
+    this.strokes += 1;
     this.hud.callout('+1 PENALTY', 'bad small');
     this.audio.penalty();
     this.updateScoreHud();
-    this.ballMesh.visible = this.blob.visible = false;
+    this.dropBall(1.5);
+  }
+
+  /** Back on dry land after a hazard, once the callouts have had their moment. */
+  dropBall(wait) {
     this.setState('settle');
-    this.settleFor = 1.5;
+    this.settleFor = wait;
     this.afterSettle = () => {
       const { ball, world, shot } = this;
       // Drop a touch back from where it last crossed dry land
@@ -1332,6 +1384,9 @@ export class Game {
       }
       case 'flight':
         this.updateFlight(dt);
+        break;
+      case 'fishing':
+        this.fishing.update(dt);
         break;
       case 'settle':
         if (this.shot?.putt) this.rig.watch(ball); else if (this.rig.mode === 'landing') this.rig.landing(ball, this.plan, this.shot.fromX, this.shot.fromZ);
