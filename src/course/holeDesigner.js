@@ -1,5 +1,5 @@
 import { createGameRng } from '../core/rng.js';
-import { BIOMES } from './biomes.js';
+import { BIOMES, biomeForHole } from './biomes.js';
 import { pathLength, pointAlongPath, pathInfo, blobCovers, greenDistance } from './shapes.js';
 
 /**
@@ -39,27 +39,28 @@ export const PAR_BANDS = { 3: [100, 165], 4: [255, 320], 5: [350, 400] };
 
 /**
  * The 18-hole routing (par 72). Pacing is authored: a gentle open, a
- * signature hole in each third, and the island green at 17.
+ * signature hole in each third, and the island green at 17. Which world
+ * each three-hole stretch is played in comes from the seed (biomes.js).
  */
 export const ROUND_PLAN = [
-  { par: 4, archetypes: ['straight'],                 biome: 'parkland' },
-  { par: 4, archetypes: ['doglegR', 'doglegL'],       biome: 'parkland' },
-  { par: 3, archetypes: ['overWater'],                biome: 'parkland' },
-  { par: 5, archetypes: ['doglegL', 'doglegR'],       biome: 'parkland' },
-  { par: 4, archetypes: ['bottleneck'],               biome: 'parkland' },
-  { par: 3, archetypes: ['elevatedGreen'],            biome: 'parkland' },
-  { par: 4, archetypes: ['lakeside'],                 biome: 'links' },
-  { par: 5, archetypes: ['dunes'],                    biome: 'links' },
-  { par: 4, archetypes: ['elevatedGreen', 'dunes'],   biome: 'links' },
-  { par: 4, archetypes: ['doglegL', 'doglegR'],       biome: 'links' },
-  { par: 3, archetypes: ['potBunkers'],               biome: 'links' },
-  { par: 5, archetypes: ['lakeside', 'cape'],         biome: 'links' },
-  { par: 4, archetypes: ['bottleneck', 'straight'],   biome: 'pines' },
-  { par: 4, archetypes: ['waterApproach'],            biome: 'pines' },
-  { par: 5, archetypes: ['doubleDogleg'],             biome: 'pines' },
-  { par: 4, archetypes: ['cape'],                     biome: 'pines' },
-  { par: 3, archetypes: ['islandGreen'],              biome: 'pines' },
-  { par: 4, archetypes: ['lakeside', 'waterApproach'], biome: 'pines' },
+  { par: 4, archetypes: ['straight'] },
+  { par: 4, archetypes: ['doglegR', 'doglegL'] },
+  { par: 3, archetypes: ['overWater'] },
+  { par: 5, archetypes: ['doglegL', 'doglegR'] },
+  { par: 4, archetypes: ['bottleneck'] },
+  { par: 3, archetypes: ['elevatedGreen'] },
+  { par: 4, archetypes: ['lakeside'] },
+  { par: 5, archetypes: ['dunes'] },
+  { par: 4, archetypes: ['elevatedGreen', 'dunes'] },
+  { par: 4, archetypes: ['doglegL', 'doglegR'] },
+  { par: 3, archetypes: ['potBunkers'] },
+  { par: 5, archetypes: ['lakeside', 'cape'] },
+  { par: 4, archetypes: ['bottleneck', 'straight'] },
+  { par: 4, archetypes: ['waterApproach'] },
+  { par: 5, archetypes: ['doubleDogleg'] },
+  { par: 4, archetypes: ['cape'] },
+  { par: 3, archetypes: ['islandGreen'] },
+  { par: 4, archetypes: ['lakeside', 'waterApproach'] },
 ];
 
 /** Which course holes make up a round of the given length. */
@@ -390,7 +391,7 @@ export function designHole(seedString, holeNumber, request = {}) {
   const plan = ROUND_PLAN[(holeNumber - 1) % ROUND_PLAN.length];
   const archetype = request.archetype || holeRng.pick(plan.archetypes);
   const par = request.par || plan.par;
-  const biome = request.biome || plan.biome;
+  const biome = request.biome || biomeForHole(seedString, holeNumber);
 
   let best = null;
   for (let attempt = 0; attempt < 60; attempt++) {

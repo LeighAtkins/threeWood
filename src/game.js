@@ -893,7 +893,7 @@ export class Game {
       case 'splash':
         fx.splash(e.x, e.y, e.z);
         this.audio.splash();
-        this.penalty('WATER');
+        this.penalty(this.world.biome.liquid === 'lava' ? 'LAVA' : 'WATER');
         break;
       case 'oob':
         this.penalty('OUT OF BOUNDS');
@@ -1363,6 +1363,15 @@ export class Game {
     this.round.index = index;
     this.hud.clearLayer();
     this.startHole();
+  }
+
+  /** Test hook: rebuild the current hole in another world (a biome id). */
+  debugBiome(biome) {
+    const spec = designHole(this.world.spec.seed, this.world.spec.number, { biome });
+    this.loadWorld(spec);
+    placeBall(this.ball, this.world, this.world.tee.x, this.world.tee.z);
+    this.aimAngle = Math.atan2(this.world.cup.z - this.ball.z, this.world.cup.x - this.ball.x);
+    if (this.state === 'aim') this.beginAim();
   }
 
   /** Test hook: drop the ball `dist` yards from the pin and take aim. */

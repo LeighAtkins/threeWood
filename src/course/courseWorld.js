@@ -212,8 +212,8 @@ export function buildWorld(spec) {
   const cup = { x: spec.pin.x, z: spec.pin.z, y: heightAt(spec.pin.x, spec.pin.z) };
   const tee = { x: spec.tee.x, z: spec.tee.z, y: heightAt(spec.tee.x, spec.tee.z) };
 
-  // Tree colliders. Canopy shapes match scenery.js (round / pine / scrub).
-  const kind = biome.treeKind;
+  // Tree colliders: three shapes, which every kind of tree in props.js is built to fit.
+  const kind = biome.treeShape;
   const trees = spec.trees.map((t) => {
     const y = heightAt(t.x, t.z);
     const s = t.s;

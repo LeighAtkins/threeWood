@@ -3,67 +3,14 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { createGameRng } from '../core/rng.js';
 import { CUP_R } from '../core/ballSim.js';
 import { pathInfo, pointAlongPath } from '../course/shapes.js';
+import { buildProps } from './props.js';
 
 /**
- * Everything on a hole that is not the ground: trees, water, the flag and
- * cup, tee markers, tufts and flowers, the far hills and the clouds.
- * Instanced wherever there is more than one of a thing.
+ * Everything on a hole that is not the ground: water (or lava), the flag and
+ * cup, tee markers, tufts and flowers, the clouds, and whatever is drifting
+ * through the air. The solid dressing — trees, props, set pieces and the
+ * horizon — is grown per biome in props.js.
  */
-
-function treeGeometries(kind) {
-  if (kind === 'pine') {
-    const trunk = new THREE.CylinderGeometry(0.22, 0.34, 2.4, 6).translate(0, 1.2, 0);
-    const tiers = [
-      new THREE.ConeGeometry(2.5, 3.6, 7).translate(0, 3.6, 0),
-      new THREE.ConeGeometry(2.0, 3.2, 7).translate(0, 5.6, 0),
-      new THREE.ConeGeometry(1.4, 3.0, 7).translate(0, 7.6, 0),
-    ];
-    return { trunk, canopy: mergeGeometries(tiers) };
-  }
-  if (kind === 'scrub') {
-    const trunk = new THREE.CylinderGeometry(0.16, 0.26, 1.4, 5).translate(0, 0.7, 0);
-    const blobs = [
-      new THREE.IcosahedronGeometry(1.7, 0).scale(1.15, 0.8, 1).translate(0, 2.2, 0),
-      new THREE.IcosahedronGeometry(1.1, 0).translate(1.1, 1.8, 0.5),
-    ];
-    return { trunk, canopy: mergeGeometries(blobs) };
-  }
-  const trunk = new THREE.CylinderGeometry(0.26, 0.4, 3.6, 6).translate(0, 1.8, 0);
-  const blobs = [
-    new THREE.IcosahedronGeometry(2.8, 0).scale(1, 1.1, 1).translate(0, 5.7, 0),
-    new THREE.IcosahedronGeometry(1.8, 0).translate(1.7, 4.6, 0.6),
-    new THREE.IcosahedronGeometry(1.6, 0).translate(-1.5, 4.9, -0.9),
-  ];
-  return { trunk, canopy: mergeGeometries(blobs) };
-}
-
-function buildTrees(world, rng) {
-  const group = new THREE.Group();
-  const trees = world.trees;
-  if (!trees.length) return group;
-  const { biome } = world;
-  const geo = treeGeometries(biome.treeKind);
-  const trunks = new THREE.InstancedMesh(
-    geo.trunk, new THREE.MeshLambertMaterial({ color: biome.trunk, flatShading: true }), trees.length);
-  const canopies = new THREE.InstancedMesh(
-    geo.canopy, new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true }), trees.length);
-  trunks.castShadow = canopies.castShadow = true;
-  const dummy = new THREE.Object3D();
-  const color = new THREE.Color();
-  trees.forEach((t, i) => {
-    dummy.position.set(t.x, t.y - 0.1, t.z);
-    dummy.scale.setScalar(t.s);
-    dummy.rotation.y = rng() * Math.PI * 2;
-    dummy.updateMatrix();
-    trunks.setMatrixAt(i, dummy.matrix);
-    canopies.setMatrixAt(i, dummy.matrix);
-    color.setHex(biome.canopy[Math.floor(rng() * biome.canopy.length)]).multiplyScalar(0.9 + rng() * 0.2);
-    canopies.setColorAt(i, color);
-  });
-  canopies.instanceColor.needsUpdate = true;
-  group.add(trunks, canopies);
-  return group;
-}
 
 // --- Water -------------------------------------------------------------------
 
@@ -84,7 +31,7 @@ function buildWater(world) {
       fog: true,
       uniforms: THREE.UniformsUtils.merge([
         THREE.UniformsLib.fog,
-        { uColor: { value: new THREE.Color(world.biome.water) } },
+        { uColor: { value: new THREE.Color(world.biome.water) }, uLava: { value: world.biome.liquid === 'lava' ? 1 : 0 } },
       ]),
       vertexShader: /* glsl */`
         varying vec3 vWorld;
@@ -103,6 +50,7 @@ function buildWater(world) {
         uniform vec3 uLightDir;
         uniform vec3 uLightColor;
         uniform float uTime;
+        uniform float uLava;
         varying vec3 vWorld;
         #include <fog_pars_fragment>
         void main() {
@@ -117,7 +65,14 @@ function buildWater(world) {
           vec3 ripple = normalize(vec3(sin(p.x * 1.7 + uTime * 1.6) * 0.07, 1.0, sin(p.y * 1.9 - uTime * 1.3) * 0.07));
           float path = pow(max(dot(reflect(-view, ripple), uLightDir), 0.0), 140.0);
           col += uLightColor * path * (0.5 + glint);
-          gl_FragColor = vec4(col, 0.86);
+          if (uLava > 0.5) {
+            // Lava makes its own light: slow bright veins between cooling crust
+            float veins = sin(p.x * 0.55 + sin(p.y * 0.4 + uTime * 0.25) * 2.0) * sin(p.y * 0.5 - uTime * 0.2 + sin(p.x * 0.3) * 2.0);
+            float crust = smoothstep(0.15, 0.75, abs(veins));
+            col = mix(vec3(1.0, 0.72, 0.2), uColor * 0.9, smoothstep(0.0, 0.18, abs(veins)));
+            col = mix(col, vec3(0.16, 0.05, 0.03), crust * 0.85) + vec3(0.5, 0.12, 0.0) * glint;
+          }
+          gl_FragColor = vec4(col, mix(0.86, 1.0, uLava));
           #include <fog_fragment>
         }`,
     });
@@ -203,7 +158,7 @@ function buildTeeMarkers(world) {
 function buildGroundCover(world, rng, lowDetail) {
   const group = new THREE.Group();
   const { spec, biome } = world;
-  const tuftCount = lowDetail ? 420 : 900;
+  const tuftCount = Math.round((lowDetail ? 420 : 900) * (biome.tufts ?? 1));
   const flowerCount = lowDetail ? 90 : 220;
   const dummy = new THREE.Object3D();
   const color = new THREE.Color();
@@ -234,7 +189,7 @@ function buildGroundCover(world, rng, lowDetail) {
     group.add(mesh);
   };
 
-  const rough = new THREE.Color(biome.rough);
+  const rough = new THREE.Color(biome.tuft);
   scatter(
     tuftCount,
     new THREE.ConeGeometry(0.35, 0.9, 4).translate(0, 0.4, 0),
@@ -309,26 +264,88 @@ function buildFireflies(world, rng, lowDetail) {
   return points;
 }
 
-function buildBackdrop(world, rng) {
-  const group = new THREE.Group();
-  const { biome } = world;
+// --- Weather in the air ---------------------------------------------------------
 
-  // Far hills ring the tile and dissolve into the fog
-  const hillMat = new THREE.MeshLambertMaterial({ color: biome.hills, flatShading: true });
-  const hillGeos = [];
-  const n = 22;
-  for (let i = 0; i < n; i++) {
-    const a = (i / n) * Math.PI * 2 + rng() * 0.2;
-    const r = 420 + rng() * 160;
-    const w = 90 + rng() * 110;
-    const h = 28 + rng() * (biome.id === 'pines' ? 95 : 55);
-    hillGeos.push(new THREE.ConeGeometry(w, h, 6 + Math.floor(rng() * 3))
-      .rotateY(rng() * 3)
-      .scale(1.6, 1, 1)
-      .rotateY(-a)
-      .translate(Math.cos(a) * r, h / 2 - 6, Math.sin(a) * r));
+// fall: yards/s downwards (negative rises)   sway: sideways wander   wind: how far the wind carries it
+const AMBIENT = {
+  snow:   { count: 420, size: 0.16, fall: 2.4, sway: 0.7, wind: 0.5, glow: false },
+  leaves: { count: 150, size: 0.3, fall: 1.5, sway: 1.8, wind: 0.6, glow: false },
+  petals: { count: 240, size: 0.17, fall: 0.9, sway: 1.5, wind: 0.6, glow: false },
+  embers: { count: 200, size: 0.14, fall: -1.7, sway: 1.0, wind: 0.3, glow: true },
+  spores: { count: 170, size: 0.15, fall: -0.25, sway: 0.9, wind: 0.2, glow: true },
+  pollen: { count: 90, size: 0.09, fall: 0.15, sway: 0.8, wind: 0.3, glow: false },
+  dust:   { count: 170, size: 0.1, fall: 0.1, sway: 0.6, wind: 1.4, glow: false },
+};
+const AMBIENT_BOX = 64;
+const ambientShared = { uTime: { value: 0 }, uScale: { value: 300 }, uTint: { value: new THREE.Color(0xffffff) } };
+
+/** Snow, petals, leaves, embers: a box of drifting specks that travels with the camera. */
+function buildAmbient(world, lowDetail) {
+  if (!world.biome.ambient) return null;
+  const [kind, colours] = world.biome.ambient;
+  const cfg = AMBIENT[kind];
+  const count = Math.round(cfg.count * (lowDetail ? 0.6 : 1));
+  const rng = createGameRng(`ambient-${kind}`).rng;
+  const pos = new Float32Array(count * 3), col = new Float32Array(count * 3), seed = new Float32Array(count);
+  const c = new THREE.Color();
+  for (let i = 0; i < count; i++) {
+    pos[i * 3] = rng() * AMBIENT_BOX; pos[i * 3 + 1] = rng() * AMBIENT_BOX; pos[i * 3 + 2] = rng() * AMBIENT_BOX;
+    c.setHex(colours[Math.floor(rng() * colours.length)]);
+    col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
+    seed[i] = rng();
   }
-  group.add(new THREE.Mesh(mergeGeometries(hillGeos), hillMat));
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geometry.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  geometry.setAttribute('aSeed', new THREE.BufferAttribute(seed, 1));
+  const w = world.spec.wind;
+  const points = new THREE.Points(geometry, new THREE.ShaderMaterial({
+    uniforms: {
+      ...ambientShared,
+      uDrift: { value: new THREE.Vector3(w.x * 0.45 * cfg.wind, -cfg.fall, w.z * 0.45 * cfg.wind) },
+      uSway: { value: cfg.sway }, uSize: { value: cfg.size }, uGlow: { value: cfg.glow ? 1 : 0 },
+    },
+    transparent: true, depthWrite: false, vertexColors: true,
+    blending: cfg.glow ? THREE.AdditiveBlending : THREE.NormalBlending,
+    vertexShader: /* glsl */`
+      attribute float aSeed;
+      uniform float uTime, uScale, uSway, uSize, uGlow;
+      uniform vec3 uDrift, uTint;
+      varying vec3 vColor;
+      varying float vAlpha;
+      void main() {
+        float box = ${AMBIENT_BOX}.0;
+        vec3 p = position + uDrift * uTime * (0.7 + aSeed * 0.6);
+        p.x += sin(uTime * (0.5 + aSeed) + aSeed * 40.0) * uSway;
+        p.z += cos(uTime * (0.4 + aSeed * 0.8) + aSeed * 70.0) * uSway;
+        // Wrap the box around wherever the camera is
+        p = mod(p - cameraPosition, box) - box * 0.5;
+        float edge = 1.0 - smoothstep(box * 0.36, box * 0.5, length(p));
+        vec4 mv = viewMatrix * vec4(p + cameraPosition, 1.0);
+        gl_Position = projectionMatrix * mv;
+        gl_PointSize = clamp(uScale * uSize * (0.6 + aSeed * 0.8) / max(0.5, -mv.z), 1.0, 26.0);
+        float flicker = mix(1.0, 0.55 + 0.45 * sin(uTime * (3.0 + aSeed * 5.0) + aSeed * 30.0), uGlow);
+        vColor = color * mix(uTint, vec3(1.0), uGlow);
+        vAlpha = edge * flicker * smoothstep(0.6, 3.0, -mv.z);
+      }`,
+    fragmentShader: /* glsl */`
+      varying vec3 vColor;
+      varying float vAlpha;
+      void main() {
+        float d = length(gl_PointCoord - 0.5) * 2.0;
+        float a = smoothstep(1.0, 0.55, d) * vAlpha;
+        gl_FragColor = vec4(vColor * a, a);
+        #include <colorspace_fragment>
+      }`,
+  }));
+  points.material.premultipliedAlpha = true;
+  points.frustumCulled = false;
+  points.renderOrder = 4;
+  return points;
+}
+
+function buildClouds(rng) {
+  const group = new THREE.Group();
 
   // Chunky clouds
   const cloudGeos = [];
@@ -359,11 +376,14 @@ export function buildScenery(world, { lowDetail = false } = {}) {
   const group = new THREE.Group();
   group.name = 'scenery';
   const flag = buildFlag(world);
-  const backdrop = buildBackdrop(world, rng);
+  const backdrop = buildClouds(rng);
+  // Own streams: growing the props must not reshuffle anything else
+  const props = buildProps(world, createGameRng(`${world.spec.seed}:props-${world.spec.number}`).rng, { lowDetail });
+  const ambient = buildAmbient(world, lowDetail);
   // Own stream: adding fireflies must not reshuffle the rest of the dressing
   const fireflies = buildFireflies(world, createGameRng(`${world.spec.seed}:fireflies-${world.spec.number}`).rng, lowDetail);
   group.add(
-    buildTrees(world, rng),
+    props.trees, props.props, props.backdrop, props.glow,
     buildWater(world),
     flag,
     buildTeeMarkers(world),
@@ -371,12 +391,14 @@ export function buildScenery(world, { lowDetail = false } = {}) {
     backdrop,
     fireflies,
   );
-  return { group, flag, clouds: backdrop.userData.clouds, fireflies };
+  if (ambient) group.add(ambient);
+  return { group, flag, clouds: backdrop.userData.clouds, fireflies, ambient, glow: props.glow };
 }
 
 /** Point sprites are sized in device pixels: tell them how tall the canvas is. */
 export function setSceneryViewport(heightPx) {
   fireflyUniforms.uScale.value = heightPx * 0.3;
+  ambientShared.uScale.value = heightPx * 0.9;
 }
 
 export function updateScenery(scenery, time, dt, sky) {
@@ -391,6 +413,10 @@ export function updateScenery(scenery, time, dt, sky) {
   // Clouds keep a little of the lit colour in their shade, and sink back after dark
   scenery.clouds.material.emissive.copy(sky.look.cloud).lerp(sky.look.cloudLit, 0.3);
   scenery.clouds.material.color.setScalar(1 - 0.7 * sky.night);
+  ambientShared.uTime.value = time;
+  ambientShared.uTint.value.copy(sky.tint);
+  // Lit windows and lanterns sit back a little by day and come up at dusk
+  scenery.glow.material.color.setScalar(0.72 + 0.4 * sky.night);
   fireflyUniforms.uTime.value = time;
   fireflyUniforms.uNight.value = sky.night;
   scenery.fireflies.visible = sky.night > 0.02;
