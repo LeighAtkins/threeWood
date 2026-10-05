@@ -1,5 +1,5 @@
 // Contact shots of the sky through a day, for tuning the palette.
-// Usage: node scripts/dev/sky.mjs [outDir] [hours,comma,separated] [hole] [place lat,lon]
+// Usage: node scripts/dev/sky.mjs [outDir] [hours,comma,separated] [hole] [place lat,lon] [date yyyy-mm-dd]
 // Then:  python3 scripts/dev/sheet.py <outDir> <sheet.png> 1 6
 import fs from 'node:fs';
 import { openPhone, URL } from './browser.mjs';
@@ -7,7 +7,7 @@ import { openPhone, URL } from './browser.mjs';
 const out = process.argv[2] || '/tmp/tw/sky';
 const hours = (process.argv[3] || '0,4,5,5.5,6,6.5,7,8,10,12,15,17,18,18.5,19,19.5,20,22').split(',').map(Number);
 const hole = Number(process.argv[4] || 0);
-const place = process.argv[5] ? `&place=${process.argv[5]}` : '';
+const place = (process.argv[5] ? `&place=${process.argv[5]}` : '') + (process.argv[6] ? `&date=${process.argv[6]}` : '');
 fs.rmSync(out, { recursive: true, force: true });
 fs.mkdirSync(out, { recursive: true });
 
@@ -28,7 +28,7 @@ for (const h of hours) {
     const g = window.THREEWOOD;
     g.sky.fixedHour = h; g.sky.hour = h;
     for (let i = 0; i < 20; i++) g.debugFrame(1 / 30, i === 19);
-    return `${g.sky.phase()} alt ${g.sky.altitude.toFixed(1)}`;
+    return `${g.sky.phase()} alt ${g.sky.altitude.toFixed(1)} moon ${(g.sky.moonFraction * 100).toFixed(0)}% up ${g.sky.moonUp.toFixed(2)}`;
   }, h);
   console.log(h, info);
   await page.screenshot({ path: `${out}/${String(n++).padStart(4, '0')}.png` });

@@ -39,7 +39,7 @@ const KEYS = [
     alt: -9,
     zenith: 0x08122f, mid: 0x1a2250, horizon: 0x503a68, fog: 0x2c2a52,
     glow: 0x7a3048, disc: 0xff4a2a, anti: 0,
-    sun: 0xff6a2e, sunI: 0, hemi: 0x5c68b8, hemiI: 1.2, bounce: 0.45,
+    sun: 0xff6a2e, sunI: 0, hemi: 0x5c68b8, hemiI: 1.35, bounce: 0.5,
     cloud: 0x1a1c3a, cloudLit: 0x64486e, stars: 0.8, exposure: 1.2, dim: 0.4,
     fogNear: 110, fogFar: 600,
     am: { horizon: 0x3a4a80, fog: 0x283460, glow: 0x44529a, cloudLit: 0x4c5a90 },
@@ -48,7 +48,7 @@ const KEYS = [
     alt: -4,
     zenith: 0x172c6a, mid: 0x6c4a8c, horizon: 0xf2783e, fog: 0x8c5c76,
     glow: 0xff5622, disc: 0xff4a2a, anti: 0.35,
-    sun: 0xff6a2e, sunI: 0, hemi: 0x9c8cd0, hemiI: 1.55, bounce: 0.85,
+    sun: 0xff6a2e, sunI: 0, hemi: 0x9c8cd0, hemiI: 1.9, bounce: 0.9,
     cloud: 0x34284e, cloudLit: 0xff7052, stars: 0.3, exposure: 1.3, dim: 0.6,
     fogNear: 120, fogFar: 610,
     am: { mid: 0x6660a8, horizon: 0xf29c9c, fog: 0x86789c, glow: 0xff8686, cloudLit: 0xff9cac, fogNear: 60, fogFar: 430 },
@@ -57,7 +57,7 @@ const KEYS = [
     alt: 0,
     zenith: 0x2a54a4, mid: 0xdc8684, horizon: 0xffa646, fog: 0xe89c72,
     glow: 0xff6418, disc: 0xff6a30, anti: 0.55,
-    sun: 0xff7a38, sunI: 2.6, hemi: 0xb4a4dc, hemiI: 1.5, bounce: 0.95,
+    sun: 0xff7a38, sunI: 2.8, hemi: 0xb4a4dc, hemiI: 1.8, bounce: 1,
     cloud: 0x4e3a5e, cloudLit: 0xff9450, stars: 0.05, exposure: 1.3, dim: 0.82,
     fogNear: 130, fogFar: 620,
     am: { mid: 0xd8a6c6, horizon: 0xffc6a2, fog: 0xe6c0c2, glow: 0xff9872, cloudLit: 0xffb6a6, sun: 0xff9a76, disc: 0xff9a70, fogNear: 45, fogFar: 380 },
@@ -265,6 +265,10 @@ export class Sky {
     const [lat, lon] = (query.get('place') || '').split(',').map(Number);
     if (Number.isFinite(lat) && Number.isFinite(lon)) this.place = { lat, lon, name: '', source: 'url' };
 
+    // ?date=2026-09-26 — borrow another day's sun and moon
+    const day = Date.parse(`${query.get('date')}T12:00:00`);
+    this.dateShift = Number.isFinite(day) ? atLocalHour(new Date(day), 0) - atLocalHour(new Date(), 0) : 0;
+
     // ?sky=dusk or ?sky=17.5 (a local hour) pins the sky for this visit only
     const pinned = query.get('sky');
     this.fixedHour = pinned !== null && pinned !== '' && Number.isFinite(Number(pinned)) ? Number(pinned) : null;
@@ -328,8 +332,10 @@ export class Sky {
 
   // --- Time ---------------------------------------------------------------------
 
+  now() { return new Date(Date.now() + this.dateShift); }
+
   /** Today's landmarks, recomputed when the date rolls over. */
-  day(now = new Date()) {
+  day(now = this.now()) {
     const stamp = now.toDateString();
     if (this._dayStamp !== stamp) {
       this._dayStamp = stamp;
@@ -339,7 +345,7 @@ export class Sky {
   }
 
   /** The local hour the sky should be showing. */
-  targetHour(now = new Date()) {
+  targetHour(now = this.now()) {
     if (this.fixedHour !== null) return this.fixedHour;
     if (this.mode === 'live') return localHour(now);
     const { lat, lon } = this.place;
@@ -384,7 +390,7 @@ export class Sky {
   // --- Frame -----------------------------------------------------------------------
 
   update(dt, time) {
-    const now = new Date();
+    const now = this.now();
     // Ease towards the target hour the short way round, so changing mode
     // sweeps the sun across the sky rather than cutting
     let target = this.targetHour(now);
@@ -484,7 +490,7 @@ export class Sky {
   }
 
   /** One line for the title screen: the light, the place, and what the sun does next. */
-  describe(now = new Date()) {
+  describe(now = this.now()) {
     const parts = [this.mode === 'live' && this.fixedHour === null ? 'LIVE SKY' : 'SKY'];
     parts.push(this.place.name ? `${this.phase()} IN ${this.place.name.toUpperCase()}` : this.phase());
     const { rise, set } = this.day(now);

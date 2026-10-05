@@ -403,7 +403,7 @@ export class Hud {
         </div>
         <div class="btn-row">
           <button class="btn ghost" data-a="sky">${skyLabel(sky)}</button>
-          <button class="btn ghost" data-a="help">HOW TO PLAY</button>
+          <button class="btn ghost" data-a="help">HELP</button>
         </div>
         <button class="btn ghost" data-a="quit">QUIT TO TITLE</button>
       </div>`);

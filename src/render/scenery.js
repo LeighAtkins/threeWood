@@ -388,7 +388,9 @@ export function updateScenery(scenery, time, dt, sky) {
   waterUniforms.uTint.value.copy(sky.tint);
   waterUniforms.uLightDir.value.copy(sky.lightDir);
   waterUniforms.uLightColor.value.copy(sky.lightColor).multiplyScalar(0.25 + 0.75 * sky.dim);
-  scenery.clouds.material.emissive.copy(sky.look.cloud);
+  // Clouds keep a little of the lit colour in their shade, and sink back after dark
+  scenery.clouds.material.emissive.copy(sky.look.cloud).lerp(sky.look.cloudLit, 0.3);
+  scenery.clouds.material.color.setScalar(1 - 0.7 * sky.night);
   fireflyUniforms.uTime.value = time;
   fireflyUniforms.uNight.value = sky.night;
   scenery.fireflies.visible = sky.night > 0.02;

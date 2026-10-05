@@ -92,3 +92,24 @@ test('the soundtrack keeps a two-step backbeat and saves the snare for the round
   assert.equal(SCENE_LEVEL.title, 0);
   assert.equal(SCENE_LEVEL.flight, 2);
 });
+
+test('the almanac puts the sun and moon where they belong', async () => {
+  const { sunPosition, moonPosition, sunDay, guessPlace } = await import('../src/core/almanac.js');
+  const deg = 180 / Math.PI;
+  // Greenwich at the equinox: the noon sun stands at 90 - latitude, due south
+  const noon = sunPosition(new Date('2024-03-20T12:00:00Z'), 51.48, 0);
+  assert.ok(Math.abs(noon.altitude * deg - 38.5) < 0.5);
+  assert.ok(Math.abs(noon.azimuth * deg - 180) < 4);
+  // Mornings are in the east
+  assert.ok(sunPosition(new Date('2024-03-20T07:00:00Z'), 51.48, 0).azimuth * deg < 120);
+  // A known full moon and new moon
+  assert.ok(moonPosition(new Date('2024-01-25T17:54:00Z'), 0, 0).fraction > 0.99);
+  assert.ok(moonPosition(new Date('2024-01-11T11:57:00Z'), 0, 0).fraction < 0.01);
+  // Midsummer inside the Arctic circle: the sun never sets
+  assert.equal(sunDay(new Date('2026-06-21T12:00:00Z'), 70, 0).set, null);
+  // Place from a time zone, from a legacy alias, and from the clock alone
+  assert.deepEqual([guessPlace('Australia/Sydney').lat, guessPlace('Australia/Sydney').lon], [-34, 151]);
+  assert.equal(guessPlace('Asia/Calcutta').source, 'zone');
+  const blind = guessPlace('Nowhere/Land', -660, -600);
+  assert.ok(blind.lat < 0 && blind.lon === 150);
+});
