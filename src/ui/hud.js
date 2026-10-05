@@ -13,6 +13,7 @@ import { blobRadius, greenDistance } from '../course/shapes.js';
  * out, so it can be restyled without touching the rules.
  */
 
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const el = (tag, cls, html) => {
   const node = document.createElement(tag);
   if (cls) node.className = cls;
@@ -396,6 +397,7 @@ export class Hud {
         </div>
         <div class="title-foot">${best ? `BEST ROUND ${vsPar(best.score)} · ★ ${best.points.toLocaleString()}<br>` : ''}COURSE ${seed}${sky ? `<br>${sky}` : ''}</div>
         <button class="music-toggle" data-a="music">${musicLabel(music)}</button>
+        <button class="music-toggle" data-a="friends">PLAY WITH FRIENDS</button>
         <button class="music-toggle" data-a="camper">MY CAMPER</button>
         <button class="music-toggle" data-a="fishing">PRACTICE FISHING</button>
         <button class="music-toggle" data-a="grill">PRACTICE GRILL</button>
@@ -444,13 +446,14 @@ export class Hud {
     this.layer.appendChild(node);
   }
 
-  showSummary({ total, par, strokes, points, stats, card, best, seed, outfits = [], onAgain, onShare, onCamp }) {
+  showSummary({ total, par, strokes, points, stats, card, best, seed, outfits = [], board = null, onAgain, onShare, onCamp }) {
     this.clearLayer();
     const node = el('div', 'overlay dim', `
       <div class="card">
         <h2>ROUND COMPLETE</h2>
         <h1 class="gold">${vsPar(total)}</h1>
         <div class="result-score">${strokes} strokes · par ${par} · ★ ${points.toLocaleString()}${best ? ' · <b class="gold">NEW BEST!</b>' : ''}</div>
+        ${board ? `<div class="board">${board.map((b, i) => `<div class="${b.me ? 'me' : ''}"><span>${i + 1}. ${esc(b.name)}</span><span>${vsPar(b.total)}</span></div>`).join('')}</div>` : ''}
         ${scorecardHtml(card)}
         <div class="stats">${stats.map((s) => `<div class="stat"><b>${s.value}</b><span>${s.label}</span></div>`).join('')}</div>
         ${outfits.map((name) => `<div class="new-fit">NEW OUTFIT · ${name.toUpperCase()}</div>`).join('')}

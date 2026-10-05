@@ -30,6 +30,7 @@ import { Camper, GRIP } from './render/camper.js';
 import { buildCampsite } from './render/campsite.js';
 import { CamperUi } from './ui/camperUi.js';
 import { loadCamp, bump } from './core/camp.js';
+import { NetPlay } from './net/netplay.js';
 import { Audio } from './audio.js';
 import { Music } from './music.js';
 
@@ -99,6 +100,7 @@ export class Game {
     this.camperUi = new CamperUi(this.hud.root, this.hud.layer);
     this.newOutfits = [];
     this._pivot = new THREE.Vector3();
+    this.net = new NetPlay(this);
     this.cookHud = new CookHud(this.hud.root, this.hud.layer, () => this.eatFish());
     this.initBall();
     this.initInput();
@@ -126,6 +128,9 @@ export class Game {
     });
 
     this.showTitle();
+    // Opened from a friend's link: straight to their room
+    const room = new URLSearchParams(location.search).get('room');
+    if (room) this.net.openLobby(room);
     this.clock = new THREE.Clock();
     this.frameTimes = [];
     this.loop = this.loop.bind(this);
@@ -286,7 +291,7 @@ export class Game {
     this.loadWorld(designHole(this.seed, 1));
     this.ballMesh.visible = this.blob.visible = false;
     const saved = store.get(SAVE_KEY);
-    const usable = saved && saved.index < saved.holes.length;
+    const usable = saved && !saved.net && saved.index < saved.holes.length;
     this.hud.showTitle({
       saved: usable ? { hole: saved.index + 1, total: saved.scores.reduce((s, h) => s + h.strokes - h.par, 0) - 2 * (saved.gold || 0) } : null,
       best: store.get(BEST_KEY),
@@ -304,6 +309,7 @@ export class Game {
     if (choice === 'fishing') { this.practiceFishing(() => this.showTitle()); return; }
     if (choice === 'grill') { this.startCooking(() => this.showTitle()); return; }
     if (choice === 'camper') { this.openCreator(); return; }
+    if (choice === 'friends') { this.net.openLobby(); return; }
     const saved = store.get(SAVE_KEY);
     if (choice === 'continue' && saved) {
       this.seed = saved.seed;
@@ -333,6 +339,26 @@ export class Game {
     this.hud.clearLayer();
     this.keepAwake();
     this.startHole();
+  }
+
+  /** A round with friends: everyone builds the same course from the host's seed. */
+  startNetRound(seed, length) {
+    this.audio.unlock();
+    this.seed = seed;
+    this.round = {
+      net: true, daily: false, seed, length,
+      holes: roundHoles(length), index: 0, scores: [], points: 0, pureStreak: 0,
+      stats: { fairways: 0, fairwayChances: 0, gir: 0, putts: 0, longestDrive: 0, longestPutt: 0, pures: 0, swings: 0 },
+    };
+    this.rng = createGameRng(`${seed}:play:${Date.now()}`).rng;
+    this.hud.clearLayer();
+    this.keepAwake();
+    this.startHole();
+  }
+
+  /** NEXT on the result card: with friends, the room moves on together. */
+  pressNext() {
+    if (this.net.active) this.net.pressNext(); else this.nextHole?.();
   }
 
   /** Keep the screen on during a round (it is a long time between taps on a putt read). */
@@ -388,6 +414,7 @@ export class Game {
     this.holeLog = newHoleLog(spec.par);
     this.hud.setChallenge(this.challenge.text, null);
     this.hud.showIntro(this.introCard());
+    this.net.atHole();
     this.landing = null;
     this.aimAngle = Math.atan2(this.world.cup.z - this.ball.z, this.world.cup.x - this.ball.x);
     this.hud.drawMinimap(this.world, this.ball, null);
@@ -690,6 +717,7 @@ export class Game {
     this.ballScale = 1.4;
     this.walkIn = { t: 0, dur: 1.0 };
     this.cheerSpot = null;
+    this.net.atAim();
     this.showHint();
   }
 
@@ -812,7 +840,7 @@ export class Game {
     else if (this.state === 'swing' && !this.putting) this.advanceSwing();
     else if (this.state === 'swing' && this.putting && this.puttLatched) this.releasePutt();
     else if (this.state === 'flight') this.fastForward = true;
-    else if (this.state === 'result') this.nextHole?.();
+    else if (this.state === 'result') this.pressNext();
   }
 
   swingDown() {
@@ -821,6 +849,8 @@ export class Game {
     if (this.state === 'intro') { if (this.stateTime > 0.5) this.endIntro(); return; }
     if (this.state === 'flight') { this.fastForward = true; return; }
     if (this.state === 'aim') {
+      // With friends the first press says READY; the swing waits for GO
+      if (!this.net.clearToSwing()) return;
       this.walkIn = null; // swinging already: the camper is at the ball
       this.coachHeld = null;
       if (this.planDirty) this.updatePlan();
@@ -990,6 +1020,7 @@ export class Game {
     });
     this.beginFlight(false);
     launchBall(ball, launch);
+    this.net.shot({ kind: 'full', x: this.shot.fromX, z: this.shot.fromZ, launch });
     this.plan = this.planShot();
     this.shot.chase = this.plan.landTime > 2.1;
     // A decent strike can be worked in the air
@@ -1023,6 +1054,7 @@ export class Game {
     this.putts += 1;
     this.round.stats.putts += 1;
     puttBall(this.ball, { speed, dirX: this.dirX, dirZ: this.dirZ });
+    this.net.shot({ kind: 'putt', x: this.shot.fromX, z: this.shot.fromZ, speed, dirX: this.dirX, dirZ: this.dirZ });
     this.plan = this.planShot();
     this.audio.putt(speed);
     const off = (power - this.idealPct) / this.idealPct;
@@ -1332,6 +1364,7 @@ export class Game {
     const { shot, world, round } = this;
     const par = world.spec.par;
     this.holeLog.holed = true;
+    this.net.holedOut();
     if (!shot.putt && this.holeLog.onGreenIn === null) { this.holeLog.onGreenIn = this.strokes; this.holeLog.firstProximity = 0; }
     this.effects.endTrail();
     this.hud.setCarry(null);
@@ -1437,6 +1470,7 @@ export class Game {
     const log = this.holeLog;
     log.strokes = this.strokes; log.putts = this.putts;
     this.earn('holes');
+    if (this.net.active && this.net.friends.length) this.earn('friends');
     if (log.holed && this.strokes < par) this.earn('birdies');
     const won = !!this.challenge.test(log);
     if (won) {
@@ -1455,6 +1489,7 @@ export class Game {
     const d = this.strokes - par;
     this.hud.setPlayVisible(false);
     this.updateScoreHud();
+    this.net.holeDone(this.strokes, this.roundTotal());
     this.setState('result');
     this.nextHole = () => {
       this.nextHole = null;
@@ -1470,7 +1505,7 @@ export class Game {
       holePoints: this.holePoints,
       challenge: { text: this.challenge.text, won },
       card, last,
-      onNext: () => this.nextHole?.(),
+      onNext: () => this.pressNext(),
     });
   }
 
@@ -1509,6 +1544,7 @@ export class Game {
     this.newOutfits = [];
     const showCard = () => this.hud.showSummary({
       total, par, strokes, points: round.points, best, seed: round.seed, card, outfits,
+      board: this.net.active && this.net.players.length > 1 ? this.net.standings(total) : null,
       onCamp: () => {
         this.hud.clearLayer();
         this.camperUi.showPoses((pose) => this.setCampPose(pose), () => { this.setCampPose('sit'); showCard(); });
@@ -1522,6 +1558,7 @@ export class Game {
         { label: 'CHALLENGES', value: `★ ${round.stars || 0}/${round.holes.length}` },
       ],
       onAgain: () => {
+        this.net.leave();
         this.seedPinned = false;
         this.seed = generateSeed();
         history.replaceState(null, '', location.pathname);
@@ -1565,7 +1602,7 @@ export class Game {
       onMusic: () => this.toggleMusic(),
       onHelp: () => this.hud.showHelp(() => this.openMenuAgain()),
       onFishing: () => this.practiceFishing(() => this.openMenuAgain()),
-      onQuit: () => { this.paused = false; this.hud.clearLayer(); this.showTitle(); },
+      onQuit: () => { this.paused = false; this.net.leave(); this.hud.clearLayer(); this.showTitle(); },
     });
   }
 
@@ -1753,7 +1790,7 @@ export class Game {
         this.celebrateAngle += dt * 0.25;
         this.rig.orbit(world.cup.x, world.cup.y, world.cup.z, 9, 4, this.celebrateAngle);
         this.hud.setAutoProgress(this.stateTime / 9);
-        if (this.stateTime > 9) this.nextHole?.();
+        if (this.stateTime > 9 && !this.net.active) this.nextHole?.();
         break;
       default:
         break;
@@ -1826,6 +1863,7 @@ export class Game {
 
     this.updateClub(dt);
     this.updateCamper(dt);
+    this.net.update(dt);
     updateScenery(this.scenery, this.time, dt, this.sky);
     const onGreen = this.round && (this.putting || ball.surface === 'green') && this.state !== 'intro' && this.state !== 'title';
     updateFlag(this.scenery.flag, this.time, onGreen && this.state !== 'holed' && this.state !== 'result', camera);

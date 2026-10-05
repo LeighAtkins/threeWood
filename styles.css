@@ -661,3 +661,39 @@ button { font: inherit; color: inherit; border: 0; background: none; padding: 0;
 }
 .pose-bar button.on { background: var(--gold); color: #4a3200; }
 .pose-bar .back { background: rgba(255, 255, 255, 0.25); }
+
+/* ---- Friends: lobby, the room pill, names over heads ----------------------------- */
+.room-code { font-size: 64px !important; letter-spacing: 10px !important; margin: 4px 0 8px !important; }
+.join-row { display: flex; gap: 10px; align-items: stretch; margin-top: 12px; }
+.join-row .code {
+  flex: 1; min-width: 0; text-align: center; text-transform: uppercase;
+  font: inherit; font-size: 24px; font-weight: 800; letter-spacing: 6px;
+  border-radius: 16px; border: 0; background: rgba(255, 255, 255, 0.12); color: var(--cream);
+}
+.join-row .btn { margin-top: 0; width: auto; padding: 14px 22px; }
+.net-error { color: #ff9a86 !important; }
+.net-list { margin: 12px 0 4px; display: grid; gap: 6px; text-align: left; }
+.net-player { padding: 9px 12px; border-radius: 12px; background: rgba(255, 255, 255, 0.08); font-weight: 700; }
+.net-player i, .net-pill .who i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: #7bd152; margin-right: 8px; }
+.net-player small { opacity: 0.6; font-size: 10px; letter-spacing: 1px; margin-left: 4px; }
+.net-pill {
+  position: absolute; right: calc(var(--sar) + 10px); top: calc(var(--sat) + 172px);
+  padding: 6px 9px; border-radius: 12px; background: var(--panel); font-size: 11px; font-weight: 700;
+  display: grid; gap: 3px; max-width: 46vw;
+}
+.net-pill .who { display: flex; align-items: center; white-space: nowrap; }
+.net-pill .who b { overflow: hidden; text-overflow: ellipsis; }
+.net-pill .who span { margin-left: 8px; color: var(--gold); }
+.net-pill .who i { background: rgba(255, 255, 255, 0.3); }
+.net-pill .who.ready i { background: var(--gold); }
+.net-pill .who.busy i { background: #ff5a3c; }
+.net-pill .who.done i { background: #7bd152; }
+.net-tags { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.net-tag {
+  position: absolute; left: 0; top: 0; display: none; white-space: nowrap;
+  padding: 2px 8px; border-radius: 9px; background: rgba(16, 38, 26, 0.7); color: var(--cream);
+  font-size: 12px; font-weight: 700;
+}
+.card .board { margin: 8px 0; display: grid; gap: 4px; }
+.card .board div { display: flex; justify-content: space-between; padding: 6px 12px; border-radius: 10px; background: rgba(255, 255, 255, 0.08); font-weight: 700; }
+.card .board .me { background: rgba(255, 210, 63, 0.18); color: var(--gold); }

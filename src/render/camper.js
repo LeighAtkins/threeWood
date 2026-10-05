@@ -176,8 +176,8 @@ export class Camper {
 
     // ---- Head -----------------------------------------------------------------------------
     const head = this.head = new THREE.Group();
-    head.position.y = Y(HEAD) + 0.012;
-    head.scale.setScalar(1.2); // anime heads are big
+    head.position.y = Y(HEAD) - 0.012;
+    head.scale.setScalar(0.82); // close to real proportions: about five and a half heads tall
     upper.add(head);
     const R = 0.125;
     add(head, ball(R, 24, 18), skinMat, 0, 0, 0, 1, 0.97, 0.98);
@@ -189,9 +189,10 @@ export class Camper {
     const irisDeep = flat(new THREE.Color(EYE_COLORS[eyes]).multiplyScalar(0.55));
     for (const side of [-1, 1]) {
       const eye = new THREE.Group();
-      const ex = side * 0.05, ey = -0.012;
+      const ex = side * 0.046, ey = -0.008;
       eye.position.set(ex, ey, Math.sqrt(R * R - ex * ex - ey * ey) * 0.97);
       eye.rotation.y = side * 0.42;
+      eye.scale.setScalar(0.74); // bright, but not the whole face
       const disc = (r, material, x, y, z, sx = 1, sy = 1) => add(eye, ball(r, 14, 10), material, x, y, z, sx, sy, 0.16);
       disc(0.036, white, 0, 0, 0, 1, 1.22);
       disc(0.029, irisDeep, 0, -0.002, 0.003, 1, 1.3);
