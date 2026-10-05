@@ -7,9 +7,10 @@
  * the ball. Three games take turns, one per trip into the water:
  *
  *   drop   the hook swings by itself; one tap drops the line (timing)
- *   steer  the hook is yours: drag it down through the fish to the ball on
- *          the bottom, then bring the ball back up through them. A fish
- *          knocks the hook back to the top and the ball off it
+ *   steer  tap to cast, then drag left and right: the line goes down by
+ *          itself to the ball on the bottom and brings it back up, and you
+ *          steer it past the fish both ways. A fish knocks the hook back to
+ *          the top and the ball off it
  *   gold   the same, after a golden ball that will not keep still. Offered
  *          after two lost balls in a row: it forgives this stroke and gives
  *          those two back
@@ -120,6 +121,9 @@ export class Fishing {
     this.targetX = 0.5;                      // where a drag has asked the hook to be
     this.targetY = SURFACE - 0.04;
     this.stun = 0;                           // a fish has knocked the hook: no control
+    this.cast = false;                       // drag games: the line is in the water
+    this.clock = 0;                          // drag games: seconds since the cast
+    this.dirY = 1;                           // drag games: the line is going down (1) or up (-1)
     this.moved = 0;
     this.ballX0 = 0.3 + rng() * 0.4;
     this.ballPhase = rng() * 6.28;
@@ -139,7 +143,7 @@ export class Fishing {
     }
     this.bubbles = [];
     this.weeds = Array.from({ length: 7 }, (_, i) => ({ x: 0.06 + i * 0.15 + rng() * 0.05, h: 0.07 + rng() * 0.09, p: rng() * 6.28 }));
-    this.setCue(hint ? (mode === 'drop' ? 'tap' : 'shape') : null);
+    this.setCue(hint ? 'tap' : null);
     this.verdict.classList.add('hidden');
     this.node.classList.remove('hidden', 'won', 'lost', 'gold');
     this.node.classList.toggle('gold', mode === 'gold');
@@ -170,38 +174,60 @@ export class Fishing {
   }
 
   /** Button or key: drops the line in the games that have a drop. */
-  tap() { return this.mode === 'drop' ? this.dropLine() : false; }
+  tap() { return this.mode === 'drop' ? this.dropLine() : this.castLine(); }
+
+  /** Drag games: send the line down. From then on it is steered sideways. */
+  castLine() {
+    if (!this.active || this.phase !== 'play' || this.cast) return false;
+    this.cast = true;
+    this.setCue(this.hint ? 'drag' : null);
+    this.sounds.drop?.();
+    return true;
+  }
 
   press() {
     if (!this.active) return;
     this.held = true;
-    if (this.mode === 'drop') this.dropLine();
+    if (this.mode === 'drop') this.dropLine(); else this.castLine();
   }
 
-  /** dx, dy: finger travel as a fraction of the pond's width and height. */
-  drag(dx, dy = 0) {
-    if (!this.active || this.mode === 'drop' || this.phase !== 'play' || this.stun > 0) return;
+  /** dx: finger travel as a fraction of the pond's width. Sideways only. */
+  drag(dx) {
+    if (!this.active || this.mode === 'drop' || this.phase !== 'play' || !this.cast || this.stun > 0) return;
     this.targetX = Math.max(0.05, Math.min(0.95, this.targetX + dx));
-    this.targetY = Math.max(SURFACE - 0.04, Math.min(BED - 0.03, this.targetY + dy));
-    this.moved += Math.abs(dx) + Math.abs(dy);
+    this.moved += Math.abs(dx);
     if (this.moved > 0.25) this.setCue(null); // they have got it
   }
 
   release() { this.held = false; }
 
-  /** The drag games: the hook goes where the finger sends it, at its own pace. */
+  /**
+   * The drag games: once cast, the line travels down and up by itself and the
+   * finger only steers it sideways.
+   */
   updateDrag(dt) {
     const { hook, ball } = this;
-    if (this.t >= this.limit) { this.finish('miss'); return; }
+    const top = SURFACE - 0.04;
+    if (!this.cast) {
+      hook.y = top;
+      if (this.t > 3) this.castLine(); // nobody tapped: go anyway, so it never stalls
+      return;
+    }
+    this.clock += dt;
+    if (this.clock >= this.limit) { this.finish('miss'); return; }
     if (this.stun > 0) {
-      // Knocked by a fish: the hook shoots back to the top
+      // Knocked by a fish: the hook shoots back to the top, then goes down again
       this.stun -= dt;
-      hook.y = Math.max(SURFACE - 0.04, hook.y - 1.6 * dt);
-      this.targetX = hook.x; this.targetY = hook.y;
+      hook.y = Math.max(top, hook.y - 1.6 * dt);
+      this.targetX = hook.x;
+      this.dirY = 1;
     } else {
-      const max = (this.carry ? 0.6 : 0.85) * dt; // a loaded hook is slower
+      const max = 0.85 * dt;
       hook.x += Math.max(-max, Math.min(max, this.targetX - hook.x));
-      hook.y += Math.max(-max, Math.min(max, this.targetY - hook.y));
+      // Down to look for the ball; up with it (slowly), or up empty for another go
+      hook.y += this.dirY * (this.carry || this.dirY > 0 ? 0.3 : 0.9) * dt;
+      if (!this.carry && this.dirY > 0 && hook.y >= BED - 0.03) this.dirY = -1;
+      else if (!this.carry && this.dirY < 0 && hook.y <= top) { hook.y = top; this.dirY = 1; }
       const fish = this.fish.find((f) => Math.abs(f.x - hook.x) < f.size * 0.95 && Math.abs(f.y - hook.y) < f.size * 0.6);
       if (fish) {
         this.stun = 0.5;
@@ -209,6 +235,7 @@ export class Fishing {
         this.sounds.bump?.();
       } else if (!this.carry && Math.abs(hook.x - ball.x) < this.catchR * 0.75 && Math.abs(hook.y - ball.y) < 0.055) {
         this.carry = 'ball';
+        this.dirY = -1;
         this.sounds.hooked?.();
       }
     }
@@ -414,7 +441,7 @@ export class Fishing {
 
     // Time left: the bar along the bottom drains as the ball sinks
     if (this.phase === 'swing' || this.phase === 'play') {
-      const left = Math.max(0, 1 - this.t / (this.phase === 'play' ? this.limit : this.sinkFor));
+      const left = Math.max(0, this.phase === 'play' ? 1 - this.clock / this.limit : 1 - this.t / this.sinkFor);
       ctx.fillStyle = 'rgba(0,0,0,0.3)';
       ctx.fillRect(0, H - 0.02 * u, W, 0.02 * u);
       ctx.fillStyle = left < 0.3 ? '#ff5a3c' : '#ffd23f';
