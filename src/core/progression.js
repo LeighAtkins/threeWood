@@ -77,7 +77,7 @@ export function difficultyPips(courseD, level) {
 // Short, plain words and a picture each: they must work for someone reading
 // in their second language. icon names are drawn by ui/glyphs.js.
 const TIPS = [
-  { icon: 'tap3', text: 'Tap 3 times. This first time, the bar waits for you.' },
+  { icon: 'tap3', text: 'One tap for each dot on the button. This first time, the bar waits for you.' },
   { icon: 'wind', text: 'Wind pushes the ball. Aim a little into it.' },
   { icon: 'shape', text: 'Good hit? Swipe to curve the ball.' },
   { icon: 'dots', text: 'The dots roll downhill. Your putt line is shorter now.' },

@@ -265,7 +265,7 @@ button { font: inherit; color: inherit; border: 0; background: none; padding: 0;
 .glyph svg, .glyph i { position: absolute; }
 .g-hand { inset: 0; width: 100%; height: 100%; filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.25)); }
 .g-arrow { width: 34%; height: 34%; }
-.g-pips { display: flex; gap: 5px; justify-content: center; margin-top: 2px; }
+.g-pips { display: flex; gap: 5px; justify-content: center; align-items: center; margin-top: 2px; }
 .g-pips i { width: 9px; height: 9px; border-radius: 50%; background: rgba(18, 38, 26, 0.25); }
 .g-pips i.done { background: #1b7a3a; }
 .g-pips i.now { background: #12261a; transform: scale(1.35); }
@@ -514,3 +514,29 @@ button { font: inherit; color: inherit; border: 0; background: none; padding: 0;
   #minimap { width: 150px; height: 150px; }
   .hole-pill .big { font-size: 20px; }
 }
+
+/* Full-power shots: the middle step is not a tap. It is a MAX tag on the
+   button, and on the bar the power fills itself up to the same tag. */
+.g-pips b {
+  font-size: 9px; font-weight: 800; letter-spacing: 0.5px; line-height: 1;
+  padding: 2px 4px; border-radius: 6px;
+  background: rgba(18, 38, 26, 0.3); color: #fff8ec;
+}
+.g-pips b.done { background: #12261a; }
+.g-pips b.now { background: #12261a; color: var(--gold); animation: maxNow 0.5s infinite; }
+@keyframes maxNow { 50% { transform: scale(1.18); } }
+.meter .max-tag {
+  display: none; position: absolute; right: 0; bottom: 2px;
+  font-size: 11px; font-weight: 800; letter-spacing: 1px;
+  padding: 3px 8px; border-radius: 8px;
+  background: var(--gold); color: #4a3200;
+  animation: maxNow 0.5s infinite;
+}
+.meter.auto .max-tag { display: block; }
+.meter.auto .fill {
+  background-image: repeating-linear-gradient(110deg, rgba(255, 255, 255, 0.35) 0 8px, transparent 8px 16px), linear-gradient(90deg, #7bd152, #ffd23f 70%, #ff5a3c);
+  background-size: 32px 100%, 100% 100%;
+  animation: autoFill 0.5s infinite linear;
+}
+@keyframes autoFill { to { background-position: 32px 0, 0 0; } }
+.meter .flag.later { opacity: 0.45; animation: none; }

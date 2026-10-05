@@ -557,9 +557,12 @@ export class Game {
     } else {
       const max = Math.round(distanceAt(this.club, 100, lie.speedFactor));
       this.hud.setClub({ name: this.club.name, yards: `${max}y max`, lie: lieText, lieBad: penalty > 0, canChange: true });
-      this.hud.setAction('swing');
+      this.hud.setAction('swing', this.fullPower);
     }
   }
+
+  /** The shot needs everything the club has: power sets itself, two taps. */
+  get fullPower() { return !this.putting && !this.idealPower; }
 
   /** Recompute the shot preview for the current aim/club. */
   updatePlan() {
@@ -586,7 +589,10 @@ export class Game {
       this.hud.setMeterSteps(null);
     } else {
       const reach = distanceAt(this.club, 100, this.lie.speedFactor);
-      this.idealPower = reach >= this.targetDist ? powerFor(this.club, this.targetDist, this.lie.speedFactor) : null;
+      // Near enough to everything the club has counts as a full shot: asking
+      // for a tap a hair before the bar tops out is a trap, not a skill
+      const want = reach >= this.targetDist ? powerFor(this.club, this.targetDist, this.lie.speedFactor) : null;
+      this.idealPower = want && want < 96 ? want : null;
       this.slope = slopeAlong(world, ball, dirX, dirZ);
       const launch = buildLaunch({
         club: this.club, power: this.idealPower ?? 100, dirX, dirZ, lie: this.lie, slope: this.slope,
@@ -604,7 +610,7 @@ export class Game {
       this.landing = { x: preview.landX, y: preview.landY, z: preview.landZ };
       const camDist = Math.hypot(preview.landX - this.camera.position.x, preview.landZ - this.camera.position.z);
       this.effects.showAim(preview.points, preview.landX, world.heightAt(preview.landX, preview.landZ), preview.landZ, camDist);
-      if (this.state === 'aim') this.hud.hideMeter();
+      if (this.state === 'aim') { this.hud.hideMeter(); this.hud.setAction('swing', this.fullPower); }
     }
     this.planDirty = false;
   }
@@ -663,9 +669,11 @@ export class Game {
           this.hud.setMeterFlag(markerToPercent(this.idealPower), 'tap');
           this.hud.setAction('power');
         } else {
-          // Out of range: the bar fills itself, no second tap needed
+          // Full power: the bar fills itself to MAX, no second tap needed.
+          // The one tap still to come is already marked, dimmed, on the line
           this.hud.setMeterCaption('');
-          this.hud.setMeterFlag(null);
+          this.hud.setMeterAuto(true);
+          this.hud.setMeterFlag(markerToPercent(SWING.LINE), 'tap', false, true);
           this.hud.setAction('wait');
         }
         this.hud.demo(null);
@@ -709,7 +717,7 @@ export class Game {
     if (event.type === 'powerLocked') {
       this.lockGrace = 0.2;
       this.audio.powerLock(event.power);
-      this.hud.setAction('strike');
+      this.hud.setAction('strike', !this.idealPower);
       this.hud.setMeterCaption('');
       this.hud.setMeterFlag(markerToPercent(SWING.LINE), 'tap');
       this.hud.setMeterSteps(3);

@@ -68,7 +68,7 @@ export class Hud {
       <div class="meter hidden">
         <div class="steps hidden"><i>1 START</i><i>2 POWER</i><i>3 STRIKE</i></div>
         <div class="caption"></div>
-        <div class="flag-rail"><div class="flag hidden"></div></div>
+        <div class="flag-rail"><div class="flag hidden"></div><div class="max-tag">MAX</div></div>
         <div class="track">
           <div class="fill"></div>
           <div class="zone good"></div><div class="zone pure"></div>
@@ -220,22 +220,24 @@ export class Hud {
    * The button shows the gesture it wants next, as a picture:
    *   swing / power / strike  tap (the dots count the three taps)
    *   wait     hands off, the bar is filling itself
+   *   full     a full-power shot: two taps, the middle step is a MAX tag
    *   hold     press and keep pressing      release  let go now
    *   tap      one tap (tap-tap putting)
    */
-  setAction(kind) {
+  setAction(kind, full = false) {
     const faces = {
-      swing:   [glyph('tap') + pips(0), 'ready', 'Tap to swing'],
+      swing:   [glyph('tap') + pips(0, 3, full), 'ready', full ? 'Tap to swing at full power' : 'Tap to swing'],
       power:   [glyph('tap') + pips(1), 'go', 'Tap to set power'],
-      wait:    [glyph('wait') + pips(1), 'disabled', 'Wait'],
-      strike:  [glyph('tap') + pips(2), 'go', 'Tap to strike'],
+      wait:    [glyph('wait') + pips(1, 3, true), 'disabled', 'Wait'],
+      strike:  [glyph('tap') + pips(2, 3, full), 'go', 'Tap to strike'],
       hold:    [glyph('hold'), 'ready', 'Hold to putt'],
       release: [glyph('release'), 'go', 'Let go'],
       tap:     [glyph('tap'), 'go', 'Tap to putt'],
     };
     const [html, mode, label] = faces[kind];
-    if (this.actionKind !== kind) {
-      this.actionKind = kind;
+    const key = `${kind}${full ? '+' : ''}`;
+    if (this.actionKind !== key) {
+      this.actionKind = key;
       this.swingBtn.innerHTML = html;
       this.swingBtn.setAttribute('aria-label', label);
     }
@@ -266,7 +268,11 @@ export class Hud {
     this.lock.classList.add('hidden');
     this.fill.style.left = `${pct(0)}%`;
     this.fill.style.width = '0%';
+    this.setMeterAuto(false);
   }
+
+  /** Full-power shot: the bar is filling itself to the MAX tag at its end. */
+  setMeterAuto(on) { this.meter.classList.toggle('auto', on); }
 
   updateSwingMeter(swing) {
     const pct = markerToPercent;
@@ -284,6 +290,7 @@ export class Hud {
   showPuttMeter(idealPct) {
     this.meter.classList.remove('hidden');
     this.meter.dataset.mode = 'putt';
+    this.setMeterAuto(false);
     this.zonePure.classList.add('hidden');
     this.zoneGood.classList.add('hidden');
     this.line.classList.add('hidden');
@@ -305,13 +312,15 @@ export class Hud {
 
   /**
    * A gesture glyph standing on the bar exactly where the tap (or the
-   * release) belongs. kind: 'tap' | 'release'; now = do it this instant.
+   * release) belongs. kind: 'tap' | 'release'; now = do it this instant,
+   * later = not yet (dimmed: it marks the tap that is still to come).
    */
-  setMeterFlag(pct, kind = 'tap', now = false) {
+  setMeterFlag(pct, kind = 'tap', now = false, later = false) {
     this.meterFlag.classList.toggle('hidden', pct == null);
     if (pct == null) return;
     if (this.flagKind !== kind) { this.flagKind = kind; this.meterFlag.innerHTML = glyph(kind); }
     this.meterFlag.classList.toggle('now', now);
+    this.meterFlag.classList.toggle('later', later);
     this.meterFlag.style.left = `${pct}%`;
   }
 
@@ -486,6 +495,7 @@ export class Hud {
         <h2>HOW TO PLAY</h2>
         ${row(glyph('drag'), 'Aim', 'Drag left or right')}
         ${row(glyph('tap') + pips(0), 'Swing', 'Tap 3 times: start, power, hit')}
+        ${row(glyph('tap') + pips(0, 3, true), 'Long shot', 'MAX power fills itself: tap 2 times')}
         ${row(glyph('shape'), 'Curve', 'Good hit? Swipe while it flies')}
         ${row(glyph('hold'), 'Putt', 'Hold, then let go on the mark')}
         <button class="btn" data-a="close">OK</button>

@@ -38,10 +38,17 @@ export function glyph(kind, extraClass = '') {
   return `<span class="glyph g-${kind} ${extraClass}">${BODY[kind] || ''}</span>`;
 }
 
-/** Three dots: how many taps this swing has had, and which is next. */
-export function pips(done, total = 3) {
+/**
+ * Three steps: how many taps this swing has had, and which is next. A round
+ * dot is a tap. auto = a full-power shot: the middle step is not a tap, the
+ * bar fills itself, so it is drawn as a MAX tag instead of a dot.
+ */
+export function pips(done, total = 3, auto = false) {
   let html = '<span class="g-pips">';
-  for (let i = 0; i < total; i++) html += `<i class="${i < done ? 'done' : i === done ? 'now' : ''}"></i>`;
+  for (let i = 0; i < total; i++) {
+    const state = i < done ? 'done' : i === done ? 'now' : '';
+    html += auto && i === 1 ? `<b class="${state}">MAX</b>` : `<i class="${state}"></i>`;
+  }
   return `${html}</span>`;
 }
 
