@@ -583,3 +583,46 @@ button { font: inherit; color: inherit; border: 0; background: none; padding: 0;
 
 /* Practice: the way out sits under the cue */
 .fishing .done { width: auto; padding: 10px 26px; margin: 0; }
+
+/* ---- Yakizakana: two doneness bars and the EAT button --------------------------- */
+.cook { position: absolute; inset: 0; pointer-events: none; }
+.cook-bars {
+  position: absolute; left: 50%; top: calc(var(--sat) + 70px); transform: translateX(-50%);
+  width: min(340px, calc(100% - 28px)); display: grid; gap: 10px;
+  padding: 12px 14px; border-radius: 18px; background: rgba(16, 38, 26, 0.6);
+}
+.cook-bar { display: flex; align-items: center; gap: 10px; }
+.cook-bar .flame {
+  flex: none; width: 16px; height: 20px; border-radius: 50% 50% 50% 50% / 62% 62% 38% 38%;
+  background: #ff8a2b; opacity: 0.15;
+}
+.cook-bar.lit .flame { opacity: 1; animation: maxNow 0.4s infinite; box-shadow: 0 0 10px #ffb347; }
+.cook-bar .track {
+  position: relative; flex: 1; height: 20px; border-radius: 10px; overflow: hidden;
+  background: #8fa0aa; border: 3px solid var(--cream);
+}
+.cook-bar .zone { position: absolute; top: 0; bottom: 0; }
+.cook-bar .zone.ok { background: #7bd152; }
+.cook-bar .zone.best { background: var(--gold); }
+.cook-bar .zone.bad { background: #3a1410; }
+.cook-bar .mark {
+  position: absolute; top: -3px; bottom: -3px; width: 7px; margin-left: -3.5px; border-radius: 4px;
+  background: #fff; box-shadow: 0 0 0 2px #12261a;
+}
+.cook.flare .cook-bars { box-shadow: 0 0 0 4px #ff5a1e, 0 0 26px #ff8a2b; }
+.cook-cue {
+  position: absolute; left: 50%; top: 72%; transform: translateX(-50%);
+  padding: 14px 40px; border-radius: 22px; background: rgba(16, 38, 26, 0.5);
+}
+.cook-cue .glyph { width: 56px; height: 56px; display: block; }
+.cook-eat {
+  position: absolute; right: calc(var(--sar) + 16px); bottom: calc(var(--sab) + 22px);
+  width: 104px; height: 104px; border-radius: 50%;
+  pointer-events: auto; touch-action: none; cursor: pointer;
+  font: inherit; font-size: 22px; font-weight: 800; letter-spacing: 1px;
+  background: #8fa0aa; color: #12261a; border: 4px solid var(--cream);
+  box-shadow: 0 6px 0 rgba(0, 0, 0, 0.35);
+}
+.cook-eat.ready { background: #7bd152; }
+.cook-eat.best { background: var(--gold); animation: pulse 0.7s infinite; }
+.cook.over .cook-eat { display: none; }

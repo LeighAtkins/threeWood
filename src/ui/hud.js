@@ -397,6 +397,7 @@ export class Hud {
         <div class="title-foot">${best ? `BEST ROUND ${vsPar(best.score)} · ★ ${best.points.toLocaleString()}<br>` : ''}COURSE ${seed}${sky ? `<br>${sky}` : ''}</div>
         <button class="music-toggle" data-a="music">${musicLabel(music)}</button>
         <button class="music-toggle" data-a="fishing">PRACTICE FISHING</button>
+        <button class="music-toggle" data-a="grill">PRACTICE GRILL</button>
       </div>`);
     node.addEventListener('click', (e) => {
       const a = e.target.closest('[data-a]')?.dataset.a;

@@ -24,6 +24,8 @@ import {
 } from './core/progression.js';
 import { Hud, scoreName } from './ui/hud.js';
 import { Fishing } from './ui/fishing.js';
+import { CookHud } from './ui/cookHud.js';
+import { Grill } from './render/grill.js';
 import { Audio } from './audio.js';
 import { Music } from './music.js';
 
@@ -81,6 +83,8 @@ export class Game {
       onMusic: () => this.toggleMusic(),
     });
     this.fishing = new Fishing(this.hud.root, this.hud.layer);
+    this.grill = new Grill(this.scene);
+    this.cookHud = new CookHud(this.hud.root, this.hud.layer, () => this.eatFish());
     this.initBall();
     this.initInput();
 
@@ -92,7 +96,7 @@ export class Game {
     this.simAccumulator = 0;
     this.events = [];
     this.swing = createSwing();
-    this.hints = { swing: 0, putt: 0, spin: 0, fish: 0, ...(store.get(HINT_KEY) || {}) };
+    this.hints = { swing: 0, putt: 0, spin: 0, fish: 0, cook: 0, ...(store.get(HINT_KEY) || {}) };
 
     this.seedPinned = !!getSeedFromUrl();
     this.seed = getSeedFromUrl() || store.get(SAVE_KEY)?.seed || generateSeed();
@@ -210,6 +214,9 @@ export class Game {
         if (drag.moved > 14) this.hud.demo(null); // they have got it
       } else if (this.state === 'flight' && !this.paused) {
         this.afterTouch(dx, e.clientY - prevY);
+      } else if (this.state === 'cook') {
+        this.grill.turn(dx / Math.max(320, Math.min(window.innerWidth, 900)));
+        if (this.grill.spin > 0.3) this.cookHud.hideCue();
       }
     });
     const end = (e) => {
@@ -278,6 +285,7 @@ export class Game {
     this.audio.unlock();
     this.audio.tap();
     if (choice === 'fishing') { this.practiceFishing(() => this.showTitle()); return; }
+    if (choice === 'grill') { this.startCooking(() => this.showTitle()); return; }
     const saved = store.get(SAVE_KEY);
     if (choice === 'continue' && saved) {
       this.seed = saved.seed;
@@ -422,6 +430,7 @@ export class Game {
 
   setState(state) {
     if (state !== 'fishing' && this.fishing?.active) this.fishing.stop();
+    if (state !== 'cook' && this.grill?.active) { this.grill.stop(); this.cookHud.hide(); }
     this.state = state;
     this.stateTime = 0;
     this.music.setScene(state);
@@ -1031,7 +1040,12 @@ export class Game {
           this.award('Fished it out', 150, true);
           this.dropBall(1.1);
         } else {
-          if (result === 'fish') { this.hud.callout('A FISH!', 'small'); this.award('Caught a fish', 50, true); }
+          if (result === 'fish') {
+            // Dinner: it goes on the fire once the hole is finished
+            this.round.fish = (this.round.fish || 0) + 1;
+            this.hud.callout('A FISH!', 'small');
+            this.award('Caught a fish', 50, true);
+          }
           this.takePenalty();
         }
       },
@@ -1181,7 +1195,72 @@ export class Game {
     this.announced = false;
   }
 
+  /**
+   * Yakizakana: the camera swings over to a fire by the green and the fish
+   * caught on this hole goes on it. then() runs when it has been eaten (or
+   * burnt). Free play (practice) passes no round and scores nothing.
+   */
+  startCooking(then) {
+    const { world } = this;
+    const spot = Grill.place(world, this.scenery.placed);
+    const y = world.heightAt(spot.x, spot.z);
+    // Camera stands on the green side of the fire, the skewer across its view
+    const view = Math.atan2(world.cup.z - spot.z, world.cup.x - spot.x);
+    this.cookView = { x: spot.x, y, z: spot.z, angle: view };
+    this.cookThen = then;
+    this.cookEnd = null;
+    this.hud.setPlayVisible(false);
+    this.hud.clearLayer();
+    this.ballMesh.visible = this.blob.visible = false;
+    this.setState('cook');
+    this.grill.start({
+      x: spot.x, y, z: spot.z,
+      facing: Math.atan2(-Math.cos(view), -Math.sin(view)),
+      level: this.assists?.level ?? 0.3,
+    });
+    this.cookHud.show(this.hints.cook < 3);
+    this.cookHud.update(this.grill);
+    this.audio.whoosh();
+  }
+
+  /** The EAT button: take the fish off the fire as it is. */
+  eatFish() {
+    if (this.state !== 'cook' || this.cookEnd !== null || this.stateTime < 1.2) return;
+    this.cookResult(this.grill.take());
+  }
+
+  cookResult(grade) {
+    this.cookEnd = this.stateTime;
+    this.cookHud.finish();
+    if (this.hints.cook < 3) { this.hints.cook += 1; store.set(HINT_KEY, this.hints); }
+    const scoring = !!this.round;
+    if (grade === 'perfect') {
+      this.hud.callout('PERFECT YAKIZAKANA!', 'gold');
+      if (scoring) this.award('Perfect yakizakana', 600, true);
+      this.audio.fanfare(2);
+    } else if (grade === 'cooked') {
+      this.hud.callout('TASTY!', '');
+      if (scoring) this.award('Yakizakana', 250, true);
+      this.audio.reward(3);
+    } else if (grade === 'raw') {
+      this.hud.callout('STILL RAW…', 'bad small');
+      if (scoring) this.award('Raw fish', 30, true);
+      this.audio.reward(0);
+    } else {
+      this.hud.callout('BURNT!', 'bad');
+      this.hud.callout('NOTHING TO EAT', 'bad small');
+      this.audio.penalty();
+    }
+  }
+
   finishHole() {
+    if (!Number.isFinite(this.celebrateAngle)) this.celebrateAngle = 0; // picked up before ever holing out
+    // A fish caught on this hole is grilled before the card comes up
+    if (this.round.fish) {
+      this.round.fish = 0;
+      this.startCooking(() => this.finishHole());
+      return;
+    }
     const { round, world } = this;
     const par = world.spec.par;
     const log = this.holeLog;
@@ -1289,7 +1368,7 @@ export class Game {
   // ===========================================================================
 
   openMenu() {
-    if (!this.round || this.paused || this.state === 'result' || this.state === 'summary' || this.state === 'fishing') return;
+    if (!this.round || this.paused || this.state === 'result' || this.state === 'summary' || this.state === 'fishing' || this.state === 'cook') return;
     this.paused = true;
     this.audio.tap();
     this.hud.showMenu({
@@ -1441,6 +1520,24 @@ export class Game {
       case 'fishing':
         this.fishing.update(dt);
         break;
+      case 'cook': {
+        const v = this.cookView;
+        this.rig.orbit(v.x, v.y + 0.5, v.z, 2.1, 1.55, v.angle);
+        // Nothing cooks until the camera has arrived
+        if (this.stateTime > 1.2) {
+          if (this.grill.update(dt) && this.cookEnd === null) this.cookResult('burnt');
+        } else {
+          this.grill.paint();
+        }
+        this.cookHud.update(this.grill);
+        if (this.cookEnd !== null && this.stateTime - this.cookEnd > 1.8) {
+          const then = this.cookThen;
+          this.cookThen = null;
+          this.setState('settle'); // puts the fire away
+          then?.();
+        }
+        break;
+      }
       case 'settle':
         if (this.shot?.putt) this.rig.watch(ball); else if (this.rig.mode === 'landing') this.rig.landing(ball, this.plan, this.shot.fromX, this.shot.fromZ);
         if (this.stateTime > this.settleFor) this.afterSettle();
