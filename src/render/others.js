@@ -69,6 +69,7 @@ export class Others {
       const off = (i % 2 ? 1 : -1) * Math.ceil(i / 2) * 2.2;
       o.status = 'aim';
       o.flying = false;
+      o.camp = null;
       this.put(o, world, tee.x + sx * off - (cup.x - tee.x) / d * 1.5, tee.z + sz * off - (cup.z - tee.z) / d * 1.5, true);
       o.ball.visible = false; // not hit yet: only the camper waits by the tee
     }
@@ -96,6 +97,22 @@ export class Others {
     o.flying = false;
     o.holed = false;
     this.put(o, world, x, z, false);
+  }
+
+  /** The round is over: stand them round the fire. list: [{ id, x, y, z, yaw, pose }] */
+  camp(list) {
+    for (const at of list) {
+      const o = this.map.get(at.id);
+      if (!o) continue;
+      o.camp = at.pose;
+      o.flying = false;
+      o.placed = true;
+      o.target = null;
+      o.ball.visible = false;
+      o.camper.group.position.set(at.x, at.y, at.z);
+      o.camper.group.rotation.y = at.yaw;
+      o.camper.group.scale.setScalar(1.75);
+    }
   }
 
   setStatus(id, status) { const o = this.map.get(id); if (o) o.status = status; }
@@ -129,6 +146,7 @@ export class Others {
       const g = o.camper.group;
       if (!show || !o.placed) { g.visible = false; o.ball.visible = false; o.tag.style.display = 'none'; continue; }
       g.visible = true;
+      if (o.camp) { o.ball.visible = false; o.camper.update(dt, o.camp); this.tagAt(o, 1.75, camera); continue; }
       if (o.flying) {
         o.acc += dt; o.flyT += dt;
         while (o.acc >= SIM_DT && o.flying) {
@@ -163,11 +181,16 @@ export class Others {
       }
       o.camper.update(dt, pose);
 
-      // Name over the head
-      const v = this._v.set(g.position.x, g.position.y + SCALE * 1.12, g.position.z).project(camera);
-      const on = v.z < 1 && Math.abs(v.x) < 1.05 && Math.abs(v.y) < 1.05;
-      o.tag.style.display = on ? 'block' : 'none';
-      if (on) o.tag.style.transform = `translate(${(v.x * 0.5 + 0.5) * window.innerWidth}px, ${(-v.y * 0.5 + 0.5) * window.innerHeight}px) translate(-50%, -100%)`;
+      this.tagAt(o, SCALE, camera);
     }
+  }
+
+  /** Name over the head. */
+  tagAt(o, scale, camera) {
+    const g = o.camper.group;
+    const v = this._v.set(g.position.x, g.position.y + scale * 1.08, g.position.z).project(camera);
+    const on = v.z < 1 && Math.abs(v.x) < 1.05 && Math.abs(v.y) < 1.05;
+    o.tag.style.display = on ? 'block' : 'none';
+    if (on) o.tag.style.transform = `translate(${(v.x * 0.5 + 0.5) * window.innerWidth}px, ${(-v.y * 0.5 + 0.5) * window.innerHeight}px) translate(-50%, -100%)`;
   }
 }

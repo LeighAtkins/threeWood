@@ -435,13 +435,15 @@ export class Sky {
     this.sun.color.copy(this.lightColor);
     this.hemi.color.copy(look.hemi);
     this.hemi.groundColor.copy(this.ground).multiplyScalar(look.bounce);
-    this.hemi.intensity = look.hemiI;
+    // Night golf: lift the fill after dark so the course reads, and let the
+    // glowing turf and lanterns (nightGlow.js) do the rest
+    this.hemi.intensity = look.hemiI * (1 + 1.3 * this.night);
 
     const fog = this.scene.fog;
     fog.color.copy(look.fog);
     fog.near = look.fogNear;
     fog.far = look.fogFar;
-    this.renderer.toneMappingExposure = look.exposure;
+    this.renderer.toneMappingExposure = look.exposure * (1 + 0.3 * this.night);
     this.dim = look.dim;
     this.tint.setRGB(1, 1, 1).lerp(look.hemi, this.night * 0.8).multiplyScalar(look.dim);
 

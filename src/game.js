@@ -31,6 +31,7 @@ import { buildCampsite } from './render/campsite.js';
 import { CamperUi } from './ui/camperUi.js';
 import { loadCamp, bump } from './core/camp.js';
 import { NetPlay } from './net/netplay.js';
+import { buildNightGlow, updateNightGlow } from './render/nightGlow.js';
 import { Audio } from './audio.js';
 import { Music } from './music.js';
 
@@ -202,6 +203,9 @@ export class Game {
       new THREE.MeshStandardMaterial({ map, roughness: 0.4, emissive: 0xffffff, emissiveMap: map, emissiveIntensity: 0.42 }));
     this.ballMesh.castShadow = true;
     this.scene.add(this.ballMesh);
+    // A glow that travels with the ball at night
+    this.ballLight = new THREE.PointLight(0xcfeeff, 0, 11, 1.4);
+    this.scene.add(this.ballLight);
     // Blob shadow: the depth cue that makes ball flight readable
     this.blob = new THREE.Mesh(
       new THREE.CircleGeometry(1, 16).rotateX(-Math.PI / 2),
@@ -379,6 +383,9 @@ export class Game {
     this.terrain = buildTerrainMesh(this.world);
     this.scenery = buildScenery(this.world, { lowDetail: this.coarse });
     this.scene.add(this.terrain, this.scenery.group);
+    if (this.nightGlow) { this.scene.remove(this.nightGlow); disposeGroup(this.nightGlow); }
+    this.nightGlow = buildNightGlow(this.world);
+    this.scene.add(this.nightGlow);
     this.sky.setHole(this.world);
     this.rig.setWorld(this.world, this.scenery.placed);
     this.effects.hideAim();
@@ -670,6 +677,7 @@ export class Game {
     this.campsite.rotation.y = facing + Math.PI; // its front faces the camera
     this.campsite.visible = true;
     this.setCampPose('sit');
+    this.net.campfire(this.campsite);
   }
 
   setCampPose(pose) {
@@ -1865,6 +1873,14 @@ export class Game {
     this.updateCamper(dt);
     this.net.update(dt);
     updateScenery(this.scenery, this.time, dt, this.sky);
+    // After dark: the course, the ball and the campers carry their own light
+    const night = this.sky.night;
+    updateNightGlow(this.nightGlow, night, this.time);
+    this.ballMesh.material.emissiveIntensity = 0.42 + night * 0.9;
+    this.ballLight.intensity = this.ballMesh.visible ? night * 7 : 0;
+    this.ballLight.position.set(this.ballMesh.position.x, this.ballMesh.position.y + 0.7, this.ballMesh.position.z);
+    this.camper.setGlow(night);
+    for (const o of this.net.others.map.values()) o.camper.setGlow(night);
     const onGreen = this.round && (this.putting || ball.surface === 'green') && this.state !== 'intro' && this.state !== 'title';
     updateFlag(this.scenery.flag, this.time, onGreen && this.state !== 'holed' && this.state !== 'result', camera);
     this.effects.update(dt, this.time);

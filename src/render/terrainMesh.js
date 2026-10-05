@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { SURFACE_IDS } from '../course/courseWorld.js';
 import { pathInfo, smoothstep, lerp } from '../course/shapes.js';
 import { createGameRng } from '../core/rng.js';
+import { terrainGlow } from './nightGlow.js';
 
 /**
  * Terrain mesh, built vertex-for-vertex from the world grid the physics uses.
@@ -114,6 +115,15 @@ export function buildTerrainMesh(world) {
     flatShading: true,
     map: getGrainTexture(),
   });
+  // Night golf: after dark the turf gives back its own colour, the mown grass most
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.uGlow = terrainGlow;
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform float uGlow;')
+      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+        float lawn = smoothstep(0.0, 0.22, vColor.g - max(vColor.r, vColor.b));
+        totalEmissiveRadiance += vColor.rgb * vec3(0.75, 1.15, 0.95) * uGlow * (0.3 + 0.9 * lawn);`);
+  };
   const mesh = new THREE.Mesh(geometry, material);
   mesh.receiveShadow = true;
   mesh.name = 'terrain';

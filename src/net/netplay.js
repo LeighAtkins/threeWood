@@ -349,6 +349,20 @@ export class NetPlay {
       .sort((a, b) => a.total - b.total);
   }
 
+  /** The round is over: friends gather round the fire with you. site: the campsite group */
+  campfire(site) {
+    if (!this.active) return;
+    const spots = [[1.3, 0.4, -0.8, 'hello'], [0.55, -1.2, -0.2, 'cheer'], [-2.1, 0.75, 0.85, 'peace']];
+    site.updateMatrixWorld();
+    const v = this.others._v;
+    this.others.camp(this.friends.slice(0, spots.length).map((p, i) => {
+      const [x, z, yaw, pose] = spots[i];
+      v.set(x, 0, z).applyMatrix4(site.matrixWorld);
+      return { id: p.id, x: v.x, y: this.g.world.heightAt(v.x, v.z), z: v.z, yaw: yaw + site.rotation.y, pose };
+    }));
+    this.pill.classList.add('hidden');
+  }
+
   /** The pill under the score: who is in the room and what they are doing. */
   paint() {
     this.pill.classList.toggle('hidden', !this.active || this.g.state === 'title');
@@ -367,7 +381,7 @@ export class NetPlay {
 
   update(dt) {
     const g = this.g;
-    const show = this.active && ['aim', 'swing', 'flight', 'settle', 'holed', 'result', 'fishing'].includes(g.state);
+    const show = this.active && ['aim', 'swing', 'flight', 'settle', 'holed', 'result', 'fishing', 'summary'].includes(g.state);
     if (g.world) this.others.update(dt, g.world, g.env, g.camera, show);
     if (!this.active || !this.room.isHost) return;
     if (this.waitT !== null) {
