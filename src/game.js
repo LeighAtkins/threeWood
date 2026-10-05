@@ -264,7 +264,7 @@ export class Game {
     const saved = store.get(SAVE_KEY);
     const usable = saved && saved.index < saved.holes.length;
     this.hud.showTitle({
-      saved: usable ? { hole: saved.index + 1, total: saved.scores.reduce((s, h) => s + h.strokes - h.par, 0) } : null,
+      saved: usable ? { hole: saved.index + 1, total: saved.scores.reduce((s, h) => s + h.strokes - h.par, 0) - 2 * (saved.gold || 0) } : null,
       best: store.get(BEST_KEY),
       daily: store.get(DAILY_KEY)?.[dailySeed()] ?? null,
       seed: this.seed,
@@ -399,7 +399,7 @@ export class Game {
   }
 
   roundTotal() {
-    return this.round.scores.reduce((s, h) => s + h.strokes - h.par, 0);
+    return this.round.scores.reduce((s, h) => s + h.strokes - h.par, 0) - 2 * (this.round.gold || 0);
   }
 
   updateScoreHud(label) {
@@ -990,10 +990,17 @@ export class Game {
   goFishing() {
     const a = this.audio;
     this.setState('fishing');
+    // Two games take turns. Lose two balls running and the third trip is the
+    // golden ball: catch it and those two strokes come back as well, so the
+    // water has cost nothing. It can never give back more than it took.
+    const round = this.round;
+    const trips = round.stats.waters = (round.stats.waters || 0) + 1;
+    const mode = (round.waterLost || 0) >= 2 ? 'gold' : ['drop', 'steer'][(trips - 1) % 2];
     this.fishing.start({
+      mode,
       level: this.assists.level,
       color: this.world.biome.water,
-      hint: this.hints.fish < 3,
+      hint: this.hints.fish < 6,
       sounds: {
         drop: () => a.whoosh(),
         hooked: () => a.tap(),
@@ -1002,9 +1009,21 @@ export class Game {
         miss: () => a.penalty(),
       },
       onDone: (result) => {
-        if (this.hints.fish < 3) { this.hints.fish += 1; store.set(HINT_KEY, this.hints); }
+        if (this.hints.fish < 6) { this.hints.fish += 1; store.set(HINT_KEY, this.hints); }
         this.setState('settle');
-        if (result === 'ball') {
+        // Only balls lost in a row count toward the golden one
+        round.waterLost = result === 'ball' || mode === 'gold' ? 0 : (round.waterLost || 0) + 1;
+        if (result === 'gold') {
+          // The golden ball: no stroke this time, and the last two are refunded
+          this.round.gold = (this.round.gold || 0) + 1;
+          this.round.stats.fished = (this.round.stats.fished || 0) + 1;
+          this.hud.callout('GOLDEN BALL!', 'gold');
+          this.hud.callout('3 STROKES SAVED', 'gold small');
+          this.award('Golden ball', 1000, true);
+          this.audio.fanfare?.(2);
+          this.updateScoreHud();
+          this.dropBall(1.6);
+        } else if (result === 'ball') {
           this.round.stats.fished = (this.round.stats.fished || 0) + 1;
           this.hud.callout('SAVED!', 'gold');
           this.hud.callout('NO PENALTY', 'gold small');
@@ -1205,7 +1224,7 @@ export class Game {
   showSummary() {
     const round = this.round;
     const total = this.roundTotal();
-    const strokes = round.scores.reduce((s, h) => s + h.strokes, 0);
+    const strokes = round.scores.reduce((s, h) => s + h.strokes, 0) - 2 * (round.gold || 0);
     const par = round.scores.reduce((s, h) => s + h.par, 0);
     const st = round.stats;
     let best = false;
