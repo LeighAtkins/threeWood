@@ -141,3 +141,28 @@ test('the almanac puts the sun and moon where they belong', async () => {
   const blind = guessPlace('Nowhere/Land', -660, -600);
   assert.ok(blind.lat < 0 && blind.lon === 150);
 });
+
+test('the round ramps: course and assists both tighten, and heat follows results', async () => {
+  const { courseTuning, playerLevel, assistsFor, nextHeat, challengeFor, newHoleLog, caddieTip } = await import('../src/core/progression.js');
+  assert.ok(courseTuning(1).wind < courseTuning(9).wind && courseTuning(9).wind < courseTuning(18).wind);
+  assert.ok(courseTuning(18).fairway < courseTuning(1).fairway);
+  const first = assistsFor(playerLevel(0, 18)), mid = assistsFor(playerLevel(8, 18)), last = assistsFor(playerLevel(17, 18));
+  assert.equal(first.tight, 1);
+  assert.equal(first.puttLine, 1);
+  assert.ok(mid.tight > 1.3 && mid.puttLine < 0.6, 'half way round the help is mostly gone');
+  assert.ok(last.tempo > mid.tempo && last.gimme < first.gimme);
+  // Birdies turn the screw, bogeys ease it, and neither runs away
+  let heat = 0;
+  for (let i = 0; i < 20; i++) heat = nextHeat(heat, 3, 4);
+  assert.ok(heat > 0.3 && heat <= 0.35);
+  for (let i = 0; i < 20; i++) heat = nextHeat(heat, 7, 4);
+  assert.ok(heat >= -0.25 && heat < 0);
+  // Challenges escalate within a par, and read the hole log
+  const easy = challengeFor(4, 0), hard = challengeFor(4, 9);
+  assert.notEqual(easy.id, hard.id);
+  assert.ok(hard.points > easy.points);
+  const log = { ...newHoleLog(4), fairway: true };
+  assert.equal(easy.test(log), true);
+  assert.equal(hard.test(log), false);
+  assert.ok(caddieTip(0, 0).includes('Three taps'));
+});

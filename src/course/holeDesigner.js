@@ -1,6 +1,7 @@
 import { createGameRng } from '../core/rng.js';
 import { BIOMES, biomeForHole } from './biomes.js';
 import { pathLength, pointAlongPath, pathInfo, blobCovers, greenDistance } from './shapes.js';
+import { courseTuning } from '../core/progression.js';
 
 /**
  * The course generator.
@@ -78,6 +79,8 @@ function layoutHole(rng, plan) {
   const { par, archetype } = plan;
   const biome = BIOMES[plan.biome];
   const band = PAR_BANDS[par];
+  // The course tightens as the round goes on (core/progression.js)
+  const tune = courseTuning(plan.number);
   let totalLen = rng.range(band[0], band[1]);
   if (archetype === 'islandGreen') totalLen = rng.range(100, 125);
   if (archetype === 'potBunkers') totalLen = rng.range(95, 120);
@@ -122,11 +125,11 @@ function layoutHole(rng, plan) {
     angle: Math.atan2(greenPt.z - prev.z, greenPt.x - prev.x),
     elev: archetype === 'elevatedGreen' ? rng.range(1.8, 2.8) : 0,
     tiltAngle: rng.range(0, Math.PI * 2),
-    tilt: rng.range(0.008, 0.024),
-    undulation: biome.greenUndulation * rng.range(0.8, 1.25),
+    tilt: rng.range(0.008, 0.024) * tune.slope,
+    undulation: biome.greenUndulation * rng.range(0.8, 1.25) * tune.slope,
   };
 
-  const fairwayHalf = par === 5 ? 12 : 13;
+  const fairwayHalf = (par === 5 ? 12 : 13) * tune.fairway;
   // Where the short grass starts: par 3s only get an apron near the green
   let fairwayStart = par === 3 ? totalLen - green.size * 2.4 : rng.range(28, 40);
 
@@ -257,9 +260,9 @@ function layoutHole(rng, plan) {
   let pin = { x: green.x, z: green.z };
   for (let i = 0; i < 30; i++) {
     const a = rng.range(0, Math.PI * 2);
-    const d = rng.range(0.15, 0.6) * green.size;
+    const d = rng.range(tune.pinNear, tune.pinFar) * green.size;
     const c = { x: green.x + Math.cos(a) * d, z: green.z + Math.sin(a) * d };
-    if (greenDistance(green, c.x, c.z) < 0.68) { pin = c; break; }
+    if (greenDistance(green, c.x, c.z) < tune.pinEdge) { pin = c; break; }
   }
 
   // --- Scattered trees in the rough (never in the play corridor) ---
@@ -306,7 +309,7 @@ function layoutHole(rng, plan) {
   green.angle += theta;
   green.tiltAngle += theta;
 
-  const windSpeed = Math.round(rng.range(biome.wind[0], biome.wind[1]));
+  const windSpeed = Math.round(rng.range(biome.wind[0], biome.wind[1]) * tune.wind);
   const windAngle = rng.range(0, Math.PI * 2);
 
   const spec = {
@@ -325,6 +328,7 @@ function layoutHole(rng, plan) {
     bunkers,
     water,
     trees,
+    difficulty: tune.difficulty,
     wind: { speed: windSpeed, x: Math.cos(windAngle) * windSpeed, z: Math.sin(windAngle) * windSpeed },
   };
   spec.carryRequired = computeCarry(spec);

@@ -57,6 +57,7 @@ export class Hud {
       <div class="side-left play">
         <div class="pill wind"><svg class="wind-arrow" viewBox="0 0 24 24"><path d="M12 2 L19 14 L13.5 12.5 L13.5 22 L10.5 22 L10.5 12.5 L5 14 Z" fill="#fff8ec"/></svg><span></span></div>
         <div class="pill points">★ 0</div>
+        <div class="pill goal hidden"></div>
       </div>
       <div class="side-right play"><canvas id="minimap" width="208" height="208"></canvas></div>
       <div class="pin-tag play hidden"></div>
@@ -100,6 +101,7 @@ export class Hud {
     this.windArrow = q('.wind-arrow');
     this.windText = q('.wind span');
     this.points = q('.points');
+    this.goal = q('.goal');
     this.minimap = q('#minimap');
     this.pinTag = q('.pin-tag');
     this.callouts = q('.callouts');
@@ -183,6 +185,13 @@ export class Hud {
     }
   }
 
+  /** The hole's challenge, under the points. done: null = in play, true/false = result. */
+  setChallenge(text, done) {
+    this.goal.classList.toggle('hidden', !text);
+    this.goal.classList.toggle('won', done === true);
+    this.goal.textContent = text ? `${done === true ? '★' : '☆'} ${text}` : '';
+  }
+
   /** angle: radians, 0 = blowing straight up the screen (away from camera). */
   setWind(speed, angle) {
     this.wind.classList.toggle('calm', speed < 1);
@@ -216,11 +225,12 @@ export class Hud {
   // --- Meter --------------------------------------------------------------------
 
   /** Full-swing meter: late zone | strike line | power -> */
-  showSwingMeter(idealPower) {
+  showSwingMeter(idealPower, zone = 1) {
     this.meter.classList.remove('hidden');
     this.meter.dataset.mode = 'swing';
     const pct = markerToPercent;
-    const pure = SWING.PURE_MAX * SWING.WINDOW, good = SWING.GOOD_MAX * SWING.WINDOW;
+    // zone < 1: the sweet spot has shrunk (later in the round)
+    const pure = SWING.PURE_MAX * SWING.WINDOW * zone, good = SWING.GOOD_MAX * SWING.WINDOW * zone;
     this.line.style.left = `${pct(SWING.LINE)}%`;
     this.zonePure.style.left = `${pct(SWING.LINE - pure)}%`;
     this.zonePure.style.width = `${pct(SWING.LINE + pure) - pct(SWING.LINE - pure)}%`;
@@ -342,26 +352,31 @@ export class Hud {
     this.layer.appendChild(node);
   }
 
-  showIntro({ index, total, name, par, yards, blurb, biome }) {
+  showIntro({ index, total, name, par, yards, blurb, biome, pips = 1, wind = 0, tip, challenge }) {
     this.clearLayer();
+    const dots = '●'.repeat(pips) + '○'.repeat(5 - pips);
     const node = el('div', 'overlay pass', `
       <div class="intro">
         <div class="num">HOLE ${index} OF ${total} · ${biome.toUpperCase()}</div>
         <div class="name">${name}</div>
         <div class="meta">PAR ${par} · ${yards} YARDS</div>
+        <div class="cond"><span class="pips">${dots}</span> ${wind >= 1 ? `· WIND ${wind} MPH` : '· CALM'}</div>
         <div class="blurb">${blurb}</div>
+        ${challenge ? `<div class="quest">☆ ${challenge.text} <b>+${challenge.points}</b></div>` : ''}
+        ${tip ? `<div class="tip"><b>CADDIE</b> ${tip}</div>` : ''}
         <div class="skip">TAP TO TEE OFF</div>
       </div>`);
     this.layer.appendChild(node);
   }
 
-  showResult({ title, kind, strokes, par, bonuses, holePoints, card, last, onNext }) {
+  showResult({ title, kind, strokes, par, bonuses, holePoints, challenge, card, last, onNext }) {
     this.clearLayer();
     const node = el('div', 'overlay', `
       <div class="card result">
         <h2>HOLE ${card.currentLabel}</h2>
         <h1 class="${kind}">${title}</h1>
         <div class="result-score">${strokes} ${strokes === 1 ? 'stroke' : 'strokes'} · par ${par}</div>
+        ${challenge && !challenge.won ? `<div class="missed">☆ Missed: ${challenge.text}</div>` : ''}
         <div class="bonus-list">
           ${mergeBonuses(bonuses).map((b, i) => `<div class="bonus" style="animation-delay:${0.25 + i * 0.12}s"><span>${b.label}</span><b>+${b.points}</b></div>`).join('')}
           <div class="total-line"><span>HOLE POINTS</span><span class="gold">★ ${holePoints.toLocaleString()}</span></div>

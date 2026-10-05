@@ -19,6 +19,9 @@ import { Effects } from './render/effects.js';
 import { Sky } from './render/sky.js';
 import { CameraRig } from './render/cameraRig.js';
 import { ClubRig } from './render/club.js';
+import {
+  playerLevel, assistsFor, nextHeat, difficultyPips, caddieTip, challengeFor, newHoleLog,
+} from './core/progression.js';
 import { Hud, scoreName } from './ui/hud.js';
 import { Audio } from './audio.js';
 import { Music } from './music.js';
@@ -35,7 +38,6 @@ function dailySeed() {
   return `DAILY-${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
-const GIMME = 0.5;            // yards: closer than this is conceded as a tap-in
 const PUTT_METER_RATE = 82;   // meter units per second while holding PUTT
 const INTRO_TIME = 4.6;
 
@@ -348,12 +350,14 @@ export class Game {
     this.hud.setHole({ index: round.index + 1, total: round.holes.length, par: spec.par, yards: spec.length });
     this.hud.setPoints(round.points);
     this.updateScoreHud();
-    const arch = ARCHETYPES[spec.archetype];
-    this.hud.showIntro({
-      index: round.index + 1, total: round.holes.length,
-      name: arch.label, blurb: arch.blurb, par: spec.par, yards: spec.length,
-      biome: BIOMES[spec.biome].name,
-    });
+    // Where this hole sits on the ramp: what help is left, and what it asks
+    this.level = playerLevel(round.index, round.holes.length, round.heat || 0);
+    this.assists = assistsFor(this.level);
+    const seenOfPar = round.scores.filter((h) => h.par === spec.par).length;
+    this.challenge = challengeFor(spec.par, seenOfPar);
+    this.holeLog = newHoleLog(spec.par);
+    this.hud.setChallenge(this.challenge.text, null);
+    this.hud.showIntro(this.introCard());
     this.landing = null;
     this.aimAngle = Math.atan2(this.world.cup.z - this.ball.z, this.world.cup.x - this.ball.x);
     this.hud.drawMinimap(this.world, this.ball, null);
@@ -366,6 +370,7 @@ export class Game {
       this.putts = live.putts;
       this.bonuses = live.bonuses || [];
       this.holePoints = live.holePoints || 0;
+      if (live.holeLog) this.holeLog = live.holeLog;
       placeBall(this.ball, this.world, live.x, live.z);
       this.hud.clearLayer();
       this.beginAim();
@@ -375,6 +380,19 @@ export class Game {
     this.rig.flyover(0);
     this.rig.cut();
     this.audio.whoosh();
+  }
+
+  introCard() {
+    const { round } = this, spec = this.world.spec, arch = ARCHETYPES[spec.archetype];
+    return {
+      index: round.index + 1, total: round.holes.length,
+      name: arch.label, blurb: arch.blurb, par: spec.par, yards: spec.length,
+      biome: BIOMES[spec.biome].name,
+      pips: difficultyPips(spec.difficulty ?? 0, this.level),
+      wind: spec.wind.speed,
+      tip: caddieTip(round.index, this.level),
+      challenge: this.challenge,
+    };
   }
 
   roundTotal() {
@@ -478,6 +496,7 @@ export class Game {
     this.round.live = {
       index: this.round.index, x: ball.x, z: ball.z,
       strokes: this.strokes, putts: this.putts, bonuses: this.bonuses, holePoints: this.holePoints,
+      holeLog: this.holeLog,
     };
     store.set(SAVE_KEY, this.round);
 
@@ -555,10 +574,15 @@ export class Game {
       const preview = previewPutt(world, ball, dirX, dirZ, this.idealSpeed);
       this.effects.aimArc.hide();
       this.effects.ring.visible = false;
-      this.effects.showPutt(preview.points, preview.holed);
+      const a = this.assists;
+      const keep = Math.max(2, Math.ceil((preview.points.length / 3) * a.puttLine));
+      this.effects.showPutt(preview.points.slice(0, keep * 3), a.confirmLine && preview.holed);
       this.landing = null;
       this.hud.showPuttMeter(this.idealPct);
-      this.hud.setMeterCaption(preview.holed ? 'GOOD LINE! HOLD THE BUTTON, LET GO ON THE MARK' : 'DRAG ON THE GREEN TO MOVE THE LINE');
+      this.hud.setMeterCaption(
+        a.confirmLine
+          ? (preview.holed ? 'GOOD LINE! HOLD THE BUTTON, LET GO ON THE MARK' : 'DRAG ON THE GREEN TO MOVE THE LINE')
+          : 'READ THE DOTS · DRAG TO SET YOUR LINE');
       this.hud.setMeterFlag(this.idealPct, 'LET GO HERE');
       this.hud.setMeterSteps(null);
     } else {
@@ -613,9 +637,11 @@ export class Game {
     if (this.state === 'intro') { if (this.stateTime > 0.5) this.endIntro(); return; }
     if (this.state === 'flight') { this.fastForward = true; return; }
     if (this.state === 'aim') {
+      this.coachHeld = null;
       if (this.planDirty) this.updatePlan();
       if (this.putting) {
         this.charging = true;
+        this.coach = [ 'hold', 0.6 ][this.hints.putt] ?? null;
         this.puttLatched = false;
         this.puttPower = 0;
         this.puttDir = 1;
@@ -627,9 +653,11 @@ export class Game {
       } else {
         startSwing(this.swing);
         this.lockGrace = 0;
+        // First swings are coached: the meter waits for you, then runs slow
+        this.coach = [ 'hold', 0.6, 0.8 ][this.hints.swing] ?? null;
         this.setState('swing');
         this.hud.setSwinging(true);
-        this.hud.showSwingMeter(this.idealPower);
+        this.hud.showSwingMeter(this.idealPower, this.coach ? 1 : 1 / this.assists.tight);
         this.hud.setMeterSteps(2);
         if (this.idealPower) {
           this.hud.setMeterCaption('TAP TO SET POWER');
@@ -766,7 +794,9 @@ export class Game {
 
   hitShot(timing) {
     const { ball } = this;
-    const strike = strikeFromTiming(timing, this.club.loft, this.rng);
+    // Later in the round the same miss costs more
+    const tight = this.coach ? 1 : this.assists.tight;
+    const strike = strikeFromTiming(Math.max(-1, Math.min(1, timing * tight)), this.club.loft, this.rng);
     const launch = buildLaunch({
       club: this.club, power: this.swing.power, dirX: this.dirX, dirZ: this.dirZ,
       lie: this.lie, strike, scatter: this.rng() * 2 - 1, slope: this.slope,
@@ -791,6 +821,7 @@ export class Game {
     const round = this.round;
     if (pure) {
       round.pureStreak += 1;
+      this.holeLog.pures += 1;
       round.stats.pures += 1;
       this.award(round.pureStreak > 1 ? `Pure strike ×${round.pureStreak}` : 'Pure strike', 50 * Math.min(5, round.pureStreak), true);
     } else {
@@ -931,6 +962,7 @@ export class Game {
     this.effects.endTrail();
     this.strokes += 1;
     this.round.pureStreak = 0;
+    this.holeLog.dirty = true;
     this.hud.setCarry(null);
     this.hud.callout(label, 'bad');
     this.hud.callout('+1 PENALTY', 'bad small');
@@ -972,7 +1004,7 @@ export class Game {
     const par = world.spec.par;
 
     if (shot.putt) {
-      if (toPin < GIMME) {
+      if (toPin < this.assists.gimme) {
         // Conceded: knock it in without making the player line up a six-incher
         this.strokes += 1;
         this.putts += 1;
@@ -991,14 +1023,21 @@ export class Game {
       if (shot.fromSurface === 'tee' && par > 3) {
         round.stats.fairwayChances += 1;
         round.stats.longestDrive = Math.max(round.stats.longestDrive, Math.round(carried));
+        this.holeLog.longestDrive = Math.round(carried);
         if (surface === 'fairway') {
+          this.holeLog.fairway = true;
           round.stats.fairways += 1;
           this.hud.callout('FAIRWAY!', '');
           this.award('Fairway hit', 100, true);
           if (carried >= 195) { this.hud.callout(`${Math.round(carried)}y BOMB`, 'gold small'); this.award('Big drive', 100); }
         }
       }
+      if (surface === 'rough' || surface === 'bunker') this.holeLog.dirty = true;
       if (surface === 'green') {
+        if (this.holeLog.onGreenIn === null) {
+          this.holeLog.onGreenIn = this.strokes;
+          this.holeLog.firstProximity = toPin;
+        }
         if (shot.fromSurface !== 'green') {
           this.hud.callout('ON THE GREEN', '');
           this.award('Hit the green', 150, true);
@@ -1030,6 +1069,8 @@ export class Game {
   holed(e) {
     const { shot, world, round } = this;
     const par = world.spec.par;
+    this.holeLog.holed = true;
+    if (!shot.putt && this.holeLog.onGreenIn === null) { this.holeLog.onGreenIn = this.strokes; this.holeLog.firstProximity = 0; }
     this.effects.endTrail();
     this.hud.setCarry(null);
     this.audio.cup();
@@ -1064,7 +1105,16 @@ export class Game {
   finishHole() {
     const { round, world } = this;
     const par = world.spec.par;
-    round.scores[round.index] = { number: world.spec.number, par, strokes: this.strokes, putts: this.putts };
+    const log = this.holeLog;
+    log.strokes = this.strokes; log.putts = this.putts;
+    const won = !!this.challenge.test(log);
+    if (won) {
+      this.award(`★ ${this.challenge.text}`, this.challenge.points);
+      round.stars = (round.stars || 0) + 1;
+    }
+    this.hud.setChallenge(this.challenge.text, won);
+    round.heat = nextHeat(round.heat || 0, this.strokes, par);
+    round.scores[round.index] = { number: world.spec.number, par, strokes: this.strokes, putts: this.putts, star: won };
     const last = round.index >= round.holes.length - 1;
     const card = this.cardData();
     round.index += 1;
@@ -1087,6 +1137,7 @@ export class Game {
       strokes: this.strokes, par,
       bonuses: this.bonuses,
       holePoints: this.holePoints,
+      challenge: { text: this.challenge.text, won },
       card, last,
       onNext: () => this.nextHole?.(),
     });
@@ -1128,7 +1179,7 @@ export class Game {
         { label: 'PUTTS', value: st.putts },
         { label: 'PURE STRIKES', value: st.pures },
         { label: 'LONGEST DRIVE', value: `${st.longestDrive}y` },
-        { label: 'LONGEST PUTT', value: `${st.longestPutt} ft` },
+        { label: 'CHALLENGES', value: `★ ${round.stars || 0}/${round.holes.length}` },
       ],
       onAgain: () => {
         this.seedPinned = false;
@@ -1188,11 +1239,7 @@ export class Game {
     this.hud.clearLayer();
     if (this.state === 'intro') {
       // The menu replaced the intro card: put it back
-      const spec = this.world.spec, arch = ARCHETYPES[spec.archetype];
-      this.hud.showIntro({
-        index: this.round.index + 1, total: this.round.holes.length,
-        name: arch.label, blurb: arch.blurb, par: spec.par, yards: spec.length, biome: BIOMES[spec.biome].name,
-      });
+      this.hud.showIntro(this.introCard());
     }
   }
 
@@ -1239,14 +1286,40 @@ export class Game {
         this.aimCamera();
         if (this.putting) {
           if (this.charging) {
-            this.puttPower += this.puttDir * PUTT_METER_RATE * dt;
+            const rate = PUTT_METER_RATE * (this.coach ? (this.coach === 'hold' ? 0.7 : this.coach) : this.assists.puttRate);
+            this.puttPower += this.puttDir * rate * dt;
+            if (this.coach === 'hold' && this.puttDir > 0 && this.puttPower >= this.idealPct) {
+              // Coached first putt: the bar stops on the mark and waits
+              this.puttPower = this.idealPct;
+              if (!this.coachHeld) {
+                this.coachHeld = true;
+                this.hud.setMeterCaption('PERFECT PACE — LET GO NOW!');
+                this.hud.setMeterFlag(this.idealPct, this.puttLatched ? 'TAP NOW' : 'LET GO NOW');
+              }
+            }
             if (this.puttPower >= 100) { this.puttPower = 100; this.puttDir = -1; }
             if (this.puttPower <= 0) { this.puttPower = 0; this.puttDir = 1; }
             this.hud.updatePuttMeter(this.puttPower);
           }
         } else {
           this.lockGrace = Math.max(0, (this.lockGrace || 0) - dt);
-          const event = swingStep(this.swing, dt);
+          const sw = this.swing;
+          let step = dt * (this.coach ? (this.coach === 'hold' ? 0.75 : this.coach) : this.assists.tempo);
+          if (this.coach === 'hold') {
+            // Coached first swing: the marker stops where the tap belongs and waits
+            const atPower = sw.phase === 'power' && this.idealPower && sw.marker >= this.idealPower;
+            const atLine = sw.phase === 'accuracy' && sw.marker <= SWING.LINE + 0.6;
+            if (atPower || atLine) {
+              step = 0;
+              sw.marker = atPower ? this.idealPower : SWING.LINE;
+              if (this.coachHeld !== sw.phase) {
+                this.coachHeld = sw.phase;
+                this.hud.setMeterCaption(atPower ? 'THAT IS YOUR POWER — TAP NOW!' : 'CLUB MEETS BALL — TAP NOW!');
+                this.hud.setMeterFlag(markerToPercent(sw.marker), 'TAP NOW');
+              }
+            }
+          }
+          const event = swingStep(this.swing, step);
           this.hud.updateSwingMeter(this.swing);
           if (event) this.handleSwingEvent(event);
         }
