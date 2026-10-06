@@ -42,6 +42,7 @@ const BEST_KEY = 'threewood.best.v2';
 const HINT_KEY = 'threewood.hints.v2';
 const DAILY_KEY = 'threewood.daily.v1';
 const CAMP_KEY = 'threewood.camp.v1';
+const STEADY_KEY = 'threewood.steady.v1';
 
 /** Everyone gets the same course each day. */
 function dailySeed() {
@@ -117,6 +118,9 @@ export class Game {
     this.simAccumulator = 0;
     this.events = [];
     this.swing = createSwing();
+    // Steady mode: for a jumpy bus. The meters pause where the tap belongs,
+    // run slower, forgive more, and ignore the jitter of a bumped finger
+    this.steady = !!store.get(STEADY_KEY);
     this.hints = { swing: 0, putt: 0, spin: 0, fish: 0, cook: 0, ...(store.get(HINT_KEY) || {}) };
 
     this.seedPinned = !!getSeedFromUrl();
@@ -238,7 +242,8 @@ export class Game {
       drag.x = e.clientX; drag.y = e.clientY;
       if (this.state === 'aim' && !this.paused) {
         // Putts need a jeweller's touch; full shots a quicker turn
-        const base = this.putting ? 0.0011 : 0.003;
+        const base = (this.putting ? 0.0011 : 0.003) * (this.steady ? 0.6 : 1);
+        if (this.steady && Math.abs(dx) < 2) return; // a bump, not a drag
         this.aimAngle += dx * base * (420 / Math.max(320, Math.min(window.innerWidth, 900)));
         this.planDirty = true;
         if (drag.moved > 14) this.hud.demo(null); // they have got it
@@ -897,6 +902,7 @@ export class Game {
       if (!this.net.clearToSwing()) return;
       this.walkIn = null; // swinging already: the camper is at the ball
       this.coachHeld = null;
+      this.dwell = 0;
       if (this.planDirty) this.updatePlan();
       if (this.putting) {
         this.charging = true;
@@ -969,7 +975,8 @@ export class Game {
 
   handleSwingEvent(event) {
     if (event.type === 'powerLocked') {
-      this.lockGrace = 0.2;
+      this.lockGrace = this.steady ? 0.35 : 0.2;
+      this.dwell = 0; // steady mode: a fresh pause at the line
       this.audio.powerLock(event.power);
       this.hud.setAction('strike', !this.idealPower);
       this.hud.setMeterCaption('');
@@ -988,7 +995,7 @@ export class Game {
   afterTouch(dx, dy) {
     const { ball, shot } = this;
     if (!shot || shot.putt || !shot.shapeable || ball.mode !== 'air' || ball.landed) return;
-    const k = 420 / Math.max(320, Math.min(window.innerWidth, 900));
+    const k = (420 / Math.max(320, Math.min(window.innerWidth, 900))) * (this.steady ? 0.6 : 1);
     const side = Math.max(-1.3, Math.min(1.3, shot.bend + dx * 0.0045 * k));
     ball.side += side - shot.bend;
     shot.bend = side;
@@ -1056,7 +1063,7 @@ export class Game {
   hitShot(timing) {
     const { ball } = this;
     // Later in the round the same miss costs more
-    const tight = this.coach ? 1 : this.assists.tight;
+    const tight = (this.coach ? 1 : this.assists.tight) * (this.steady ? 0.55 : 1);
     const strike = strikeFromTiming(Math.max(-1, Math.min(1, timing * tight)), this.club.loft, this.rng);
     const launch = buildLaunch({
       club: this.club, power: this.swing.power, dirX: this.dirX, dirZ: this.dirZ,
@@ -1698,6 +1705,8 @@ export class Game {
       onMute: () => { this.audio.setMuted(!this.audio.muted); return this.audio.muted; },
       sky: this.sky.mode,
       onSky: () => this.sky.cycleMode(),
+      steady: this.steady,
+      onSteady: () => { this.steady = !this.steady; store.set(STEADY_KEY, this.steady); return this.steady; },
       onMusic: () => this.toggleMusic(),
       onHelp: () => this.hud.showHelp(() => this.openMenuAgain()),
       onFishing: () => this.practiceFishing(() => this.openMenuAgain()),
@@ -1809,11 +1818,13 @@ export class Game {
         this.aimCamera();
         if (this.putting) {
           if (this.charging) {
-            const rate = PUTT_METER_RATE * (this.coach ? (this.coach === 'hold' ? 0.7 : this.coach) : this.assists.puttRate);
+            const rate = PUTT_METER_RATE * (this.coach ? (this.coach === 'hold' ? 0.7 : this.coach) : this.assists.puttRate) * (this.steady ? 0.65 : 1);
+            const pausing = this.coach === 'hold' || (this.steady && this.dwell < 0.6);
             this.puttPower += this.puttDir * rate * dt;
-            if (this.coach === 'hold' && this.puttDir > 0 && this.puttPower >= this.idealPct) {
-              // Coached first putt: the bar stops on the mark and waits
+            if (pausing && this.puttDir > 0 && this.puttPower >= this.idealPct) {
+              // Coached first putt (or steady mode): the bar stops on the mark and waits
               this.puttPower = this.idealPct;
+              this.dwell += dt;
               if (!this.coachHeld) {
                 this.coachHeld = true;
                 this.hud.setMeterFlag(this.idealPct, this.puttLatched ? 'tap' : 'release', true);
@@ -1826,16 +1837,19 @@ export class Game {
         } else {
           this.lockGrace = Math.max(0, (this.lockGrace || 0) - dt);
           const sw = this.swing;
-          let step = dt * (this.coach ? (this.coach === 'hold' ? 0.75 : this.coach) : this.assists.tempo);
-          if (this.coach === 'hold') {
-            // Coached first swing: the marker stops where the tap belongs and waits
+          let step = dt * (this.coach ? (this.coach === 'hold' ? 0.75 : this.coach) : this.assists.tempo) * (this.steady ? 0.7 : 1);
+          if (this.coach === 'hold' || this.steady) {
+            // Coached first swing: the marker stops where the tap belongs and
+            // waits. Steady mode: it pauses there for half a second instead
             const atPower = sw.phase === 'power' && this.idealPower && sw.marker >= this.idealPower;
-            const atLine = sw.phase === 'accuracy' && sw.marker <= SWING.LINE + 0.6;
-            if (atPower || atLine) {
+            const atLine = sw.phase === 'accuracy' && sw.marker <= SWING.LINE + 0.6 && sw.marker > SWING.LINE - 2;
+            if ((atPower || atLine) && (this.coach === 'hold' || this.dwell < 0.55)) {
               step = 0;
               sw.marker = atPower ? this.idealPower : SWING.LINE;
+              this.dwell += dt;
               if (this.coachHeld !== sw.phase) {
                 this.coachHeld = sw.phase;
+                this.dwell = 0;
                 this.hud.setMeterFlag(markerToPercent(sw.marker), 'tap', true);
               }
             }

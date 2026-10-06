@@ -13,6 +13,8 @@ import { blobRadius, greenDistance } from '../course/shapes.js';
  * out, so it can be restyled without touching the rules.
  */
 
+/** The bus-ride setting: meters pause where the tap belongs. */
+const steadyLabel = (on) => (on ? 'STEADY MODE · ON' : 'STEADY MODE · OFF');
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const el = (tag, cls, html) => {
   const node = document.createElement(tag);
@@ -469,7 +471,7 @@ export class Hud {
     this.layer.appendChild(node);
   }
 
-  showMenu({ muted, music, sky, card, onResume, onMute, onMusic, onSky, onQuit, onHelp, onFishing }) {
+  showMenu({ muted, music, sky, card, onResume, onMute, onMusic, onSky, onQuit, onHelp, onFishing, steady, onSteady }) {
     this.clearLayer();
     const node = el('div', 'overlay dim', `
       <div class="card">
@@ -484,6 +486,7 @@ export class Hud {
           <button class="btn ghost" data-a="sky">${skyLabel(sky)}</button>
           <button class="btn ghost" data-a="help">HELP</button>
         </div>
+        <button class="btn ghost" data-a="steady">${steadyLabel(steady)}</button>
         <button class="btn ghost" data-a="fishing">PRACTICE FISHING</button>
         <button class="btn ghost" data-a="quit">QUIT TO TITLE</button>
       </div>`);
@@ -495,6 +498,7 @@ export class Hud {
       if (a === 'sky') e.target.textContent = skyLabel(onSky());
       if (a === 'help') onHelp();
       if (a === 'fishing') onFishing();
+      if (a === 'steady') e.target.textContent = steadyLabel(onSteady());
       if (a === 'quit') onQuit();
     });
     this.layer.appendChild(node);
