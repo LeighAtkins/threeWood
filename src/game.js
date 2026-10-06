@@ -481,7 +481,16 @@ export class Game {
       tip: caddieTip(round.index, this.level),
       challenge: this.challenge,
       toy: spec.gimmick ? GIMMICKS[spec.gimmick.kind] : null,
+      pond: spec.fishing ? this.pondSide(spec.fishing) : null,
     };
+  }
+
+  /** Which side of the first tee shot a pond sits, as the player sees it. */
+  pondSide(pond) {
+    const { tee, cup } = this.world;
+    const dx = cup.x - tee.x, dz = cup.z - tee.z;
+    const cross = dx * (pond.z - tee.z) - dz * (pond.x - tee.x);
+    return cross > 0 ? 'right' : 'left';
   }
 
   roundTotal() {

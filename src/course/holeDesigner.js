@@ -289,6 +289,22 @@ function layoutHole(rng, plan) {
     }
   }
 
+  // --- A fishing pond: somewhere to go in on purpose ---
+  // Fishing is worth points, so most dry holes get a pond off to one side of
+  // the fairway, out of the way of anyone playing golf but a short detour for
+  // anyone who would rather catch dinner.
+  let fishing = null;
+  if (!water.length && par > 3 && rng.rng() < 0.85) {
+    const side = rng.sign();
+    const r = rng.range(9, 12);
+    const spot = offPath(totalLen * rng.range(0.3, 0.62), side * (fairwayHalf + 10 + r));
+    const pond = { x: spot.x, z: spot.z, r, wobble: 0.8, phase: rng.range(0, 6.28), fishing: true };
+    if (!bunkers.some((b) => Math.hypot(b.x - pond.x, b.z - pond.z) < b.r + r + 4)) {
+      water.push(pond);
+      fishing = { x: pond.x, z: pond.z, r, side };
+    }
+  }
+
   // --- Pin: somewhere honest on the putting surface ---
   let pin = { x: green.x, z: green.z };
   for (let i = 0; i < 30; i++) {
@@ -339,6 +355,7 @@ function layoutHole(rng, plan) {
   const move = (p) => { rot(p); p.x += ox; p.z += oz; };
   pathPts.forEach((p) => { p.x += ox; p.z += oz; });
   [green, pin, ...bunkers, ...water, ...trees].forEach(move);
+  if (fishing) move(fishing);
   green.angle += theta;
   green.tiltAngle += theta;
 
@@ -359,6 +376,7 @@ function layoutHole(rng, plan) {
     fairwayHalf,
     fairwayStart,
     shape,
+    fishing,
     gimmick: plan.gimmick ? buildGimmick(plan.gimmick, rng, { pathPts, totalLen, fairwayHalf, green, par, water, bunkers }) : null,
     bunkers,
     water,

@@ -40,6 +40,41 @@ export class Gimmicks {
     this.target = null;
     if (this.kind === 'bullseye') this.buildBullseye(world, toy);
     if (this.kind === 'boing') this.buildPads(world, toy);
+    if (world.spec.fishing) this.buildFishingSign(world, world.spec.fishing);
+  }
+
+  /** A little sign on the bank facing the fairway: fish here. */
+  buildFishingSign(world, pond) {
+    // On the fairway side of the pond, just past the water's edge
+    const toPath = Math.atan2(world.spec.path[0].z - pond.z, world.spec.path[0].x - pond.x);
+    let x = pond.x, z = pond.z, r = pond.r * 0.9;
+    for (let i = 0; i < 12 && world.surfaceAt(x, z) === 'water'; i++) {
+      r += 1.2;
+      x = pond.x + Math.cos(toPath) * r; z = pond.z + Math.sin(toPath) * r;
+    }
+    const y = world.heightAt(x, z);
+    const sign = new THREE.Group();
+    sign.position.set(x, y, z);
+    sign.rotation.y = Math.atan2(Math.cos(toPath), Math.sin(toPath)) + Math.PI;
+    const wood = new THREE.MeshLambertMaterial({ color: 0x7a5632 });
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 2.2, 6), wood);
+    post.position.y = 1.1;
+    const board = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.9, 0.1), new THREE.MeshLambertMaterial({ color: 0xf3e6c8 }));
+    board.position.set(0, 2.1, 0);
+    const fish = new THREE.Group();
+    const blue = new THREE.MeshBasicMaterial({ color: 0x2f8fae });
+    const body = new THREE.Mesh(new THREE.SphereGeometry(0.3, 10, 8), blue);
+    body.scale.set(1.5, 0.9, 0.3);
+    const tail = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.32, 3), blue);
+    tail.rotation.z = Math.PI / 2;
+    tail.position.x = -0.55;
+    tail.scale.z = 0.3;
+    fish.add(body, tail);
+    fish.position.set(0.05, 2.12, 0.08);
+    const bob = new THREE.Mesh(new THREE.SphereGeometry(0.16, 8, 6), new THREE.MeshBasicMaterial({ color: 0xff4d4d }));
+    bob.position.set(0.55, 2.42, 0.08);
+    sign.add(post, board, fish, bob);
+    this.group.add(sign);
   }
 
   buildBullseye(world, toy) {

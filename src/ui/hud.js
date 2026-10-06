@@ -410,7 +410,7 @@ export class Hud {
     this.layer.appendChild(node);
   }
 
-  showIntro({ index, total, name, par, yards, blurb, biome, pips = 1, wind = 0, tip, challenge, toy = null }) {
+  showIntro({ index, total, name, par, yards, blurb, biome, pips = 1, wind = 0, tip, challenge, toy = null, pond = null }) {
     this.clearLayer();
     const dots = '●'.repeat(pips) + '○'.repeat(5 - pips);
     const node = el('div', 'overlay pass', `
@@ -421,6 +421,7 @@ export class Hud {
         <div class="cond"><span class="pips">${dots}</span> ${wind >= 1 ? `· WIND ${wind} MPH` : '· CALM'}</div>
         <div class="blurb">${blurb}</div>
         ${toy ? `<div class="toy"><b>${toy.label.toUpperCase()}</b> ${toy.blurb}</div>` : ''}
+        ${pond ? `<div class="toy pond"><b>FISHING POND</b> Off the fairway on the ${pond}.</div>` : ''}
         ${challenge ? `<div class="quest">☆ ${challenge.text} <b>+${challenge.points}</b></div>` : ''}
         ${tip ? `<div class="tip">${tipIcon(tip.icon)}<span>${tip.text}</span></div>` : ''}
         <div class="skip">${glyph('tap')}</div>
