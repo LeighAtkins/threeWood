@@ -910,6 +910,7 @@ export class Game {
         this.puttLatched = false;
         this.puttPower = 0;
         this.puttDir = 1;
+        this.puttHold = 0;
         this.setState('swing');
         this.hud.setAction('release');
         this.hud.setMeterFlag(this.idealPct, 'release');
@@ -967,8 +968,6 @@ export class Game {
     // Swallow the over-eager tap right after power locks (a double tap, or a
     // tap that arrives as the bar tops out) so it cannot ruin the strike.
     if (this.lockGrace > 0) return;
-    // Full-power shots lock themselves: taps on the way up are ignored
-    if (this.swing.phase === 'power' && !this.idealPower) return;
     const event = swingClick(this.swing);
     if (event) this.handleSwingEvent(event);
   }
@@ -1149,6 +1148,13 @@ export class Game {
       if (this.gimmicks.rings.length) this.checkRings(); // every step: a fast ball must not skip a hoop
     }
 
+    // A ball that will not stop rolling (a steep bowl, a seam in the grid)
+    // must never hold the hole hostage: after a while it is simply down
+    if (ball.mode === 'roll' && ball.time > 22) {
+      ball.vx = ball.vz = ball.vy = 0;
+      ball.mode = 'rest';
+      this.events.push({ type: 'rest', x: ball.x, y: ball.y, z: ball.z, surface: ball.surface });
+    }
     if (shot.replan && ball.mode === 'air') {
       shot.replan = false;
       this.plan = this.planShot();
@@ -1819,7 +1825,7 @@ export class Game {
         if (this.putting) {
           if (this.charging) {
             const rate = PUTT_METER_RATE * (this.coach ? (this.coach === 'hold' ? 0.7 : this.coach) : this.assists.puttRate) * (this.steady ? 0.65 : 1);
-            const pausing = this.coach === 'hold' || (this.steady && this.dwell < 0.6);
+            const pausing = this.coach === 'hold';
             this.puttPower += this.puttDir * rate * dt;
             if (pausing && this.puttDir > 0 && this.puttPower >= this.idealPct) {
               // Coached first putt (or steady mode): the bar stops on the mark and waits
@@ -1830,7 +1836,12 @@ export class Game {
                 this.hud.setMeterFlag(this.idealPct, this.puttLatched ? 'tap' : 'release', true);
               }
             }
-            if (this.puttPower >= 100) { this.puttPower = 100; this.puttDir = -1; }
+            if (this.puttPower >= 100 && this.puttDir > 0) {
+              // Rest at the top for a moment: letting go late is still full pace
+              this.puttPower = 100;
+              this.puttHold = (this.puttHold || 0) + dt;
+              if (this.puttHold > 0.4) { this.puttDir = -1; this.puttHold = 0; }
+            }
             if (this.puttPower <= 0) { this.puttPower = 0; this.puttDir = 1; }
             this.hud.updatePuttMeter(this.puttPower);
           }
@@ -1840,8 +1851,8 @@ export class Game {
           let step = dt * (this.coach ? (this.coach === 'hold' ? 0.75 : this.coach) : this.assists.tempo) * (this.steady ? 0.7 : 1);
           if (this.coach === 'hold' || this.steady) {
             // Coached first swing: the marker stops where the tap belongs and
-            // waits. Steady mode: it pauses there for half a second instead
-            const atPower = sw.phase === 'power' && this.idealPower && sw.marker >= this.idealPower;
+            // waits. Steady mode: it pauses on the strike line for half a second
+            const atPower = this.coach === 'hold' && sw.phase === 'power' && this.idealPower && sw.marker >= this.idealPower;
             const atLine = sw.phase === 'accuracy' && sw.marker <= SWING.LINE + 0.6 && sw.marker > SWING.LINE - 2;
             if ((atPower || atLine) && (this.coach === 'hold' || this.dwell < 0.55)) {
               step = 0;

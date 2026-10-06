@@ -179,7 +179,7 @@ function layoutHole(rng, plan) {
     case 'halfpipe': shape = { kind: 'halfpipe', h: rng.range(3, 3.8) }; greenside(); break;
     case 'hogsback': shape = { kind: 'hogsback', h: rng.range(2, 2.6) }; addBunker(totalLen * 0.66, fairwayHalf + 9, rng.range(6, 8)); addBunker(totalLen * 0.7, -(fairwayHalf + 9), rng.range(6, 8)); break;
     case 'terraces': shape = { kind: 'terraces', h: rng.range(9, 11), steps: 3 }; greenside(); break;
-    case 'gorge': shape = { kind: 'gorge', h: rng.range(6, 8), at: rng.range(0.6, 0.66), w: rng.range(13, 16) }; greenside(); break;
+    case 'gorge': shape = { kind: 'gorge', h: rng.range(4, 5), at: rng.range(0.6, 0.66), w: rng.range(20, 24) }; greenside(); break; // gentle enough to roll out of
     case 'punchbowl': shape = { kind: 'punchbowl', h: rng.range(2.4, 3) }; break;
     default: break;
   }

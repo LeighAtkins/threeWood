@@ -16,15 +16,18 @@
  */
 
 export const SWING = {
-  POWER_SPEED: 85,      // marker units/s on the way up (0 -> 100 in ~1.2s)
-  ACCURACY_SPEED: 120,  // marker units/s on the way back down (touch-friendly)
+  POWER_SPEED: 72,      // marker units/s on the way up (0 -> 100 in ~1.4s)
+  ACCURACY_SPEED: 95,   // marker units/s at the top of the return sweep...
+  EASE: 0.5,            // ...slowing to this fraction as it nears the line
+  TOP_HOLD: 0.5,        // seconds the marker rests at 100 before the return sweep
   LINE: 8,              // strike line value on the return sweep
   WINDOW: 45,           // units of marker travel mapped to timing -1..+1
-  FLOOR: 8 - 45,        // = -37: unclicked marker auto-hits here (max late)
-  // Grade thresholds on |timing| (0..1). Pure is a ~±40ms skill window.
-  PURE_MAX: 0.11,
-  GOOD_MAX: 0.34,
-  POOR_MAX: 0.66,
+  FLOOR: 8 - 45,        // = -37: the marker stops here and waits for the tap
+  LATE_CAP: 0.65,       // a tap after the marker has stopped is this late, no worse
+  // Grade thresholds on |timing| (0..1). Pure is still a skill window (~±65ms).
+  PURE_MAX: 0.14,
+  GOOD_MAX: 0.4,
+  POOR_MAX: 0.7,
 };
 
 export function createSwing() {
@@ -32,6 +35,7 @@ export function createSwing() {
     phase: 'idle', // 'idle' | 'power' | 'accuracy'
     power: 0,      // locked power 0..100
     marker: 0,     // live marker position (domain FLOOR..100)
+    hold: 0,       // seconds spent resting at the top of the power sweep
   };
 }
 
@@ -39,6 +43,7 @@ export function startSwing(swing) {
   swing.phase = 'power';
   swing.power = 0;
   swing.marker = 0;
+  swing.hold = 0;
 }
 
 /**
@@ -53,7 +58,9 @@ export function swingClick(swing) {
     return { type: 'powerLocked', power: swing.power };
   }
   if (swing.phase === 'accuracy') {
-    const timing = timingFromMarker(swing.marker);
+    // Past the line and off the end is late, but never the worst possible:
+    // the marker waited for you, so the shot is still yours
+    const timing = Math.max(-SWING.LATE_CAP, timingFromMarker(swing.marker));
     swing.phase = 'idle';
     return { type: 'strike', timing };
   }
@@ -61,25 +68,29 @@ export function swingClick(swing) {
 }
 
 /**
- * Advance the marker. Auto-locks power at 100; auto-hits (max late) at FLOOR.
+ * Advance the marker. At the top of the power sweep it rests for TOP_HOLD (a
+ * tap there is full power; nothing happens by accident), then locks itself.
+ * The return sweep eases as it nears the line, and at FLOOR it stops and
+ * waits: the shot is never taken for you.
  * Returns the same event shapes as swingClick, or null while sweeping.
  */
 export function swingStep(swing, dt) {
   if (swing.phase === 'power') {
-    swing.marker += SWING.POWER_SPEED * dt;
     if (swing.marker >= 100) {
       swing.marker = 100;
-      swing.power = 100;
-      swing.phase = 'accuracy';
-      return { type: 'powerLocked', power: 100, auto: true };
+      swing.hold += dt;
+      if (swing.hold >= SWING.TOP_HOLD) {
+        swing.power = 100;
+        swing.phase = 'accuracy';
+        return { type: 'powerLocked', power: 100, auto: true };
+      }
+    } else {
+      swing.marker = Math.min(100, swing.marker + SWING.POWER_SPEED * dt);
     }
   } else if (swing.phase === 'accuracy') {
-    swing.marker -= SWING.ACCURACY_SPEED * dt;
-    if (swing.marker <= SWING.FLOOR) {
-      swing.marker = SWING.FLOOR;
-      swing.phase = 'idle';
-      return { type: 'strike', timing: -1, auto: true };
-    }
+    const near = Math.min(1, Math.abs(swing.marker - SWING.LINE) / 60);
+    swing.marker -= SWING.ACCURACY_SPEED * (SWING.EASE + (1 - SWING.EASE) * near) * dt;
+    if (swing.marker <= SWING.FLOOR) swing.marker = SWING.FLOOR;
   }
   return null;
 }

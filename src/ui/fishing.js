@@ -115,9 +115,9 @@ export class Fishing {
     this.phase = mode === 'drop' ? 'swing' : 'play'; // drop: swing -> drop -> reel -> done; drag games: play -> done
     this.result = null;
     this.endT = 0;
-    this.catchR = 0.1 - 0.035 * level;
-    this.sweep = 1.5 + 0.9 * level;          // hook swing, rad/s
-    this.sinkFor = 5.2 - 1.2 * level;        // drop: seconds for the ball to reach the bed
+    this.catchR = 0.12 - 0.03 * level;
+    this.sweep = 1.0 + 0.5 * level;          // hook swing, rad/s: a read, not a reflex
+    this.sinkFor = 7.5 - 1.5 * level;        // drop: seconds for the ball to reach the bed
     this.limit = (mode === 'gold' ? 14 : 12) - 3 * level; // drag games: seconds on the clock
     this.wander = mode === 'gold' ? 0.26 + 0.06 * level : 0.05;  // how far the ball strays sideways
     this.wanderRate = mode === 'gold' ? 1.0 + 0.5 * level : 1.3;

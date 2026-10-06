@@ -41,12 +41,10 @@ await page.locator('.club .prev').tap();
 await page.locator('.swing-btn').tap({ force: true });
 check('tap 1 starts swing', await g(`g.state === 'swing' && g.swing.phase === 'power'`));
 if (await g('g.idealPower == null')) {
-  // Out of range: an early tap must be ignored and the bar must lock itself
-  await waitG(`g.swing.marker > 40`, 10);
+  // Out of range: the bar rests at the top, and a tap there is full power
+  await waitG(`g.swing.marker >= 100`, 10);
   await page.locator('.swing-btn').tap({ force: true });
-  check('full power ignores an early tap', await g(`g.swing.phase === 'power'`));
-  await waitG(`g.swing.phase === 'accuracy'`, 10);
-  await page.locator('.swing-btn').tap({ force: true }); // lands inside the grace window
+  check('tap at the top locks full power', await g(`g.swing.phase === 'accuracy' && g.swing.power === 100`));
 } else {
   await waitG(`g.swing.marker > 40`, 10);
   await page.locator('.swing-btn').tap({ force: true });
