@@ -3,6 +3,7 @@ import { SURFACE_IDS } from '../course/courseWorld.js';
 import { pathInfo, smoothstep, lerp } from '../course/shapes.js';
 import { createGameRng } from '../core/rng.js';
 import { terrainGlow } from './nightGlow.js';
+import { pixelTexture } from './textures.js';
 
 /**
  * Terrain mesh, built vertex-for-vertex from the world grid the physics uses.
@@ -33,9 +34,8 @@ function getGrainTexture() {
     const x = rng() * size, y = rng() * size;
     ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + rng() * 3 - 1.5, y - 3 - rng() * 4); ctx.stroke();
   }
-  grainTexture = new THREE.CanvasTexture(canvas);
-  grainTexture.wrapS = grainTexture.wrapT = THREE.RepeatWrapping;
-  grainTexture.colorSpace = THREE.SRGBColorSpace;
+  // Copied out of the canvas: iOS blanks canvases behind a backgrounded tab
+  grainTexture = pixelTexture(canvas, { colorSpace: THREE.SRGBColorSpace, wrap: true });
   grainTexture.anisotropy = 4;
   return grainTexture;
 }

@@ -33,6 +33,7 @@ import { loadCamp, bump } from './core/camp.js';
 import { NetPlay } from './net/netplay.js';
 import { buildNightGlow, updateNightGlow } from './render/nightGlow.js';
 import { Gimmicks } from './render/gimmicks.js';
+import { pixelTexture } from './render/textures.js';
 import { Audio } from './audio.js';
 import { Music } from './music.js';
 
@@ -127,8 +128,12 @@ export class Game {
     window.addEventListener('orientationchange', () => setTimeout(() => this.resize(), 200));
     document.addEventListener('visibilitychange', () => {
       this.clock.getDelta();
-      if (document.visibilityState === 'visible' && this.round) this.keepAwake();
+      if (document.visibilityState !== 'visible') return;
+      if (this.round) this.keepAwake();
+      this.recover();
     });
+    // A phone that was put away may hand back a fresh GL context
+    this.canvas.addEventListener('webglcontextrestored', () => this.recover());
 
     this.showTitle();
     // Opened from a friend's link: straight to their room
@@ -198,8 +203,7 @@ export class Game {
     ctx.fillRect(96, 60, 64, 8);            // alignment stripe
     ctx.fillStyle = '#ffd23f';
     ctx.fillRect(220, 52, 14, 24);          // a second mark, so every spin axis shows
-    const map = new THREE.CanvasTexture(skin);
-    map.colorSpace = THREE.SRGBColorSpace;
+    const map = pixelTexture(skin, { colorSpace: THREE.SRGBColorSpace });
     this.ballMesh = new THREE.Mesh(
       new THREE.SphereGeometry(BALL_R, 24, 16),
       new THREE.MeshStandardMaterial({ map, roughness: 0.4, emissive: 0xffffff, emissiveMap: map, emissiveIntensity: 0.42 }));
@@ -365,6 +369,23 @@ export class Game {
   /** NEXT on the result card: with friends, the room moves on together. */
   pressNext() {
     if (this.net.active) this.net.pressNext(); else this.nextHole?.();
+  }
+
+  /**
+   * Back from the background: anything the GPU may have dropped is marked for
+   * re-upload, and the shadow map is rebuilt rather than trusted.
+   */
+  recover() {
+    this.scene.traverse((o) => {
+      if (!o.isMesh) return;
+      for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
+        if (!m) continue;
+        m.needsUpdate = true;
+        for (const key of ['map', 'emissiveMap', 'gradientMap', 'alphaMap', 'normalMap']) if (m[key]) m[key].needsUpdate = true;
+      }
+    });
+    if (this.sun.shadow.map) { this.sun.shadow.map.dispose(); this.sun.shadow.map = null; }
+    this.renderer.shadowMap.needsUpdate = true;
   }
 
   /** Keep the screen on during a round (it is a long time between taps on a putt read). */
