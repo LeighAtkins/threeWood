@@ -560,6 +560,13 @@ button { font: inherit; color: inherit; border: 0; background: none; padding: 0;
   padding: 2px 12px; border-radius: 12px; background: #ff5a3c; color: #fff;
 }
 .fishing .stake s { text-decoration-thickness: 3px; text-decoration-color: #12261a; }
+.fishing .basket {
+  position: absolute; left: 10px; top: 8px; display: flex; align-items: center; gap: 4px;
+  padding: 2px 10px 2px 6px; border-radius: 12px; background: rgba(16, 38, 26, 0.75); color: var(--cream);
+  font-weight: 800; font-size: 20px;
+}
+.fishing .basket svg { width: 28px; height: 28px; }
+.fishing .basket.pop { animation: cardIn 0.35s cubic-bezier(0.2, 1.6, 0.4, 1); }
 .fishing.lost .stake s { text-decoration: none; }
 .fishing.won .stake { background: #1b9a4a; }
 /* The tap cue stands under the pond, never over the ball */

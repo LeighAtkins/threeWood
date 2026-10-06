@@ -1307,6 +1307,14 @@ export class Game {
         this.setState('settle');
         // Only balls lost in a row count toward the golden one
         round.waterLost = result === 'ball' || mode === 'gold' ? 0 : (round.waterLost || 0) + 1;
+        // Every fish in the basket is dinner later
+        const caught = this.fishing.caught;
+        if (caught) {
+          this.round.fish = (this.round.fish || 0) + caught;
+          this.earn('fish', caught);
+          this.hud.callout(caught > 1 ? `${caught} FISH!` : 'A FISH!', 'small');
+          this.award(caught > 1 ? `Caught ${caught} fish` : 'Caught a fish', 50 * caught, true);
+        }
         if (result === 'gold') {
           // The golden ball: no stroke this time, and the last two are refunded
           this.round.gold = (this.round.gold || 0) + 1;
@@ -1325,13 +1333,6 @@ export class Game {
           this.award('Fished it out', 150, true);
           this.dropBall(1.1);
         } else {
-          if (result === 'fish') {
-            // Dinner: it goes on the fire once the hole is finished
-            this.round.fish = (this.round.fish || 0) + 1;
-            this.earn('fish');
-            this.hud.callout('A FISH!', 'small');
-            this.award('Caught a fish', 50, true);
-          }
           this.takePenalty();
         }
       },
@@ -1546,11 +1547,14 @@ export class Game {
   finishHole() {
     if (!Number.isFinite(this.celebrateAngle)) this.celebrateAngle = 0; // picked up before ever holing out
     // A fish caught on this hole is grilled before the card comes up
+    // (one fish a time, up to three, so a big haul does not stall the round)
     if (this.round.fish) {
-      this.round.fish = 0;
+      this.round.cooked = (this.round.cooked || 0) + 1;
+      this.round.fish = this.round.cooked > 3 ? 0 : this.round.fish - 1;
       this.startCooking(() => this.finishHole());
       return;
     }
+    this.round.cooked = 0;
     const { round, world } = this;
     const par = world.spec.par;
     const log = this.holeLog;

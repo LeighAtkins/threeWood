@@ -8,9 +8,11 @@
  *
  *   drop   the hook swings by itself; one tap drops the line (timing)
  *   steer  tap to cast, then drag left and right: the line goes down by
- *          itself to the ball on the bottom and brings it back up, and you
- *          steer it past the fish both ways. A fish knocks the hook back to
- *          the top and the ball off it
+ *          itself to the ball on the bottom and brings it back up. Run the
+ *          empty hook into a fish and you have caught it: it comes up, goes
+ *          in the basket, and the hook goes down again — catch as many as the
+ *          clock allows. A fish that hits a hook carrying the ball knocks the
+ *          ball off and the hook back to the top
  *   gold   the same, after a golden ball that will not keep still. Offered
  *          after two lost balls in a row: it forgives this stroke and gives
  *          those two back
@@ -43,6 +45,7 @@ export class Fishing {
       <div class="pond">
         <canvas></canvas>
         <div class="stake"><s>+1</s><b><s>+3</s></b></div>
+        <div class="basket hidden">${FISH_ICON}<b>0</b></div>
         <div class="verdict hidden"></div>
       </div>
       <div class="cue"></div>
@@ -52,6 +55,7 @@ export class Fishing {
     this.ctx = this.canvas.getContext('2d');
     this.cue = this.node.querySelector('.cue');
     this.verdict = this.node.querySelector('.verdict');
+    this.basket = this.node.querySelector('.basket');
     // Practice only: a way out. It must not count as a touch on the pond
     this.doneBtn = this.node.querySelector('.done');
     this.doneBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
@@ -131,6 +135,8 @@ export class Fishing {
     this.hook = { x: 0.5, y: SURFACE - 0.04 };
     this.ball = { x: this.ballX0, y: SURFACE + 0.08 };
     this.carry = null; // what is on the hook: 'ball' | fish object
+    this.caught = 0;   // fish in the basket this session
+    this.basket.classList.add('hidden');
     const count = (mode === 'drop' ? 2 : mode === 'steer' ? 4 : 5) + Math.round(level * 2);
     this.fish = [];
     for (let i = 0; i < count; i++) {
@@ -228,21 +234,44 @@ export class Fishing {
       hook.y += this.dirY * (this.carry || this.dirY > 0 ? 0.3 : 0.9) * dt;
       if (!this.carry && this.dirY > 0 && hook.y >= BED - 0.03) this.dirY = -1;
       else if (!this.carry && this.dirY < 0 && hook.y <= top) { hook.y = top; this.dirY = 1; }
-      const fish = this.fish.find((f) => Math.abs(f.x - hook.x) < f.size * 0.95 && Math.abs(f.y - hook.y) < f.size * 0.6);
-      if (fish) {
+      const fish = this.fish.find((f) => !f.hooked && Math.abs(f.x - hook.x) < f.size * 0.95 && Math.abs(f.y - hook.y) < f.size * 0.6);
+      if (fish && this.carry === 'ball') {
+        // Knocked: the ball comes off and the hook shoots back up
         this.stun = 0.5;
-        if (this.carry) { this.carry = null; this.ballX0 = hook.x; this.ballPhase = -this.t * this.wanderRate; }
+        this.carry = null; this.ballX0 = hook.x; this.ballPhase = -this.t * this.wanderRate;
         this.sounds.bump?.();
+      } else if (fish && !this.carry) {
+        // Hooked one: bring it up
+        fish.hooked = true;
+        this.carry = fish;
+        this.dirY = -1;
+        this.sounds.hooked?.();
       } else if (!this.carry && Math.abs(hook.x - ball.x) < this.catchR * 0.75 && Math.abs(hook.y - ball.y) < 0.055) {
         this.carry = 'ball';
         this.dirY = -1;
         this.sounds.hooked?.();
       }
     }
-    if (this.carry) {
+    if (this.carry === 'ball') {
       ball.x = hook.x; ball.y = hook.y + 0.035;
       if (hook.y <= SURFACE) this.finish(this.mode === 'gold' ? 'gold' : 'ball');
+    } else if (this.carry) {
+      this.carry.x = hook.x; this.carry.y = hook.y + 0.04;
+      if (hook.y <= top + 0.01) this.bank();
     }
+  }
+
+  /** A fish reaches the surface: into the basket, and the hook goes back down. */
+  bank() {
+    this.carry.gone = true;
+    this.carry = null;
+    this.caught += 1;
+    this.dirY = 1;
+    this.basket.classList.remove('hidden', 'pop');
+    void this.basket.offsetWidth;
+    this.basket.classList.add('pop');
+    this.basket.querySelector('b').textContent = this.caught;
+    this.sounds.fish?.();
   }
 
   finish(result) {
@@ -319,7 +348,10 @@ export class Fishing {
       hook.y -= 1.1 * dt;
       if (this.carry === 'ball') { ball.x += (hook.x - ball.x) * Math.min(1, dt * 14); ball.y = hook.y + 0.035; }
       else if (this.carry) { this.carry.x = hook.x; this.carry.y = hook.y + 0.04; }
-      if (hook.y <= SURFACE - 0.02) this.finish(this.carry === 'ball' ? 'ball' : this.carry ? 'fish' : 'miss');
+      if (hook.y <= SURFACE - 0.02) {
+        if (this.carry && this.carry !== 'ball') this.caught += 1;
+        this.finish(this.carry === 'ball' ? 'ball' : this.carry ? 'fish' : 'miss');
+      }
     } else if (this.phase === 'done' && this.t - this.endT > 1.0) {
       const { result, onDone } = this;
       this.stop();
@@ -390,7 +422,7 @@ export class Fishing {
     for (const b of this.bubbles) { ctx.beginPath(); ctx.arc(b.x * W, b.y * H, b.r * u, 0, 6.3); ctx.stroke(); }
 
     // Fish
-    for (const f of this.fish) this.drawFish(f, W, H, u);
+    for (const f of this.fish) if (!f.gone) this.drawFish(f, W, H, u);
 
     // Where the hook will fall: a faint plumb line while it swings
     const hx = this.hook.x * W, hy = this.hook.y * H;
