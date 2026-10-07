@@ -9,6 +9,7 @@
  */
 
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { pathLength, pointAlongPath } from '../course/shapes.js';
 
 /** Shared with terrainMesh.js: how much the turf glows (0 by day). */
@@ -43,21 +44,36 @@ export function buildNightGlow(world) {
       const x = p.x - (tz / len) * off, z = p.z + (tx / len) * off;
       const s = world.surfaceAt(x, z);
       if (s === 'water' || s === 'green' || s === 'bunker') continue;
-      spots.push({ x, y: world.heightAt(x, z), z });
+      // nx, nz: toward the middle of the fairway
+      spots.push({ x, y: world.heightAt(x, z), z, nx: (tz / len) * side, nz: -(tx / len) * side });
     }
   }
   const lampMat = new THREE.MeshBasicMaterial({ color: 0xffd98a, transparent: true, opacity: 0, fog: false });
   const postMat = new THREE.MeshBasicMaterial({ color: 0x2a2a30, transparent: true, opacity: 0 });
-  const lamps = new THREE.InstancedMesh(new THREE.SphereGeometry(0.34, 10, 8), lampMat, Math.max(1, spots.length));
-  const posts = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.04, 0.05, 1.0, 5), postMat, Math.max(1, spots.length));
+  // Each is a camp lantern hung from a crook: a post, an arm, a cap and a foot (dark), and
+  // a fat glowing glass (bright). Two instanced meshes for the lot.
+  const lampGeo = mergeGeometries([
+    new THREE.CylinderGeometry(0.25, 0.25, 0.42, 8).translate(0.42, 1.27, 0),
+    new THREE.SphereGeometry(0.25, 8, 4, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2).translate(0.42, 1.06, 0),
+  ]);
+  const frameGeo = mergeGeometries([
+    new THREE.CylinderGeometry(0.045, 0.06, 1.85, 5).translate(0, 0.925, 0),
+    new THREE.BoxGeometry(0.5, 0.05, 0.05).translate(0.22, 1.82, 0),
+    new THREE.CylinderGeometry(0.012, 0.012, 0.18, 3).translate(0.42, 1.72, 0),
+    new THREE.ConeGeometry(0.3, 0.16, 8).translate(0.42, 1.56, 0),
+      ]);
+  const lamps = new THREE.InstancedMesh(lampGeo, lampMat, Math.max(1, spots.length));
+  const posts = new THREE.InstancedMesh(frameGeo, postMat, Math.max(1, spots.length));
   // A soft pool of light on the turf under each lantern
   const poolMat = new THREE.MeshBasicMaterial({ color: 0xffc56a, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, fog: false });
   const pools = new THREE.InstancedMesh(new THREE.CircleGeometry(2.6, 16).rotateX(-Math.PI / 2), poolMat, Math.max(1, spots.length));
   const m = new THREE.Matrix4();
   spots.forEach((s, i) => {
-    lamps.setMatrixAt(i, m.makeTranslation(s.x, s.y + 1.15, s.z));
-    posts.setMatrixAt(i, m.makeTranslation(s.x, s.y + 0.5, s.z));
-    pools.setMatrixAt(i, m.makeTranslation(s.x, s.y + 0.06, s.z));
+    // The arm reaches in over the fairway
+    m.makeRotationY(Math.atan2(-s.nz, s.nx)).setPosition(s.x, s.y, s.z);
+    lamps.setMatrixAt(i, m);
+    posts.setMatrixAt(i, m);
+    pools.setMatrixAt(i, m.makeTranslation(s.x + s.nx * 0.42, s.y + 0.06, s.z + s.nz * 0.42));
   });
   lamps.count = posts.count = pools.count = spots.length;
   group.add(posts, pools, lamps);

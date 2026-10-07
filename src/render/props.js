@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { pathInfo, pointAlongPath, greenDistance } from '../course/shapes.js';
+import { mulberry32 } from '../core/rng.js';
 
 /**
  * Props — every tree, rock, hut, shrine and far-off volcano in the game,
@@ -59,6 +60,7 @@ class Stream {
  *   x y z        offset            rx ry rz   rotation
  *   sx sy sz     stretch           top/topAt  second colour above a height fraction
  *   glow         send to the unlit mesh        shade      brightness multiplier
+ *   under        brightness at the bottom, easing up to full at the top (soft cel shading)
  * Primitives sit on y = 0 and grow upwards (blobs are centred).
  */
 class Builder {
@@ -83,7 +85,7 @@ class Builder {
       _scale.set(o.sx ?? 1, o.sy ?? 1, o.sz ?? 1));
     _m.multiplyMatrices(_base.copy(this.baseM), _local);
     const base = rgb(hex), top = o.top != null ? rgb(o.top) : null;
-    const shade = o.shade ?? 1, topAt = o.topAt ?? 0.5;
+    const shade = o.shade ?? 1, topAt = o.topAt ?? 0.5, under = o.under ?? 1;
     for (let i = 0; i < verts.length; i += 9) {
       const fr = [0, 0, 0];
       for (let k = 0; k < 3; k++) {
@@ -103,7 +105,8 @@ class Builder {
         out.pos.push(_v[k].x, _v[k].y, _v[k].z);
         out.nor.push(_n.x, _n.y, _n.z);
         const c = top && fr[k] >= topAt ? top : base;
-        out.col.push(c.r * face, c.g * face, c.b * face);
+        const f = under === 1 ? face : face * (under + (1 - under) * Math.min(1, Math.max(0, fr[k])));
+        out.col.push(c.r * f, c.g * f, c.b * f);
       }
     }
     return this;
@@ -162,7 +165,7 @@ function pineTiers(b, biome, snowy) {
   const green = pick(biome.canopy), tiers = chance(0.3) ? 4 : 3;
   for (let i = 0; i < tiers; i++) {
     const k = i / (tiers - 1), r = 2.5 - k * 1.15, y = 1.8 + k * 4.2, h = 3.6 - k * 0.5;
-    const o = { y, seg: 7, shade: R(0.9, 1.08), spin: R(0, 1) };
+    const o = { y, seg: 7, shade: R(0.9, 1.08), spin: R(0, 1), under: 0.7 };
     b.fr(green, r, 0, h, snowy ? { ...o, top: 0xf6fbff, topAt: R(0.22, 0.42) } : o);
   }
 }
@@ -171,20 +174,22 @@ const TREES = {
   round(b, biome) {
     b.fr(biome.trunk, 0.4, 0.26, 3.8);
     const leaf = pick(biome.canopy);
-    b.bl(leaf, 2.8, { y: 5.7, sy: 1.1, ry: R(0, 3) });
+    b.bl(leaf, 2.8, { y: 5.7, sy: 1.1, ry: R(0, 3), under: 0.72 });
     for (let i = 0, n = 2 + Math.floor(R(0, 2.5)); i < n; i++) {
       const a = R(0, TAU), d = R(1.3, 1.9);
       b.bl(chance(0.3) ? pick(biome.canopy) : leaf, R(1.4, 2.0),
-        { x: Math.cos(a) * d, y: R(4.4, 6.4), z: Math.sin(a) * d, ry: R(0, 3), shade: R(0.88, 1.1) });
+        { x: Math.cos(a) * d, y: R(4.4, 6.4), z: Math.sin(a) * d, ry: R(0, 3), shade: R(0.88, 1.1), under: 0.72 });
     }
+    // A low branch fork showing under the crown
+    b.fr(biome.trunk, 0.16, 0.08, 1.6, { y: 2.9, ry: R(0, TAU), rz: 0.7, seg: 5 });
   },
   pine(b, biome) { pineTiers(b, biome, false); },
   snowPine(b, biome) { pineTiers(b, biome, true); },
   scrub(b, biome) {
     b.fr(biome.trunk, 0.26, 0.16, 1.5, { rz: R(-0.2, 0.2) });
     const leaf = pick(biome.canopy);
-    b.bl(leaf, 1.7, { y: 2.2, sx: 1.15, sy: 0.8, ry: R(0, 3) });
-    b.bl(leaf, 1.1, { x: R(0.8, 1.2), y: 1.8, z: R(-0.6, 0.6), shade: 0.92 });
+    b.bl(leaf, 1.7, { y: 2.2, sx: 1.15, sy: 0.8, ry: R(0, 3), under: 0.74 });
+    b.bl(leaf, 1.1, { x: R(0.8, 1.2), y: 1.8, z: R(-0.6, 0.6), shade: 0.92, under: 0.74 });
   },
   palm(b, biome) {
     // A trunk that leans and then recovers, the way they do
@@ -221,7 +226,7 @@ const TREES = {
     }
     for (let i = 0, n = 5 + Math.floor(R(0, 3)); i < n; i++) {
       const t = R(0, TAU), d = i ? R(0.9, 1.9) : 0;
-      b.bl(pick(biome.canopy), R(1.3, 2.0), { x: Math.cos(t) * d, y: R(4.6, 6.5), z: Math.sin(t) * d, sy: 0.72, ry: R(0, 3), shade: R(0.94, 1.06) });
+      b.bl(pick(biome.canopy), R(1.3, 2.0), { x: Math.cos(t) * d, y: R(4.6, 6.5), z: Math.sin(t) * d, sy: 0.72, ry: R(0, 3), shade: R(0.94, 1.06), under: 0.8 });
     }
   },
   charred(b, biome) {
@@ -236,7 +241,7 @@ const TREES = {
     const cap = pick(biome.canopy), r = R(2.5, 3.0), tilt = { rz: R(-0.1, 0.1), rx: R(-0.1, 0.1) };
     b.fr(biome.trunk, 0.75, 0.5, 4.7, { seg: 7 });
     b.fr(biome.trunk, r * 0.5, r * 0.94, 0.5, { y: 4.3, seg: 8, shade: 0.86, ...tilt });
-    b.bl(cap, r, { y: 4.8, sy: 0.62, detail: 1, ...tilt });
+    b.bl(cap, r, { y: 4.8, sy: 0.62, detail: 1, under: 0.7, ...tilt });
     for (let i = 0; i < 6; i++) {
       const a = R(0, TAU), d = i ? R(0.9, r * 0.78) : 0;
       const lift = Math.sqrt(Math.max(0, 1 - (d / r) ** 2)) * r * 0.62;
@@ -269,14 +274,25 @@ function shards(b, colours, n, h, o = {}) {
 
 function toadstools(b, caps, n, size) {
   for (let i = 0; i < n; i++) {
-    const h = size * R(0.5, 1), x = i ? R(-1, 1) * size : 0, z = i ? R(-1, 1) * size : 0;
-    b.fr(0xf2ead8, h * 0.16, h * 0.12, h, { x, z });
-    b.bl(pick(caps), h * 0.55, { x, y: h, z, sy: 0.6 });
+    const h = size * R(0.5, 1), x = i ? R(-1, 1) * size : 0, z = i ? R(-1, 1) * size : 0, r = h * 0.55;
+    b.fr(0xf2ead8, h * 0.17, h * 0.12, h, { x, z, seg: 7 });
+    b.fr(0xe2cfb0, r * 0.95, h * 0.12, r * 0.12, { x, y: h - r * 0.1, z, seg: 8 }); // gills
+    b.bl(pick(caps), r, { x, y: h, z, sy: 0.6, under: 0.75 });
+    // Spots: one on the crown, a couple round the shoulder
+    b.bl(0xfffbee, r * 0.2, { x, y: h + r * 0.58, z, sy: 0.35 });
+    for (let k = 0; k < 3; k++) {
+      const a = R(0, TAU);
+      b.bl(0xfffbee, r * R(0.12, 0.17), { x: x + Math.cos(a) * r * 0.7, y: h + r * 0.4, z: z + Math.sin(a) * r * 0.7, sy: 0.45 });
+    }
   }
 }
 
 const PROPS = {
-  bush(b, biome) { for (let i = 0; i < 3; i++) b.bl(pick(biome.canopy), R(0.6, 1.1), { x: R(-0.8, 0.8), y: 0.5, z: R(-0.8, 0.8), sy: 0.8, shade: R(0.9, 1.1) }); },
+  bush(b, biome) {
+    for (let i = 0; i < 3; i++) b.bl(pick(biome.canopy), R(0.6, 1.1), { x: R(-0.8, 0.8), y: 0.5, z: R(-0.8, 0.8), sy: 0.8, shade: R(0.9, 1.1), under: 0.72 });
+    // Now and then a few berries or blooms
+    if (chance(0.4)) for (let i = 0; i < 4; i++) b.bl(pick(biome.flowers), 0.12, { x: R(-0.9, 0.9), y: R(0.7, 1.1), z: R(-0.9, 0.9) });
+  },
   fence(b, biome) {
     const wood = biome.id === 'parkland' ? 0xf4f0e4 : 0x8a6a48, posts = 4 + Math.floor(R(0, 3));
     for (let i = 0; i < posts; i++) b.bx(wood, 0.18, R(1.0, 1.2), 0.18, { x: i * 1.8, rz: R(-0.06, 0.06) });
@@ -319,7 +335,7 @@ const PROPS = {
   },
   shell(b) { b.fr(pick([0xffc8d8, 0xfff0e0, 0xffb09a]), 0.4, 0, 0.9, { rz: 1.3, y: 0.3, seg: 7 }); },
   hibiscus(b, biome) {
-    for (let i = 0; i < 3; i++) b.bl(pick(biome.canopy), R(0.5, 0.9), { x: R(-0.6, 0.6), y: 0.45, z: R(-0.6, 0.6), sy: 0.8 });
+    for (let i = 0; i < 3; i++) b.bl(pick(biome.canopy), R(0.5, 0.9), { x: R(-0.6, 0.6), y: 0.45, z: R(-0.6, 0.6), sy: 0.8, under: 0.75 });
     for (let i = 0; i < 4; i++) b.bl(pick(biome.flowers), 0.2, { x: R(-0.9, 0.9), y: R(0.7, 1.2), z: R(-0.9, 0.9) });
   },
   surfboard(b) {
@@ -342,12 +358,21 @@ const PROPS = {
   pumpkin(b) {
     for (let i = 0, n = 1 + Math.floor(R(0, 2.4)); i < n; i++) {
       const r = R(0.4, 0.8), x = i * R(0.9, 1.3), z = i ? R(-0.6, 0.6) : 0;
-      b.bl(pick([0xf28a1e, 0xe8741a, 0xf2a43a]), r, { x, y: r * 0.7, z, sy: 0.75, detail: 1 });
-      b.fr(0x4a6a2a, r * 0.12, r * 0.08, r * 0.35, { x, y: r * 1.35, z });
+      const skin = pick([0xf28a1e, 0xe8741a, 0xf2a43a]);
+      // Ribbed: a ring of fat lobes round a core
+      b.bl(skin, r, { x, y: r * 0.7, z, sy: 0.75, detail: 1, under: 0.78 });
+      for (let k = 0; k < 5; k++) {
+        const a = (k / 5) * TAU;
+        b.bl(skin, r * 0.6, { x: x + Math.cos(a) * r * 0.45, y: r * 0.6, z: z + Math.sin(a) * r * 0.45, sy: 0.88, sx: 0.8, ry: -a, shade: k % 2 ? 0.92 : 1, under: 0.72 });
+      }
+      b.fr(0x4a6a2a, r * 0.12, r * 0.08, r * 0.35, { x, y: r * 1.25, z, rz: 0.25 });
+      b.bx(0x5a8a32, r * 0.5, 0.03, r * 0.3, { x: x + r * 0.2, y: r * 1.27, z, ry: R(0, TAU) });
     }
   },
   leafPile(b, biome) {
-    for (let i = 0; i < 3; i++) b.bl(pick(biome.canopy), R(0.7, 1.2), { x: R(-0.7, 0.7), y: 0.12, z: R(-0.7, 0.7), sy: 0.32, ry: R(0, 3) });
+    for (let i = 0; i < 3; i++) b.bl(pick(biome.canopy), R(0.7, 1.2), { x: R(-0.7, 0.7), y: 0.12, z: R(-0.7, 0.7), sy: 0.32, ry: R(0, 3), under: 0.8 });
+    // A few loose leaves blown off the top
+    for (let i = 0; i < 4; i++) b.bx(pick(biome.canopy), 0.3, 0.03, 0.2, { x: R(-1.6, 1.6), z: R(-1.6, 1.6), ry: R(0, TAU), shade: R(0.9, 1.1) });
   },
   toadstool(b, biome) { toadstools(b, biome.id === 'toadstool' ? biome.canopy : [0xe8423a, 0xd9c8a8, 0xb86a3a], 1 + Math.floor(R(0, 3)), R(0.6, 1.5)); },
   bamboo(b) {
@@ -443,7 +468,11 @@ const FEATURES = {
   },
   haystack(b) {
     for (let i = 0, n = 1 + Math.floor(R(0, 2.5)); i < n; i++) {
-      b.fr(pick([0xe6c25a, 0xd9b24a]), 1.1, 1.1, 1.7, { x: i * 2.6 - 0.85, y: 1.1, z: R(-0.4, 0.4), rz: -Math.PI / 2, seg: 9 });
+      const x = i * 2.6 - 0.85, z = R(-0.4, 0.4), hay = pick([0xe6c25a, 0xd9b24a]);
+      b.fr(hay, 1.1, 1.1, 1.7, { x, y: 1.1, z, rz: -Math.PI / 2, seg: 10 });
+      // Wound faces and a band of twine round the middle
+      b.fr(0xf2d27a, 0.75, 0.75, 1.72, { x: x - 0.01, y: 1.1, z, rz: -Math.PI / 2, seg: 10 });
+      b.fr(0xb8924a, 1.13, 1.13, 0.1, { x: x + 0.8, y: 1.1, z, rz: -Math.PI / 2, seg: 10 });
     }
   },
   scarecrow(b) {
@@ -465,9 +494,12 @@ const FEATURES = {
   },
   crystalCluster(b) { shards(b, [0xc49aff, 0x7ae8ff, 0xff9ae0], 7, R(4, 7), { glow: true, shade: 0.85 }); rocks(b, 0x5a6a7a, 3, 1.4); },
   boat(b) {
-    const hull = pick([0xe8523a, 0x3a8ad8, 0xf4f0e4, 0x3aa87a]);
-    b.bl(hull, 1, { y: 0.45, sx: 2.6, sy: 0.6, sz: 1.0, rz: R(-0.2, 0.2), detail: 1 });
-    b.bx(0xd9b98a, 0.3, 0.1, 1.5, { y: 0.85 }).bx(0xd9b98a, 0.3, 0.1, 1.3, { x: 1.0, y: 0.85 });
+    // A rowboat pulled up on the bank: a flared hull, a pale gunwale, seats and oars
+    const hull = pick([0xe8523a, 0x3a8ad8, 0xf4f0e4, 0x3aa87a]), tilt = R(-0.12, 0.12);
+    b.fr(hull, 0.62, 1.0, 0.85, { seg: 10, sx: 2.5, rx: tilt, top: 0xf4ead8, topAt: 0.85 });
+    b.fr(0x6a4a30, 0.88, 0.88, 0.02, { y: 0.85, seg: 10, sx: 2.45, rx: tilt });
+    for (const x of [-0.8, 0.6]) b.bx(0xd9b98a, 0.32, 0.08, 1.7, { x, y: 0.86, rx: tilt });
+    for (const z of [-1, 1]) b.fr(0xd9b98a, 0.05, 0.05, 2.8, { x: -1.0, y: 0.92, z: z * 0.6, rz: -1.45, ry: z * 0.12, seg: 4 });
   },
   watchtower(b) {
     for (const x of [-1, 1]) for (const z of [-1, 1]) b.fr(0x6a4a30, 0.2, 0.16, 8.4, { x: x * 1.9, z: z * 1.9, rz: x * 0.1, rx: -z * 0.1, seg: 4 });
@@ -476,9 +508,20 @@ const FEATURES = {
     b.bx(0xffe08a, 1.2, 0.8, 0.08, { y: 9.2, z: 1.54, glow: true });
   },
   tent(b) {
-    b.rf(pick([0xf28a2a, 0x3a8ad8, 0xd8d24a, 0xe8523a]), 3.6, 2.3, 3.2, { ry: Math.PI / 2 });
+    // A-frame with its door open toward its own little campfire
+    b.rf(pick([0xf28a2a, 0x3a8ad8, 0xd8d24a, 0xe8523a]), 3.6, 2.3, 3.2);
+    b.rf(0x3a2a24, 0.06, 1.5, 1.5, { x: 1.81 });
+    for (const side of [-1, 1]) {
+      // Poles poking through at each end, guyed out to a peg
+      b.fr(0x5a4a40, 0.06, 0.06, 2.6, { x: side * 1.85, seg: 4 });
+      b.fr(0xf4ead8, 0.025, 0.025, 2.71, { x: side * 2.9, rz: side * 0.4, seg: 3 });
+    }
+    // Fire: a ring of stones, crossed logs, a flame
+    for (let i = 0; i < 6; i++) b.bl(0x8a8a86, 0.24, { x: 3.4 + Math.cos(i) * 0.6, y: 0.08, z: Math.sin(i) * 0.6, sy: 0.6 });
     for (let i = 0; i < 4; i++) b.fr(0x5a4030, 0.12, 0.1, 0.9, { x: 3.4, y: 0.1, ry: i * 1.6, rz: 1.1, seg: 4 });
-    b.bl(0xff8a2a, 0.34, { x: 3.4, y: 0.4, glow: true }).bl(0xffd24a, 0.2, { x: 3.4, y: 0.7, glow: true });
+    b.fr(0xff8a2a, 0.36, 0, 0.9, { x: 3.4, y: 0.1, seg: 5, glow: true }).fr(0xffd24a, 0.2, 0, 0.6, { x: 3.4, y: 0.12, seg: 5, glow: true });
+    // A stump to sit on
+    b.fr(0x7a5536, 0.3, 0.32, 0.45, { x: 3.6, z: 1.6, seg: 7, top: 0xe2c08a, topAt: 0.95 });
   },
   rockArch(b) { arch(b, pick([0xc8683a, 0xb85a34]), { top: 0xe09a58, topAt: 0.6 }); },
   iceArch(b) { arch(b, 0xa8d8f6, { top: 0xffffff, topAt: 0.55 }); },
@@ -767,6 +810,14 @@ export function buildProps(world, rng, { lowDetail = false } = {}) {
     mesh.castShadow = shadows;
     return mesh;
   };
+  // Each thing is grown from its own little stream, seeded from the hole's: how
+  // many dice a cactus throws can then never move where the next one stands
+  const own = (grow) => {
+    const keep = rnd;
+    rnd = mulberry32(Math.floor(keep() * 4294967296));
+    grow();
+    rnd = keep;
+  };
   const glowParts = [];
   const placed = []; // where everything stands: camera blockers, and the clearance audit
 
@@ -775,7 +826,7 @@ export function buildProps(world, rng, { lowDetail = false } = {}) {
   const grow = TREES[biome.treeKind];
   for (const t of world.trees) {
     trees.place(t.x, t.y - 0.1, t.z, R(0, TAU), t.s);
-    grow(trees, biome);
+    own(() => grow(trees, biome));
   }
   glowParts.push(trees.glow);
 
@@ -790,7 +841,7 @@ export function buildProps(world, rng, { lowDetail = false } = {}) {
       taken.push({ x: s.x, z: s.z, r: 9 });
       placed.push({ x: s.x, y: s.y, z: s.z, r: 7, h: 12, type: 'feature', kind });
       props.place(s.x, s.y - 0.4, s.z, R(0, TAU), R(1.3, 1.8));
-      FEATURES[kind](props, biome);
+      own(() => FEATURES[kind](props, biome));
     }
   }
   for (const [kind, count] of biome.props) {
@@ -800,13 +851,13 @@ export function buildProps(world, rng, { lowDetail = false } = {}) {
     for (const s of spots) {
       placed.push({ x: s.x, y: s.y, z: s.z, r: 1.5, h: 3, type: 'prop', kind });
       props.place(s.x, s.y - 0.1, s.z, R(0, TAU), R(1.2, 2.0));
-      PROPS[kind](props, biome);
+      own(() => PROPS[kind](props, biome));
     }
   }
   glowParts.push(props.glow);
 
   const backdrop = new Builder();
-  buildBackdrop(backdrop, world);
+  own(() => buildBackdrop(backdrop, world));
   glowParts.push(backdrop.glow);
 
   const glowStream = new Stream();

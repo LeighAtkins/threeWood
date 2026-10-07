@@ -118,7 +118,15 @@ function buildFlag(world) {
   const poleMat = new THREE.MeshLambertMaterial({ color: 0xfff6d8, emissive: 0xfff6d8, emissiveIntensity: 0, transparent: true });
   const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 3.4, 6).translate(0, 1.7, 0), poleMat);
   pole.castShadow = true;
-  const clothGeo = new THREE.PlaneGeometry(1.25, 0.8, 8, 3).translate(0.625, 0, 0);
+  // A little ball on top of the pin
+  pole.add(new THREE.Mesh(new THREE.SphereGeometry(0.075, 8, 6).translate(0, 3.42, 0), poleMat));
+  // A pennant with a swallowtail notch cut in the fly end
+  const clothGeo = new THREE.PlaneGeometry(1.25, 0.8, 8, 4).translate(0.625, 0, 0);
+  const cp = clothGeo.attributes.position;
+  for (let i = 0; i < cp.count; i++) {
+    const x = cp.getX(i), y = cp.getY(i);
+    cp.setX(i, x - (x / 1.25) ** 3 * (0.4 - Math.abs(y)) * 0.75);
+  }
   const clothMat = new THREE.MeshLambertMaterial({ color: 0xff3b3b, emissive: 0xff3b3b, emissiveIntensity: 0, side: THREE.DoubleSide, transparent: true });
   const cloth = new THREE.Mesh(clothGeo, clothMat);
   cloth.position.y = 2.95;
@@ -170,16 +178,38 @@ export function updateFlag(flag, time, hidden, camera) {
 function buildTeeMarkers(world) {
   const group = new THREE.Group();
   const p = pointAlongPath(world.spec.path, 0);
-  const mat = new THREE.MeshLambertMaterial({ color: 0xff5a3c, flatShading: true });
+  // Each marker is a little cut stump with a big red ball sat on it
+  const stumpGeo = new THREE.CylinderGeometry(0.15, 0.18, 0.18, 8).translate(0, 0.09, 0);
+  const ballGeo = new THREE.IcosahedronGeometry(0.15, 1).translate(0, 0.32, 0);
+  const bandGeo = new THREE.TorusGeometry(0.15, 0.022, 4, 12).rotateX(Math.PI / 2).translate(0, 0.32, 0);
+  const bark = new THREE.MeshLambertMaterial({ color: 0x8a6040, flatShading: true });
+  const cut = new THREE.MeshLambertMaterial({ color: 0xe2c08a, flatShading: true });
+  const red = new THREE.MeshLambertMaterial({ color: 0xff5a3c, flatShading: true });
+  const white = new THREE.MeshLambertMaterial({ color: 0xfff6e4, flatShading: true });
   for (const side of [1, -1]) {
-    const m = new THREE.Mesh(new THREE.IcosahedronGeometry(0.16, 0), mat);
+    const m = new THREE.Group();
+    m.add(new THREE.Mesh(stumpGeo, [bark, cut, cut]), new THREE.Mesh(ballGeo, red), new THREE.Mesh(bandGeo, white));
     const x = world.tee.x - p.dirZ * side * 1.6 + p.dirX * 0.3;
     const z = world.tee.z + p.dirX * side * 1.6 + p.dirZ * 0.3;
-    m.position.set(x, world.heightAt(x, z) + 0.14, z);
-    m.castShadow = true;
+    m.position.set(x, world.heightAt(x, z) - 0.03, z);
+    m.children.forEach((c) => { c.castShadow = true; });
     group.add(m);
   }
   return group;
+}
+
+/** A tuft: five blades fanning out from one root, the middle one tallest. */
+function tuftGeometry() {
+  const blades = [];
+  for (let i = 0; i < 5; i++) {
+    const a = (i / 5) * Math.PI * 2 + 0.3, tall = i === 0 ? 0.95 : 0.6 + (i % 2) * 0.18;
+    const lean = i === 0 ? 0.08 : 0.42;
+    const blade = new THREE.ConeGeometry(0.11, tall, 3, 1, true).translate(0, tall / 2, 0);
+    blade.rotateZ(lean);
+    blade.rotateY(a);
+    blades.push(blade);
+  }
+  return mergeGeometries(blades);
 }
 
 function buildGroundCover(world, rng, lowDetail) {
@@ -219,7 +249,7 @@ function buildGroundCover(world, rng, lowDetail) {
   const rough = new THREE.Color(biome.tuft);
   scatter(
     tuftCount,
-    new THREE.ConeGeometry(0.35, 0.9, 4).translate(0, 0.4, 0),
+    tuftGeometry(),
     new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true }),
     (c) => c.copy(rough).multiplyScalar(0.8 + rng() * 0.45),
     [0.6, 1.5],

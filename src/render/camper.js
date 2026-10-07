@@ -113,9 +113,11 @@ export class Camper {
       add(knee, ball(0.037, 8, 6), legMat);
       add(knee, tube(0.036, 0.03, 0.19, 10), legMat, 0, -0.095, 0);
       if (!pants && fit.legs == null) add(knee, tube(0.034, 0.033, 0.05, 10), sole, 0, -0.165, 0); // socks
-      add(knee, ball(1, 10, 8), shoeMat, 0, -0.2, 0.022, 0.04, 0.034, 0.068);
-      add(knee, new THREE.BoxGeometry(0.064, 0.014, 0.118), sole, 0, -0.223, 0.022);
-      add(knee, ball(0.022, 8, 6), sole, 0, -0.207, 0.068, 1, 0.75, 0.8); // toe cap
+      // Sneaker: a rounded upper on a thick, rounded sole, a pale toe cap and a lace strip
+      add(knee, ball(1, 12, 8), shoeMat, 0, -0.198, 0.02, 0.039, 0.033, 0.066);
+      add(knee, tube(0.5, 0.5, 1, 14), sole, 0, -0.222, 0.022, 0.07, 0.016, 0.126);
+      add(knee, ball(0.021, 10, 6), sole, 0, -0.209, 0.064, 1, 0.7, 0.8); // toe cap
+      add(knee, new THREE.BoxGeometry(0.018, 0.006, 0.04), sole, 0, -0.17, 0.034).rotation.x = 0.5; // laces
       hip.add(knee);
       rig.add(hip);
       return { hip, knee };
@@ -181,7 +183,9 @@ export class Camper {
       add(elbow, ball(puff * 0.92, 8, 6), sleeve);
       add(elbow, tube(puff * 0.92, puff * 0.8, 0.11, 10), sleeve, 0, -0.055, 0);
       add(elbow, tube(puff * 0.82, puff * 0.82, 0.02, 10), open ? seam : trim, 0, -0.105, 0); // cuff
-      add(elbow, ball(0.031, 10, 8), skinMat, 0, -0.135, 0);
+      // A mitten of a hand with a thumb
+      add(elbow, ball(0.03, 12, 8), skinMat, 0, -0.136, 0, 0.88, 1.12, 0.92);
+      add(elbow, ball(0.012, 8, 6), skinMat, 0, -0.124, 0.024, 1, 1.4, 1);
       shoulder.add(elbow);
       upper.add(shoulder);
       return { shoulder, elbow };
@@ -238,13 +242,13 @@ export class Camper {
     const strands = [[-0.088, 0.03, 0.5], [-0.052, 0.022, 0.2], [-0.012, 0.012, -0.1], [0.03, 0.022, -0.25], [0.07, 0.03, -0.45], [0.1, 0.04, -0.6]];
     for (const [x, drop, lean] of strands) {
       const z = Math.sqrt(Math.max(0.001, (R + 0.012) ** 2 - x * x - 0.05 * 0.05));
-      const s = add(head, ball(0.034, 8, 8), hairMat, x, (hatted ? 0.066 : 0.09) - drop, z - 0.012, 0.95, hatted ? 1.35 : 2.0, 0.46);
+      const s = add(head, ball(0.034, 10, 8), hairMat, x, (hatted ? 0.066 : 0.09) - drop, z - 0.012, 0.95, hatted ? 1.35 : 2.0, 0.46);
       s.rotation.set(-0.35, x * 4, lean);
     }
     const long = hair === 'long' || hair === 'twintails';
     for (const side of [-1, 1]) {
       // Locks framing the face
-      const lock = add(head, ball(0.034, 8, 8), hairMat, side * 0.118, long ? -0.075 : -0.035, 0.04, 0.6, long ? 3.8 : 2.4, 0.9);
+      const lock = add(head, ball(0.034, 10, 8), hairMat, side * 0.118, long ? -0.075 : -0.035, 0.04, 0.6, long ? 3.8 : 2.4, 0.9);
       lock.rotation.z = side * -0.06;
     }
     if (hair === 'bob') add(head, ball(R, 16, 12), hairMat, 0, -0.045, -0.025, 1.12, 0.95, 0.95);
@@ -253,8 +257,16 @@ export class Camper {
       else { add(head, ball(0.062, 12, 10), hairMat, 0, 0.15, -0.03); add(head, new THREE.TorusGeometry(0.03, 0.01, 5, 10), trim, 0, 0.115, -0.025).rotation.x = Math.PI / 2; }
     }
     if (hair === 'long') {
-      add(head, ball(0.1, 14, 12), hairMat, 0, -0.17, -0.085, 1.15, 2.5, 0.5);
-      for (const side of [-1, 1]) add(head, ball(0.04, 8, 8), hairMat, side * 0.09, -0.2, -0.05, 0.8, 3.6, 0.7).rotation.z = side * 0.08;
+      // A fall of hair down the back that ends in soft points, not one blob
+      add(head, ball(0.1, 14, 12), hairMat, 0, -0.12, -0.085, 1.12, 1.8, 0.5);
+      for (const [x, len, tilt] of [[-0.075, 3.9, 0.1], [-0.026, 4.5, 0.03], [0.026, 4.3, -0.03], [0.075, 3.8, -0.1]]) {
+        add(head, ball(0.04, 10, 8), hairMat, x, -0.24, -0.1, 1, len, 0.55).rotation.z = tilt;
+      }
+      for (const side of [-1, 1]) add(head, ball(0.04, 10, 8), hairMat, side * 0.09, -0.2, -0.05, 0.8, 3.6, 0.7).rotation.z = side * 0.08;
+    }
+    if (hair === 'short' || hair === 'bun' || hair === 'ponytail') {
+      // A tidy nape: two little points at the back of the neck
+      for (const side of [-1, 1]) add(head, ball(0.03, 8, 6), hairMat, side * 0.035, -0.105, -0.1, 1, 1.8, 0.7).rotation.z = side * 0.15;
     }
     if (hair === 'twintails') {
       for (const side of [-1, 1]) {

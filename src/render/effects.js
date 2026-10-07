@@ -206,9 +206,10 @@ class Particles {
       fragmentShader: /* glsl */`
         varying vec3 vColor;
         void main() {
-          vec2 d = gl_PointCoord - 0.5;
-          if (dot(d, d) > 0.25) discard;
-          gl_FragColor = vec4(vColor, 1.0);
+          // Soft round specks with a brighter heart, rather than hard discs
+          float d = length(gl_PointCoord - 0.5);
+          if (d > 0.5) discard;
+          gl_FragColor = vec4(min(vColor * (1.0 + 0.3 * smoothstep(0.3, 0.0, d)), 1.0), smoothstep(0.5, 0.34, d));
         }`,
     });
     this.material = material;
