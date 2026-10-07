@@ -1,0 +1,45 @@
+<!doctype html>
+<!-- Dev tool: every outfit in a row of poses and angles, for spotting clipping.
+     npx vite --port 4318, then open /scripts/dev/campers.html?pose=idle&body=girl&hair=long -->
+<html><head><style>html,body{margin:0;background:#cfd8cf}canvas{display:block}</style></head>
+<body><script type="module">
+import * as THREE from 'three';
+import { Camper } from '../../src/render/camper.js';
+import { OUTFITS } from '../../src/core/camp.js';
+const q = new URLSearchParams(location.search);
+const poses = (q.get('poses') || 'idle,walk,address,perch,cheer').split(',');
+const angles = (q.get('angles') || '0,1.5708,3.1416').split(',').map(Number);
+const outfits = (q.get('outfits') || OUTFITS.map((o) => o.id).join(',')).split(',');
+const cell = +(q.get('cell') || 150);
+const cols = poses.length * angles.length, rows = outfits.length;
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setSize(cols * cell, rows * cell);
+renderer.setScissorTest(true);
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.add(new THREE.HemisphereLight(0xffffff, 0x88aa88, 1.6));
+const sun = new THREE.DirectionalLight(0xffffff, 1.8); sun.position.set(2, 4, 3); scene.add(sun);
+const cam = new THREE.PerspectiveCamera(30, 1, 0.05, 20);
+const zoom = q.get('zoom') || 'body'; // body | head | legs
+const target = { body: [0.52, 1.95], head: [0.82, 1.0], legs: [0.3, 1.5], torso: [0.58, 1.3] }[zoom];
+const look = { body: q.get('body') || 'girl', skin: 1, hair: q.get('hair') || 'long', hairColor: +(q.get('hc') || 1), eyes: 0, name: 'x' };
+const campers = outfits.map((id) => new Camper({ ...look, outfit: id }));
+rows && outfits.forEach((id, r) => {
+  const c = campers[r];
+  poses.forEach((pose, pi) => {
+    for (let i = 0; i < 40; i++) c.update(0.05, pose, { twist: pose === 'address' ? -0.6 : 0 });
+    scene.add(c.group);
+    angles.forEach((a, ai) => {
+      const col = pi * angles.length + ai;
+      cam.position.set(Math.sin(a) * target[1], target[0] + 0.15, Math.cos(a) * target[1]);
+      cam.lookAt(0, target[0], 0);
+      const x = col * cell, y = (rows - 1 - r) * cell;
+      renderer.setViewport(x, y, cell, cell); renderer.setScissor(x, y, cell, cell);
+      renderer.setClearColor(r % 2 ? 0xd8e2d6 : 0xc8d4c6);
+      renderer.render(scene, cam);
+    });
+    scene.remove(c.group);
+  });
+});
+window.done = true;
+</script></body></html>
