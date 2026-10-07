@@ -91,12 +91,13 @@ export class CamperUi {
   close() { this.node.classList.add('hidden'); this.node.innerHTML = ''; }
 
   /** Pose buttons for the campfire. onPose(name); onBack() returns to the card. */
-  showPoses(onPose, onBack) {
+  showPoses(onPose, onBack, onPhoto = null) {
     const names = [['sit', 'SIT'], ['warm', 'WARM UP'], ['peace', 'PEACE'], ['cheer', 'CHEER'], ['hello', 'HELLO']];
-    this.poses.innerHTML = `${names.map(([id, label]) => `<button data-p="${id}">${label}</button>`).join('')}<button class="back" data-p="">BACK</button>`;
+    this.poses.innerHTML = `${names.map(([id, label]) => `<button data-p="${id}">${label}</button>`).join('')}${onPhoto ? '<button class="photo" data-p="photo">📷 PHOTO</button>' : ''}<button class="back" data-p="">BACK</button>`;
     this.poses.onclick = (e) => {
       const b = e.target.closest('button');
       if (!b) return;
+      if (b.dataset.p === 'photo') { this.hidePoses(); onPhoto(); return; }
       if (!b.dataset.p) { this.hidePoses(); onBack(); return; }
       for (const o of this.poses.children) o.classList.toggle('on', o === b);
       onPose(b.dataset.p);

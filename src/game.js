@@ -105,6 +105,12 @@ export class Game {
     this.newOutfits = [];
     this._pivot = new THREE.Vector3();
     this.net = new NetPlay(this);
+    // Big moments (gold callouts) are shared with the room
+    const callout = this.hud.callout.bind(this.hud);
+    this.hud.callout = (text, kind = '') => { callout(text, kind); if (/gold/.test(kind) && !/^\+/.test(text)) this.net.brag(text); };
+    this.photoCount = document.createElement('div');
+    this.photoCount.className = 'photo-count hidden';
+    document.body.appendChild(this.photoCount);
     this.gimmicks = new Gimmicks(this.scene);
     this.cookHud = new CookHud(this.hud.root, this.hud.layer, () => this.eatFish());
     this.initBall();
@@ -717,6 +723,56 @@ export class Game {
     this.campsite.visible = true;
     this.setCampPose('sit');
     this.net.campfire(this.campsite);
+  }
+
+  /** The pose bar by the fire, with the camera. back() returns to the summary card. */
+  campPoses(back) {
+    this.hud.clearLayer();
+    this.camperUi.showPoses((pose) => this.setCampPose(pose), () => { this.setCampPose('sit'); back(); }, () => this.takePhoto(() => this.campPoses(back)));
+  }
+
+  /**
+   * A camp photo: the HUD goes away, 3-2-1, and the frame is saved to share.
+   * then() brings the pose bar back afterwards.
+   */
+  takePhoto(then) {
+    this.photo = { t: 0, then };
+    this.hud.root.classList.add('photo');
+    this.photoCount.classList.remove('hidden');
+    this.audio.tap();
+  }
+
+  /** Runs after the frame is drawn: counts down, then grabs the canvas. */
+  photoFrame(dt) {
+    const p = this.photo;
+    if (!p) return;
+    p.t += dt;
+    const left = Math.ceil(3 - p.t);
+    if (left >= 1) { this.photoCount.textContent = left; return; }
+    this.photoCount.textContent = '';
+    if (p.t < 3.15) return; // one clean frame with no number on it
+    this.photo = null;
+    this.photoCount.classList.add('hidden');
+    this.hud.root.classList.remove('photo');
+    this.audio.reward(3);
+    this.canvas.toBlob((blob) => {
+      if (!blob) { p.then(); return; }
+      const url = URL.createObjectURL(blob);
+      const file = new File([blob], 'threewood-camp.png', { type: 'image/png' });
+      const canShare = !!navigator.canShare?.({ files: [file] });
+      this.hud.clearLayer();
+      const node = document.createElement('div');
+      node.className = 'overlay dim';
+      node.innerHTML = `<div class="card photo-card"><img alt="Camp photo"><div class="btn-row">${canShare ? '<button class="btn" data-a="share">SHARE</button>' : ''}<a class="btn ${canShare ? 'ghost' : ''}" data-a="save" download="threewood-camp.png">SAVE</a></div><button class="btn ghost" data-a="close">BACK</button></div>`;
+      node.querySelector('img').src = url;
+      node.querySelector('[data-a="save"]').href = url;
+      node.addEventListener('click', async (e) => {
+        const a = e.target.closest('[data-a]')?.dataset.a;
+        if (a === 'share') { try { await navigator.share({ files: [file], title: 'ThreeWood' }); } catch { /* cancelled */ } }
+        if (a === 'close') { URL.revokeObjectURL(url); this.hud.clearLayer(); p.then(); }
+      });
+      this.hud.layer.appendChild(node);
+    }, 'image/png');
   }
 
   setCampPose(pose) {
@@ -1404,6 +1460,7 @@ export class Game {
     this.effects.endTrail();
     const toPin = Math.hypot(world.cup.x - ball.x, world.cup.z - ball.z);
     const carried = Math.hypot(ball.x - shot.fromX, ball.z - shot.fromZ);
+    if (this.strokes === 1) this.holeLog.teeToPin = toPin; // the par-3 contest
     const surface = ball.surface;
     const par = world.spec.par;
 
@@ -1603,7 +1660,7 @@ export class Game {
     const d = this.strokes - par;
     this.hud.setPlayVisible(false);
     this.updateScoreHud();
-    this.net.holeDone(this.strokes, this.roundTotal());
+    this.net.holeDone(this.strokes, this.roundTotal(), { drive: log.longestDrive || 0, pin: log.teeToPin ?? null });
     this.setState('result');
     this.nextHole = () => {
       this.nextHole = null;
@@ -1659,10 +1716,7 @@ export class Game {
     const showCard = () => this.hud.showSummary({
       total, par, strokes, points: round.points, best, seed: round.seed, card, outfits,
       board: this.net.active && this.net.players.length > 1 ? this.net.standings(total) : null,
-      onCamp: () => {
-        this.hud.clearLayer();
-        this.camperUi.showPoses((pose) => this.setCampPose(pose), () => { this.setCampPose('sit'); showCard(); });
-      },
+      onCamp: () => this.campPoses(showCard),
       stats: [
         { label: 'FAIRWAYS', value: `${st.fairways}/${st.fairwayChances}` },
         { label: 'GREENS IN REG', value: `${st.gir}/${round.holes.length}` },
@@ -1784,6 +1838,7 @@ export class Game {
     if (!this.paused) this.update(dt);
     this.updateVisuals(dt);
     this.renderer.render(this.scene, this.camera);
+    this.photoFrame(dt);
   }
 
   update(dt) {
@@ -1800,7 +1855,9 @@ export class Game {
       case 'summary': {
         const v = this.campView;
         if (v) {
-          this.rig.orbit(v.x, v.y + 0.5, v.z, 5.4, 1.2, v.angle + Math.sin(this.time * 0.25) * 0.22);
+          // For the photo: a little wider and higher, with the friends in frame
+          if (this.photo) this.rig.orbit(v.x, v.y + 0.85, v.z, 5.2, 1.5, v.angle - 0.3);
+          else this.rig.orbit(v.x, v.y + 0.5, v.z, 5.4, 1.2, v.angle + Math.sin(this.time * 0.25) * 0.22);
           this.grill.update(dt);
         }
         break;
@@ -1921,6 +1978,8 @@ export class Game {
       default:
         break;
     }
+    // Watching a friend's ball overrides the state's own camera
+    this.net.watchCamera();
   }
 
   aimCamera() {

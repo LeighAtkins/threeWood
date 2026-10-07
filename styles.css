@@ -715,3 +715,21 @@ button { font: inherit; color: inherit; border: 0; background: none; padding: 0;
 .net-pill .emotes { display: flex; gap: 4px; margin-top: 3px; }
 .net-pill .emotes button { font: inherit; font-size: 16px; line-height: 1; padding: 3px 5px; border: 0; border-radius: 8px; background: rgba(255, 255, 255, 0.12); cursor: pointer; }
 .net-pill .emotes button:active { background: var(--gold); }
+
+/* Watch a friend's ball */
+.watch-btn {
+  position: absolute; left: calc(var(--sal) + 14px); bottom: calc(var(--sab) + 150px);
+  pointer-events: auto !important; font: inherit; font-size: 12px; font-weight: 800; letter-spacing: 1px;
+  padding: 10px 14px; border: 0; border-radius: 14px; background: var(--gold); color: #4a3200; cursor: pointer;
+  box-shadow: 0 4px 0 #a87a00;
+}
+/* Camp photo */
+#hud.photo > * { visibility: hidden !important; }
+.photo-count {
+  position: fixed; inset: 0; display: grid; place-items: center; pointer-events: none; z-index: 20;
+  font-size: 160px; font-weight: 800; color: var(--cream); text-shadow: 0 6px 0 rgba(0, 0, 0, 0.35);
+}
+.photo-card img { display: block; width: 100%; border-radius: 14px; border: 4px solid var(--cream); }
+.photo-card .btn-row .btn { flex: 1; text-align: center; text-decoration: none; }
+.pose-bar .photo { background: var(--gold); color: #4a3200; }
+.card .board small { font-size: 11px; opacity: 0.9; }

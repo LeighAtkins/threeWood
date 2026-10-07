@@ -59,6 +59,8 @@ export class Camper {
     this.setLook(look);
   }
 
+  setCrown(on) { this.crowned = !!on; if (this.crown) this.crown.visible = this.crowned; }
+
   /** After dark the clothes keep some of their colour (0 = day .. 1 = night). */
   setGlow(night) {
     if (this.glow === night && !this.glowDirty) return;
@@ -264,6 +266,21 @@ export class Camper {
       add(head, ball(0.045, 10, 8), hairMat, 0, -0.06, -0.165, 0.85, 3.2, 0.8).rotation.x = 0.42;
       add(head, ball(0.022, 6, 6), trim, 0, 0.06, -0.125);
     }
+
+    // ---- A crown, for whoever won the last hole's contest (hidden until then) -------
+    const crown = this.crown = new THREE.Group();
+    const gold = toon(0xffd23f);
+    crown.add(new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.07, 0.05, 10, 1, true), toon(0xffd23f, { side: THREE.DoubleSide })));
+    for (let i = 0; i < 5; i++) {
+      const spike = new THREE.Mesh(new THREE.ConeGeometry(0.02, 0.05, 4), gold);
+      const a = (i / 5) * Math.PI * 2;
+      spike.position.set(Math.cos(a) * 0.07, 0.05, Math.sin(a) * 0.07);
+      crown.add(spike);
+    }
+    crown.position.set(0, hat === 'none' || hat === 'bandana' ? 0.17 : 0.2, -0.01);
+    crown.rotation.z = 0.12;
+    crown.visible = !!this.crowned;
+    head.add(crown);
 
     // ---- Hats ---------------------------------------------------------------------------
     const hatMat = toon(fit.hatColor ?? fit.trim);

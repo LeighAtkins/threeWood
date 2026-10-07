@@ -50,6 +50,19 @@ export class NetPlay {
     this.waitT = null;        // host: seconds since the first player was ready
     this.nextT = null;        // host: seconds since everyone finished the hole
     this.error = '';
+    // Contests: who won the last hole (crown), and how many each has won
+    this.crown = null;
+    this.nextCrown = null;
+    this.crownNews = null;
+    this.crowns = new Map();
+    this.judged = new Set();
+    // Watch mode: follow a friend's ball while it flies
+    this.watching = null;
+    this.watchIdle = 0;
+    this.watchBtn = document.createElement('button');
+    this.watchBtn.className = 'watch-btn hidden';
+    this.watchBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); this.toggleWatch(); });
+    root.insertBefore(this.watchBtn, layer);
   }
 
   /** In a round with at least the room open. */
@@ -112,6 +125,12 @@ export class NetPlay {
     this.waitT = this.nextT = null;
     this.others.clear();
     this.pill.classList.add('hidden');
+    this.watchBtn.classList.add('hidden');
+    this.watching = null;
+    this.crown = this.nextCrown = this.crownNews = null;
+    this.crowns.clear();
+    this.judged.clear();
+    this.g.camper?.setCrown(false);
   }
 
   renderLobby(typed = '') {
@@ -223,7 +242,13 @@ export class NetPlay {
       case 'done':
         this.status.set(from, 'done');
         this.others.setStatus(from, 'done');
-        this.scores.set(from, { total: num(msg.total, -99, 199), strokes: num(msg.strokes, 0, 20) });
+        this.scores.set(from, { total: num(msg.total, -99, 199), strokes: num(msg.strokes, 0, 20), drive: num(msg.drive, 0, 400), pin: msg.pin == null ? null : num(msg.pin, 0, 400) });
+        this.contest();
+        break;
+      case 'call':
+        // A friend's big moment, shared
+        g.hud.callout(`${this.nameOf(from)}: ${String(msg.text).slice(0, 24)}`, 'small');
+        g.audio.applause(0.6);
         break;
       case 'next':
         if (from === 'host' && this.inRound && msg.hole === g.round?.index) g.nextHole?.();
@@ -260,9 +285,73 @@ export class NetPlay {
     for (const p of this.players) this.status.set(p.id, 'aim');
     this.cleared = false;
     this.waitT = this.nextT = null;
+    this.watching = null;
     this.others.sync(this.friends);
     this.others.toTee(this.g.world);
+    // The crown passes to whoever won the last hole's contest
+    this.crown = this.nextCrown;
+    this.nextCrown = null;
+    this.g.camper.setCrown(this.crown === this.myId);
+    for (const o of this.others.map.values()) o.camper.setCrown(o.id === this.crown);
+    if (this.crownNews) { const news = this.crownNews; this.crownNews = null; setTimeout(() => this.g.hud.callout(news, 'gold small'), 900); }
     this.paint();
+  }
+
+  /**
+   * The hole's contest, judged by every phone from the same numbers once
+   * everyone is done: longest drive on a par 4 or 5, closest to the pin
+   * from the tee on a par 3.
+   */
+  contest() {
+    const g = this.g;
+    const hole = g.round?.index;
+    if (!this.inRound || hole == null || this.judged.has(hole) || this.players.length < 2) return;
+    if (!this.players.every((p) => this.status.get(p.id) === 'done' && this.scores.has(p.id))) return;
+    this.judged.add(hole);
+    const par3 = g.world.spec.par === 3;
+    let best = null;
+    for (const p of this.players) {
+      const s = this.scores.get(p.id);
+      const v = par3 ? s.pin : s.drive;
+      if (v == null || (!par3 && v < 30)) continue;
+      if (!best || (par3 ? v < best.v : v > best.v)) best = { id: p.id, v };
+    }
+    if (!best) return;
+    this.nextCrown = best.id;
+    this.crowns.set(best.id, (this.crowns.get(best.id) || 0) + 1);
+    const who = best.id === this.myId ? 'YOU' : this.nameOf(best.id).toUpperCase();
+    this.crownNews = par3 ? `👑 CLOSEST TO THE PIN · ${who} · ${Math.round(best.v * 3)} FT` : `👑 LONGEST DRIVE · ${who} · ${Math.round(best.v)}Y`;
+  }
+
+  /** A gold callout of mine, shared with the room. */
+  brag(text) {
+    if (this.active && this.players.length > 1) this.room.send({ t: 'call', text: String(text).slice(0, 24) });
+  }
+
+  // ---- Watch mode ---------------------------------------------------------------
+
+  /** The friend worth watching right now: a ball in the air (or just landed). */
+  flyingFriend() {
+    for (const o of this.others.map.values()) if (o.flying) return o;
+    return null;
+  }
+
+  toggleWatch() {
+    if (this.watching) { this.watching = null; return; }
+    const o = this.flyingFriend();
+    if (o) { this.watching = o.id; this.watchIdle = 0; this.g.audio.tap(); }
+  }
+
+  /** Point the camera at the watched ball; returns true if it did. */
+  watchCamera() {
+    if (!this.watching) return false;
+    const o = this.others.map.get(this.watching);
+    if (!o) { this.watching = null; return false; }
+    const b = o.sim;
+    const speed = Math.hypot(b.vx, b.vz);
+    this.watchAngle = speed > 2 ? Math.atan2(-b.vz, -b.vx) : (this.watchAngle ?? 0);
+    this.g.rig.orbit(b.x, b.y, b.z, 11, 4.5, this.watchAngle);
+    return true;
   }
 
   /** I am at my ball, lining up. */
@@ -348,14 +437,15 @@ export class NetPlay {
 
   holedOut() { if (this.active) this.room.send({ t: 'holed' }); }
 
-  /** My hole is finished and scored. */
-  holeDone(strokes, total) {
+  /** My hole is finished and scored. stat: { drive, pin } for the hole's contest. */
+  holeDone(strokes, total, stat = {}) {
     if (!this.active) return;
     this.status.set(this.myId, 'done');
-    this.scores.set(this.myId, { total, strokes });
-    this.room.send({ t: 'done', strokes, total });
+    this.scores.set(this.myId, { total, strokes, drive: stat.drive || 0, pin: stat.pin ?? null });
+    this.room.send({ t: 'done', strokes, total, drive: stat.drive || 0, pin: stat.pin ?? null });
     this.paint();
     this.judge();
+    this.contest();
   }
 
   /** NEXT on the result card. */
@@ -375,7 +465,7 @@ export class NetPlay {
   /** Names and totals for the summary card, best first. */
   standings(myTotal) {
     return this.players
-      .map((p) => ({ name: cleanLook(p.look).name, total: p.id === this.myId ? myTotal : this.scores.get(p.id)?.total ?? 0, me: p.id === this.myId }))
+      .map((p) => ({ name: cleanLook(p.look).name, total: p.id === this.myId ? myTotal : this.scores.get(p.id)?.total ?? 0, me: p.id === this.myId, crowns: this.crowns.get(p.id) || 0 }))
       .sort((a, b) => a.total - b.total);
   }
 
@@ -423,6 +513,20 @@ export class NetPlay {
     const g = this.g;
     const show = this.active && ['aim', 'swing', 'flight', 'settle', 'holed', 'result', 'fishing', 'summary'].includes(g.state);
     if (g.world) this.others.update(dt, g.world, g.env, g.camera, show);
+    // The watch button: there when a friend's ball is in the air
+    if (this.active) {
+      const o = this.flyingFriend();
+      const can = !!o && ['aim', 'swing', 'flight', 'settle'].includes(g.state);
+      this.watchBtn.classList.toggle('hidden', !can && !this.watching);
+      if (this.watching) {
+        this.watchBtn.textContent = 'BACK TO ME';
+        const w = this.others.map.get(this.watching);
+        this.watchIdle = w?.flying ? 0 : this.watchIdle + dt;
+        if (this.watchIdle > 1.6 || g.state === 'result' || g.state === 'holed') this.watching = null;
+      } else if (can) {
+        this.watchBtn.textContent = `👀 WATCH ${o.camper.look.name.toUpperCase()}`;
+      }
+    }
     if (!this.active || !this.room.isHost) return;
     if (this.waitT !== null) {
       this.waitT += dt;

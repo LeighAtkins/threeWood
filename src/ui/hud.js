@@ -457,7 +457,7 @@ export class Hud {
         <h2>ROUND COMPLETE</h2>
         <h1 class="gold">${vsPar(total)}</h1>
         <div class="result-score">${strokes} strokes · par ${par} · ★ ${points.toLocaleString()}${best ? ' · <b class="gold">NEW BEST!</b>' : ''}</div>
-        ${board ? `<div class="board">${board.map((b, i) => `<div class="${b.me ? 'me' : ''}"><span>${i + 1}. ${esc(b.name)}</span><span>${vsPar(b.total)}</span></div>`).join('')}</div>` : ''}
+        ${board ? `<div class="board">${board.map((b, i) => `<div class="${b.me ? 'me' : ''}"><span>${i + 1}. ${esc(b.name)}${b.crowns ? ` <small>👑×${b.crowns}</small>` : ''}</span><span>${vsPar(b.total)}</span></div>`).join('')}</div>` : ''}
         ${scorecardHtml(card)}
         <div class="stats">${stats.map((s) => `<div class="stat"><b>${s.value}</b><span>${s.label}</span></div>`).join('')}</div>
         ${outfits.map((name) => `<div class="new-fit">NEW OUTFIT · ${name.toUpperCase()}</div>`).join('')}
