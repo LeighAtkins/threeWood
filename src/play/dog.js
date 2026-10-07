@@ -435,8 +435,10 @@ export class Dog {
     if (s === 'cook' || s === 'nabe') {
       const v = s === 'cook' ? g.cookView : g.campView;
       if (!v) return null;
-      const a = v.angle + 1.1;
-      return { x: v.x + Math.cos(a) * 1.3, z: v.z + Math.sin(a) * 1.3, pose: 'beg', face: { x: v.x, z: v.z }, speed: 8 };
+      // Across the fire from the camera, looking hopeful
+      const a = s === 'cook' ? v.angle + 1.1 : v.angle + Math.PI + 0.55;
+      const r = s === 'cook' ? 1.3 : 1.2;
+      return { x: v.x + Math.cos(a) * r, z: v.z + Math.sin(a) * r, pose: 'beg', face: { x: v.x, z: v.z }, speed: 8 };
     }
     if (s === 'holed' || s === 'result') {
       const a = g.time * 1.8;
