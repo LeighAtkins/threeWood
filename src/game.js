@@ -723,6 +723,7 @@ export class Game {
     const seated = pose === 'sit' || pose === 'warm';
     // On the log they perch, knees bent, rather than sit flat on the ground
     this.campPose = pose === 'sit' ? 'perch' : pose === 'warm' ? 'perchWarm' : pose;
+    this.net.setPose(pose); // friends see it (they have no log: they sit on the ground)
     const at = this.campsite.userData[seated ? 'seat' : 'stand'];
     const scale = 1.75;
     this.placeCamper(this.campsite, at.x, at.z, at.yaw, scale, seated ? at.y - 0.45 * scale : 0);
@@ -900,6 +901,7 @@ export class Game {
     if (this.state === 'aim') {
       // With friends the first press says READY; the swing waits for GO
       if (!this.net.clearToSwing()) return;
+      this.net.startSwing();
       this.walkIn = null; // swinging already: the camper is at the ball
       this.coachHeld = null;
       this.dwell = 0;

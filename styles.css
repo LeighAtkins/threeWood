@@ -708,3 +708,10 @@ button { font: inherit; color: inherit; border: 0; background: none; padding: 0;
 .intro .toy { display: inline-block; margin: 8px 3px 0; padding: 6px 12px; border-radius: 12px; background: rgba(255, 210, 63, 0.96); color: #3a2800; font-size: 13px; font-weight: 600; text-shadow: none; }
 .intro .toy b { margin-right: 4px; letter-spacing: 1px; }
 .intro .toy.pond { background: rgba(80, 180, 220, 0.92); color: #0b2a3c; }
+
+/* Friends: a word over the head, and a row of things to say */
+.net-tag.bubble { background: var(--cream); color: var(--ink); font-size: 14px; padding: 4px 10px; }
+.net-pill { pointer-events: auto !important; }
+.net-pill .emotes { display: flex; gap: 4px; margin-top: 3px; }
+.net-pill .emotes button { font: inherit; font-size: 16px; line-height: 1; padding: 3px 5px; border: 0; border-radius: 8px; background: rgba(255, 255, 255, 0.12); cursor: pointer; }
+.net-pill .emotes button:active { background: var(--gold); }

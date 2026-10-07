@@ -24,6 +24,9 @@ import { generateSeed } from '../core/rng.js';
 const WAIT_LIMIT = 30;  // seconds the ready players wait for the rest
 const NEXT_DELAY = 8;   // seconds on the result card once everyone has finished
 
+const KINDS = ['wood', 'iron', 'putter'];
+const POSES = ['perch', 'perchWarm', 'sit', 'warm', 'peace', 'cheer', 'hello', 'wave'];
+export const EMOTES = ['👏', '😂', '😱', '🔥'];
 const num = (v, lo, hi, d = 0) => (Number.isFinite(+v) ? Math.max(lo, Math.min(hi, +v)) : d);
 const vsPar = (n) => (n === 0 ? 'E' : n > 0 ? `+${n}` : `${n}`);
 
@@ -188,8 +191,17 @@ export class NetPlay {
         this.others.setStatus(from, 'aim');
         break;
       case 'status':
-        if (msg.s === 'ready' || msg.s === 'aim') { this.status.set(from, msg.s); this.others.setStatus(from, msg.s); }
+        if (msg.s === 'ready' || msg.s === 'aim') { this.status.set(from, msg.s); this.others.setStatus(from, msg.s); this.others.setAim(from, +msg.aim, KINDS.includes(msg.kind) ? msg.kind : null); }
+        if (msg.s === 'swing') this.others.swinging(from, +msg.aim, KINDS.includes(msg.kind) ? msg.kind : null);
         break;
+      case 'pose':
+        if (POSES.includes(msg.p)) this.others.pose(from, msg.p);
+        break;
+      case 'emote': {
+        const i = EMOTES.indexOf(msg.e);
+        if (i >= 0) { this.others.say(from, EMOTES[i]); g.hud.callout(`${this.nameOf(from)} ${EMOTES[i]}`, 'small'); }
+        break;
+      }
       case 'go':
         if (from === 'host') this.go(Array.isArray(msg.ids) ? msg.ids : []);
         break;
@@ -272,7 +284,7 @@ export class NetPlay {
     if (!this.active || this.cleared || this.players.length < 2) return true;
     const ready = this.status.get(this.myId) !== 'ready';
     this.status.set(this.myId, ready ? 'ready' : 'aim');
-    this.room.send({ t: 'status', s: ready ? 'ready' : 'aim' });
+    this.room.send({ t: 'status', s: ready ? 'ready' : 'aim', aim: this.g.aimAngle, kind: this.g.clubKind() });
     this.g.hud.setAction(ready ? 'wait' : 'swing', this.g.fullPower);
     if (ready) this.g.hud.callout('READY', 'small');
     this.paint();
@@ -307,6 +319,24 @@ export class NetPlay {
     }
     this.paint();
   }
+
+  /** My swing has started: friends see the club go back. */
+  startSwing() {
+    if (!this.active) return;
+    this.room.send({ t: 'status', s: 'swing', aim: this.g.aimAngle, kind: this.g.clubKind() });
+  }
+
+  /** I struck a pose by the fire. */
+  setPose(p) { if (this.active) this.room.send({ t: 'pose', p }); }
+
+  /** A quick word to the room. */
+  emote(e) {
+    if (!this.active || !EMOTES.includes(e)) return;
+    this.room.send({ t: 'emote', e });
+    this.g.hud.callout(`YOU ${e}`, 'small');
+  }
+
+  nameOf(id) { const p = this.players.find((q) => q.id === id); return p ? cleanLook(p.look).name : '?'; }
 
   /** I have hit it. */
   shot(data) {
@@ -352,7 +382,7 @@ export class NetPlay {
   /** The round is over: friends gather round the fire with you. site: the campsite group */
   campfire(site) {
     if (!this.active) return;
-    const spots = [[1.3, 0.4, -0.8, 'hello'], [0.55, -1.2, -0.2, 'cheer'], [-2.1, 0.75, 0.85, 'peace']];
+    const spots = [[1.3, 0.4, -0.8, 'sit'], [0.55, -1.2, -0.2, 'cheer'], [-2.1, 0.75, 0.85, 'peace']];
     site.updateMatrixWorld();
     const v = this.others._v;
     this.others.camp(this.friends.slice(0, spots.length).map((p, i) => {
@@ -377,6 +407,16 @@ export class NetPlay {
       row.querySelector('span').textContent = score ? vsPar(score.total) : '';
       this.pill.appendChild(row);
     }
+    // A row of things to say
+    const row = document.createElement('div');
+    row.className = 'emotes';
+    for (const e of EMOTES) {
+      const b = document.createElement('button');
+      b.textContent = e;
+      b.addEventListener('pointerdown', (ev) => { ev.preventDefault(); ev.stopPropagation(); this.emote(e); });
+      row.appendChild(b);
+    }
+    this.pill.appendChild(row);
   }
 
   update(dt) {

@@ -3,12 +3,14 @@
  *
  * Each one is a camper in their own outfit, a ball, and a name over their
  * head. Their shots are flown here with the same physics as ours from the
- * launch they send, then put right when they report where it finished. Between
+ * launch they send (and you see the club go back and swing, since they tell us
+ * when), then put right when they report where it finished. Between
  * shots they walk (well, jog) to their ball, so the course feels shared.
  */
 
 import * as THREE from 'three';
-import { Camper } from './camper.js';
+import { Camper, GRIP } from './camper.js';
+import { ClubRig } from './club.js';
 import { createBall, placeBall, launchBall, puttBall, stepBall, SIM_DT } from '../core/ballSim.js';
 
 const SCALE = 1.9;
@@ -35,7 +37,9 @@ export class Others {
           id: p.id, camper: new Camper(p.look), sim: createBall(), acc: 0, flying: false, flyT: 0,
           ball: new THREE.Mesh(this.ballGeo, new THREE.MeshLambertMaterial({ color: 0xffffff })),
           tag: document.createElement('div'), target: null, status: 'aim', placed: false,
+          club: new ClubRig(this.scene), aim: null, kind: 'wood', swing: null, addr: null, bubble: null,
         };
+        o.club.hide();
         o.tag.className = 'net-tag';
         this.tags.appendChild(o.tag);
         o.camper.group.visible = o.ball.visible = false;
@@ -47,7 +51,8 @@ export class Others {
   }
 
   remove(id, o) {
-    this.scene.remove(o.camper.group, o.ball);
+    this.scene.remove(o.camper.group, o.ball, o.club.group);
+    o.club.group.traverse((m) => { if (m.isMesh) m.geometry.dispose(); });
     o.camper.dispose();
     o.ball.material.dispose();
     o.tag.remove();
@@ -117,11 +122,41 @@ export class Others {
 
   setStatus(id, status) { const o = this.map.get(id); if (o) o.status = status; }
 
+  /** Which way they are facing with which club (sent with READY and with the swing). */
+  setAim(id, aim, kind) {
+    const o = this.map.get(id);
+    if (!o) return;
+    if (Number.isFinite(aim)) o.aim = aim;
+    if (kind) o.kind = kind;
+  }
+
+  /** They have started their swing: club back, and hold it there until the hit. */
+  swinging(id, aim, kind) {
+    const o = this.map.get(id);
+    if (!o) return;
+    this.setAim(id, aim, kind);
+    o.status = 'swing';
+    o.swing = { t: 0, phase: 'back' };
+    o.addr = { x: o.sim.x, y: o.sim.y, z: o.sim.z };
+  }
+
+  /** The round is over and they chose a pose by the fire. */
+  pose(id, p) { const o = this.map.get(id); if (o && o.camp) o.camp = p; }
+
+  /** A word over their head for a moment. */
+  say(id, text) { const o = this.map.get(id); if (o) o.bubble = { text, t: 2.6 }; }
+
   /** They have hit: fly it. */
   shot(id, world, msg) {
     const o = this.map.get(id);
     if (!o || !Number.isFinite(msg.x) || !Number.isFinite(msg.z)) return;
     placeBall(o.sim, world, msg.x, msg.z);
+    // The strike: swing through from wherever the club was
+    const d = msg.kind === 'putt' ? msg : msg.launch || {};
+    if (Number.isFinite(d.dirX) && Number.isFinite(d.dirZ) && (d.dirX || d.dirZ)) o.aim = Math.atan2(d.dirZ, d.dirX);
+    o.kind = msg.kind === 'putt' ? 'putter' : o.kind === 'putter' ? 'iron' : o.kind;
+    o.addr = { x: o.sim.x, y: o.sim.y, z: o.sim.z };
+    o.swing = { t: 0, phase: 'through', from: o.swing?.theta ?? -1.6 };
     if (msg.kind === 'putt') puttBall(o.sim, { speed: +msg.speed || 0, dirX: +msg.dirX || 0, dirZ: +msg.dirZ || 0 });
     else if (msg.launch) launchBall(o.sim, msg.launch);
     else return;
@@ -161,8 +196,13 @@ export class Others {
       const far = camera.position.distanceTo(o.ball.position);
       o.ball.scale.setScalar(Math.max(1.4, Math.min(10, far / 9)));
 
+      // At the ball with a club: lining up (ready), taking it back (swing), hitting (through)
+      const atBall = (o.status === 'ready' || o.status === 'swing' || o.swing) && o.aim !== null && !o.camp;
+      if (atBall && this.address(o, dt, world)) { this.tagAt(o, g.scale.x, camera); continue; }
+      o.club.hide();
+
       // Walk to the ball
-      let pose = o.status === 'done' ? 'cheer' : o.status === 'ready' ? 'wave' : 'idle';
+      let pose = o.status === 'done' ? 'cheer' : 'idle';
       if (o.target && !o.flying) {
         const dx = o.target.x - g.position.x, dz = o.target.z - g.position.z;
         const dist = Math.hypot(dx, dz);
@@ -185,11 +225,67 @@ export class Others {
     }
   }
 
-  /** Name over the head. */
+  /**
+   * Stand them at their ball holding the club, the same geometry as our own
+   * camper (game.js addressSpot). Returns false once the swing is over.
+   */
+  address(o, dt, world) {
+    const ball = o.addr && o.swing ? o.addr : o.sim;
+    const dirX = Math.cos(o.aim), dirZ = Math.sin(o.aim);
+    const nx = dirZ, nz = -dirX;
+    const size = 0.63;
+    const p = ClubRig.pivot(ball, dirX, dirZ, o.kind, size, this._v);
+    let scale = SCALE, x = p.x, z = p.z, y = 0;
+    for (let i = 0; i < 2; i++) {
+      x = p.x + nx * GRIP.z * scale; z = p.z + nz * GRIP.z * scale;
+      y = world.heightAt(x, z);
+      scale = Math.max(1.2, Math.min(4, (p.y - y) / GRIP.y));
+    }
+    const g = o.camper.group;
+    // Walk the last step rather than teleport
+    const dx = x - g.position.x, dz = z - g.position.z, dist = Math.hypot(dx, dz);
+    if (dist > 0.2 && !o.swing) {
+      const step = Math.min(dist, Math.max(7, dist * 0.6) * dt);
+      const nxp = g.position.x + (dx / dist) * step, nzp = g.position.z + (dz / dist) * step;
+      g.position.set(nxp, world.heightAt(nxp, nzp), nzp);
+      g.rotation.y = Math.atan2(dx, dz);
+      g.scale.setScalar(scale);
+      o.camper.update(dt, 'walk');
+      o.club.hide();
+      return true;
+    }
+    g.position.set(x, y, z);
+    g.rotation.y = Math.atan2(-nx, -nz);
+    g.scale.setScalar(scale);
+    // The club: a waggle while lining up, back and held, then through
+    let theta = Math.sin(o.camper.t * 2.2) * 0.035;
+    if (o.swing) {
+      o.swing.t += dt;
+      const s = o.swing;
+      if (s.phase === 'back') {
+        theta = -1.6 * Math.min(1, s.t / 0.6);
+      } else {
+        const k = Math.min(1, s.t / 0.22);
+        theta = s.from + (2.5 - s.from) * (1 - (1 - k) * (1 - k));
+        if (s.t > 1.1) { o.swing = null; o.club.hide(); return false; }
+      }
+      s.theta = theta;
+    }
+    o.club.pose(ball, dirX, dirZ, theta, o.kind, size, 1);
+    o.camper.update(dt, 'address', { twist: Math.max(-1, Math.min(1, theta / 2.2)) });
+    return true;
+  }
+
+  /** Name over the head (and anything they just said). */
   tagAt(o, scale, camera) {
     const g = o.camper.group;
     const v = this._v.set(g.position.x, g.position.y + scale * 1.08, g.position.z).project(camera);
     const on = v.z < 1 && Math.abs(v.x) < 1.05 && Math.abs(v.y) < 1.05;
+    if (o.bubble) {
+      o.bubble.t -= 1 / 60;
+      if (o.bubble.t <= 0) { o.bubble = null; o.tag.textContent = o.camper.look.name; o.tag.classList.remove('bubble'); }
+      else if (!o.tag.classList.contains('bubble')) { o.tag.textContent = `${o.camper.look.name}  ${o.bubble.text}`; o.tag.classList.add('bubble'); }
+    }
     o.tag.style.display = on ? 'block' : 'none';
     if (on) o.tag.style.transform = `translate(${(v.x * 0.5 + 0.5) * window.innerWidth}px, ${(-v.y * 0.5 + 0.5) * window.innerHeight}px) translate(-50%, -100%)`;
   }
