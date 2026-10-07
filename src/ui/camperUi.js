@@ -6,10 +6,16 @@
  * on but not worn out of the shop: the panel says what earns them.
  */
 
-import { SKINS, HAIR_COLORS, EYE_COLORS, HAIR_STYLES, OUTFITS, isUnlocked, progress } from '../core/camp.js';
+import { SKINS, HAIR_COLORS, EYE_COLORS, HAIR_STYLES, EYE_SHAPES, EXTRAS, OUTFITS, isUnlocked, progress } from '../core/camp.js';
 
 const hex = (n) => `#${n.toString(16).padStart(6, '0')}`;
-const HAIR_NAMES = { short: 'Short', bob: 'Bob', bun: 'Bun', long: 'Long', twintails: 'Twin tails', ponytail: 'Ponytail' };
+const HAIR_NAMES = {
+  short: 'Short', spiky: 'Spiky', messy: 'Messy', parted: 'Side part', curly: 'Curly', buzz: 'Buzz cut',
+  bob: 'Bob', bun: 'Bun', long: 'Long', twintails: 'Twin tails', ponytail: 'Ponytail',
+};
+const SHAPE_NAMES = { round: 'Bright', soft: 'Gentle', sharp: 'Cool', sleepy: 'Sleepy', smiley: 'Smiley' };
+const EXTRA_NAMES = { none: 'Nothing', glasses: 'Glasses', freckles: 'Freckles', plaster: 'Plaster' };
+const STEPS = { hair: HAIR_STYLES, eyeShape: EYE_SHAPES, extra: EXTRAS };
 
 export class CamperUi {
   constructor(root, before) {
@@ -37,6 +43,10 @@ export class CamperUi {
         </div>
         <div class="row"><span>SKIN</span><div class="sws">${swatches(SKINS, 'skin')}</div></div>
         <div class="row"><span>EYES</span><div class="sws">${swatches(EYE_COLORS, 'eyes')}</div></div>
+        <div class="row"><span>FACE</span>
+          <div class="step half"><button data-step="eyeShape" data-d="-1">‹</button><b class="shape-name"></b><button data-step="eyeShape" data-d="1">›</button></div>
+          <div class="step half"><button data-step="extra" data-d="-1">‹</button><b class="extra-name"></b><button data-step="extra" data-d="1">›</button></div>
+        </div>
         <div class="row"><span>HAIR</span>
           <div class="step"><button data-step="hair" data-d="-1">‹</button><b class="hair-name"></b><button data-step="hair" data-d="1">›</button></div>
         </div>
@@ -57,6 +67,8 @@ export class CamperUi {
         b.classList.toggle('on', look[b.dataset.k] === v);
       }
       q('.hair-name').textContent = HAIR_NAMES[look.hair];
+      q('.shape-name').textContent = SHAPE_NAMES[look.eyeShape || 'round'];
+      q('.extra-name').textContent = EXTRA_NAMES[look.extra || 'none'];
       const fit = OUTFITS.find((o) => o.id === look.outfit);
       const open = isUnlocked(camp, fit.id);
       q('.fit-name').textContent = `${OUTFITS.indexOf(fit) + 1}/${OUTFITS.length} · ${fit.name}`;
@@ -68,9 +80,14 @@ export class CamperUi {
     this.node.onclick = (e) => {
       const b = e.target.closest('button');
       if (!b) return;
-      if (b.dataset.k) look[b.dataset.k] = b.dataset.k === 'body' ? b.dataset.v : Number(b.dataset.v);
-      else if (b.dataset.step === 'hair') {
-        look.hair = HAIR_STYLES[(HAIR_STYLES.indexOf(look.hair) + Number(b.dataset.d) + HAIR_STYLES.length) % HAIR_STYLES.length];
+      if (b.dataset.k === 'body') {
+        // Swapping body swaps the starting haircut too, if it is still the other one's default
+        if (look.body !== b.dataset.v && look.hair === (b.dataset.v === 'boy' ? 'long' : 'messy')) look.hair = b.dataset.v === 'boy' ? 'messy' : 'long';
+        look.body = b.dataset.v;
+      } else if (b.dataset.k) look[b.dataset.k] = Number(b.dataset.v);
+      else if (STEPS[b.dataset.step]) {
+        const list = STEPS[b.dataset.step], key = b.dataset.step;
+        look[key] = list[(Math.max(0, list.indexOf(look[key])) + Number(b.dataset.d) + list.length) % list.length];
       } else if (b.dataset.step === 'outfit') {
         const i = OUTFITS.findIndex((o) => o.id === look.outfit);
         look.outfit = OUTFITS[(i + Number(b.dataset.d) + OUTFITS.length) % OUTFITS.length].id;

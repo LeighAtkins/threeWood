@@ -1183,7 +1183,8 @@ export class Game {
     }
 
     const pure = strike.grade === 'pure';
-    if (pure) this.dog.on('pure');
+    if (pure) { this.dog.on('pure'); this.camper.feel('joy', 1.6); }
+    else if (strike.grade === 'terrible') this.camper.feel('oops', 1.6);
     this.audio.strike(this.swing.power, strike.grade);
     this.effects.strikeFlash(ball.x, ball.y, ball.z, pure);
     this.effects.startTrail(pure ? 0xffd84a : 0xffffff);
@@ -1316,6 +1317,7 @@ export class Game {
     shot.replan = true;
     this.hud.callout('BOING!', 'gold');
     this.dog.on('boing');
+    this.camper.feel('joy', 1.5);
     this.award('Mushroom bounce', 100, true);
     this.audio.bounce(18, 'green');
     this.effects.puff(ball.x, ball.y, ball.z, 'green', 1.4);
@@ -1329,6 +1331,7 @@ export class Game {
       shot.rings = (shot.rings || 0) + 1;
       this.hud.callout(shot.rings > 1 ? `RING ×${shot.rings}` : 'RING!', 'gold small');
       this.dog.on('ring');
+      this.camper.feel('joy', 1.2);
       this.award(`Sky ring ×${shot.rings}`, 150 * shot.rings, true);
       this.effects.strikeFlash(ring.p.x, ring.p.y, ring.p.z, true);
       if (this.gimmicks.ringsDone) {
@@ -1376,6 +1379,7 @@ export class Game {
         fx.splash(e.x, e.y, e.z);
         this.audio.splash();
         this.dog.on('splash');
+        this.camper.feel('oops', 2.5);
         this.penalty(this.world.biome.liquid === 'lava' ? 'LAVA' : 'WATER');
         break;
       case 'oob':
@@ -1394,6 +1398,7 @@ export class Game {
 
   penalty(label) {
     this.effects.endTrail();
+    this.camper.feel('oops', 2.2);
     this.round.pureStreak = 0;
     this.holeLog.dirty = true;
     this.hud.setCarry(null);
@@ -1442,6 +1447,7 @@ export class Game {
           this.round.fish = (this.round.fish || 0) + caught;
           this.round.fishTotal = (this.round.fishTotal || 0) + caught;
           this.dog.on('fish');
+          this.camper.feel('joy', 2);
           this.earn('fish', caught);
           this.hud.callout(caught > 1 ? `${caught} FISH!` : 'A FISH!', 'small');
           this.award(caught > 1 ? `Caught ${caught} fish` : 'Caught a fish', 50 * caught, true);
@@ -1956,7 +1962,7 @@ export class Game {
     switch (this.state) {
       case 'creator': {
         const v = this.creatorView;
-        this.rig.orbit(v.x, v.y + 0.62, v.z, 2.9, 0.55, v.angle);
+        this.rig.orbit(v.x, v.y + 0.45, v.z, 2.6, 0.95, v.angle); // head and shoulders above the panel
         break;
       }
       case 'summary': {

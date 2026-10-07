@@ -641,7 +641,7 @@ button { font: inherit; color: inherit; border: 0; background: none; padding: 0;
   padding: 12px 14px; border-radius: 22px; background: var(--panel-solid);
   box-shadow: 0 8px 0 rgba(0, 0, 0, 0.25), 0 20px 50px rgba(0, 0, 0, 0.4);
 }
-.camper-ui .row { display: flex; align-items: center; gap: 10px; margin: 7px 0; }
+.camper-ui .row { display: flex; align-items: center; gap: 10px; margin: 5px 0; }
 .camper-ui .row > span { flex: none; width: 58px; font-size: 11px; font-weight: 700; letter-spacing: 1px; opacity: 0.7; }
 .camper-ui button { font: inherit; color: var(--cream); cursor: pointer; }
 .camper-ui .seg { gap: 8px; }
@@ -853,3 +853,6 @@ button { font: inherit; color: inherit; border: 0; background: none; padding: 0;
 .nabe-card .stars { font-size: 44px; letter-spacing: 6px; }
 .nabe-card p { margin: 4px 0; opacity: 0.9; }
 #hud.skipping .side-left, #hud.skipping .side-right, #hud.skipping .pin-tag { display: none !important; }
+.camper-ui .step.half { gap: 3px; min-width: 0; }
+.camper-ui .step.half b { font-size: 13px; white-space: nowrap; overflow: hidden; }
+.camper-ui .step.half button { width: 30px; flex: none; }

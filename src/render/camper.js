@@ -49,6 +49,19 @@ const POSES = {
   hello:     P([-0.5, -0.3, -1.3], [0, 2.7, -0.15], [-0.15, 0.1], [0.45, 1.7], 0.1),
 };
 
+// The face each pose wears, unless a passing mood says otherwise
+const POSE_FACE = { cheer: 'joy', hello: 'joy', wave: 'joy', peace: 'cheeky', address: 'focus', sit: 'calm', warm: 'calm', perch: 'calm', perchWarm: 'calm' };
+// Per mood: how open the eyes are (0 = shut in a happy arch), brow lift and
+// inner-end drop, and the mouth
+const FACES = {
+  neutral: { open: 1, brow: [0, 0], mouth: 'smile' },
+  joy: { open: 0, brow: [0.008, -0.1], mouth: 'grin' },
+  cheeky: { open: 0.9, brow: [0.004, -0.06], mouth: 'cat', wink: true },
+  focus: { open: 0.7, brow: [-0.005, 0.24], mouth: 'flat' },
+  calm: { open: 0.58, brow: [-0.002, -0.06], mouth: 'smile' },
+  oops: { open: 1.15, brow: [0.01, -0.32], mouth: 'o' },
+};
+
 export class Camper {
   constructor(look) {
     this.group = new THREE.Group();
@@ -237,60 +250,212 @@ export class Camper {
     upper.add(head);
     const R = 0.125;
     add(head, ball(R, 24, 18), skinMat, 0, 0, 0, 1, 0.97, 0.98);
+    // A softer jaw: the chin tucks in a little
+    add(head, ball(0.085, 16, 12), skinMat, 0, -0.06, 0.035, 1, 0.7, 0.9);
+    // Ears, mostly hidden by hair
+    for (const side of [-1, 1]) add(head, ball(0.024, 8, 6), skinMat, side * 0.122, -0.02, 0.005, 0.5, 1, 0.8);
 
-    // Eyes: white, a big coloured iris, pupil, two highlights and a dark lash line
+    // ---- Face: eyes (shape from the look, openness from the mood), brows, mouth --------
+    const shape = this.look.eyeShape;
     const dark = flat(0x2a1c22);
     const white = flat(0xffffff);
     const iris = flat(EYE_COLORS[eyes]);
     const irisDeep = flat(new THREE.Color(EYE_COLORS[eyes]).multiplyScalar(0.55));
+    const lineGeo = new THREE.TorusGeometry(0.034, 0.0055, 5, 14, Math.PI * 0.82);
+    // Per shape: [width, height, tilt at the outer corner, iris size]
+    const EYE = { round: [1, 1, 0, 1], soft: [1.05, 1.1, -0.05, 1.12], sharp: [1.08, 0.74, 0.2, 0.9], sleepy: [1.02, 0.62, -0.08, 1], smiley: [1, 1, 0, 1] }[shape];
+    this.eyes = [];
     for (const side of [-1, 1]) {
       const eye = new THREE.Group();
       const ex = side * 0.046, ey = -0.008;
       eye.position.set(ex, ey, Math.sqrt(R * R - ex * ex - ey * ey) * 0.97);
       eye.rotation.y = side * 0.42;
       eye.scale.setScalar(0.74); // bright, but not the whole face
-      const disc = (r, material, x, y, z, sx = 1, sy = 1) => add(eye, ball(r, 14, 10), material, x, y, z, sx, sy, 0.16);
+      head.add(eye);
+      // The open eye squashes towards a line to blink
+      const open = new THREE.Group();
+      open.rotation.z = side * -EYE[2];
+      open.scale.set(EYE[0], EYE[1], 1);
+      eye.add(open);
+      const disc = (r, material, x, y, z, sx = 1, sy = 1) => add(open, ball(r, 14, 10), material, x, y, z, sx, sy, 0.16);
       disc(0.0405, dark, 0, 0.005, -0.002, 1.04, 1.2); // lid line: a dark rim, thickest on top
       disc(0.036, white, 0, 0, 0, 1, 1.22);
-      disc(0.029, irisDeep, 0, -0.002, 0.003, 1, 1.3);
-      disc(0.025, iris, 0, -0.008, 0.005, 1, 1.15);
-      disc(0.013, dark, 0, 0, 0.007, 1, 1.35);
+      disc(0.029 * EYE[3], irisDeep, 0, -0.002, 0.003, 1, 1.3);
+      disc(0.025 * EYE[3], iris, 0, -0.008, 0.005, 1, 1.15);
+      disc(0.013 * EYE[3], dark, 0, 0, 0.007, 1, 1.35);
       disc(0.0095, white, side * 0.011, 0.017, 0.01);
       disc(0.005, white, side * -0.01, -0.016, 0.01);
-      // Lash: a dark cap over the top of the eye, flicked out at the corner
-      if (girl) add(eye, new THREE.BoxGeometry(0.018, 0.006, 0.003), dark, side * 0.04, 0.036, 0).rotation.z = side * 0.55;
-      add(eye, new THREE.BoxGeometry(girl ? 0.036 : 0.046, girl ? 0.005 : 0.009, 0.003), hairMat, 0, 0.072, 0.002).rotation.z = side * (girl ? -0.1 : 0.12);
-      head.add(eye);
+      if (shape === 'sleepy') add(open, new THREE.BoxGeometry(0.085, 0.012, 0.004), dark, 0, 0.034, 0.004); // heavy lid
+      // Lashes: a flick at the outer corner
+      if (girl) add(open, new THREE.BoxGeometry(0.02, 0.006, 0.003), dark, side * 0.04, 0.036, 0.004).rotation.z = side * 0.55;
+      // Closed: a happy arch (^) or a resting curve (‿)
+      const arch = add(eye, lineGeo, dark, 0, -0.012, 0.004);
+      arch.rotation.z = Math.PI * 0.09;
+      const rest = add(eye, lineGeo, dark, 0, 0.022, 0.004, 1, 0.55, 1);
+      rest.rotation.z = Math.PI + Math.PI * 0.09;
+      // Brows sit on the head, not the eye, so they can move on their own
+      const brow = add(head, new THREE.BoxGeometry(girl ? 0.032 : 0.04, girl ? 0.0055 : 0.0095, 0.004), hairMat, side * 0.047, 0.047, 0);
+      brow.position.z = Math.sqrt(R * R - 0.047 ** 2 - 0.047 ** 2) + 0.002;
+      brow.rotation.y = side * 0.42;
+      this.eyes.push({ open, arch, rest, brow, side, base: EYE[1] });
       const cheek = add(head, ball(0.026, 10, 8), flat(0xff8f98, { transparent: true, opacity: 0.55 }), side * 0.083, -0.05, 0.088, 1, 0.6, 0.2);
       cheek.rotation.y = side * 0.75;
     }
-    // A small open smile
-    add(head, new THREE.CircleGeometry(0.02, 12, Math.PI, Math.PI), flat(0xb2413c), 0, -0.052, 0.1235);
-    add(head, new THREE.CircleGeometry(0.011, 10, Math.PI, Math.PI), flat(0xf08a8a), 0, -0.064, 0.1245);
+    this.blinkT = 2 + Math.random() * 3;
+    this.blink = 0;
+    this.mood = null; // { name, t }: a passing feeling over the pose's own face
+    // Mouths: one shows at a time
+    const mz = 0.1235;
+    const mouth = (geo, material, y, z = mz) => { const m = add(head, geo, material, 0, y, z); m.visible = false; return m; };
+    const lip = flat(0x8a3a34);
+    this.mouths = {
+      smile: mouth(new THREE.TorusGeometry(0.014, 0.003, 4, 10, Math.PI), lip, -0.05),
+      grin: mouth(new THREE.CircleGeometry(0.022, 14, Math.PI, Math.PI), flat(0xb2413c), -0.05),
+      flat: mouth(new THREE.BoxGeometry(0.018, 0.0045, 0.002), lip, -0.058),
+      o: mouth(new THREE.CircleGeometry(0.008, 10), flat(0xb2413c), -0.058),
+      cat: mouth(new THREE.TorusGeometry(0.007, 0.0028, 4, 8, Math.PI), lip, -0.054),
+    };
+    this.mouths.smile.rotation.z = Math.PI;
+    this.mouths.grin.add(new THREE.Mesh(new THREE.CircleGeometry(0.011, 10, Math.PI, Math.PI), flat(0xf08a8a)));
+    this.mouths.grin.children[0].position.set(0, -0.008, 0.001);
+    // The cat mouth (:3) is two small arcs
+    this.mouths.cat.rotation.z = Math.PI;
+    this.mouths.cat.position.x = -0.007;
+    const cat2 = new THREE.Mesh(this.mouths.cat.geometry, lip);
+    cat2.position.x = 0.014;
+    this.mouths.cat.add(cat2);
 
-    // ---- Hair: a shell, a fringe of strands, side locks, then the style ---------------
+    // Extras
+    const extra = this.look.extra;
+    if (extra === 'glasses') {
+      const frame = flat(fit.trim === 0xffffff ? 0x5a3a2a : 0x5a3a2a);
+      for (const side of [-1, 1]) {
+        const ring = add(head, new THREE.TorusGeometry(0.03, 0.0045, 6, 20), frame, side * 0.046, -0.006, 0.124);
+        ring.rotation.y = side * 0.4;
+        ring.scale.y = 0.86;
+        add(head, new THREE.BoxGeometry(0.004, 0.004, 0.09), frame, side * 0.112, 0.004, 0.06).rotation.y = side * 0.25;
+      }
+      add(head, new THREE.BoxGeometry(0.03, 0.004, 0.004), frame, 0, 0.002, 0.128);
+    } else if (extra === 'freckles') {
+      const dot = flat(0xb5703f);
+      for (const side of [-1, 1]) for (const [dx, dy] of [[0.07, -0.03], [0.085, -0.04], [0.064, -0.045], [0.08, -0.025]]) {
+        const d = add(head, new THREE.CircleGeometry(0.0035, 6), dot, side * dx, dy, 0);
+        d.position.z = Math.sqrt(Math.max(0, R * R - dx * dx - dy * dy)) + 0.001;
+        d.rotation.y = side * Math.asin(dx / R);
+      }
+    } else if (extra === 'plaster') {
+      const p = add(head, new THREE.BoxGeometry(0.034, 0.014, 0.004), toon(0xf1d2a6), 0.075, -0.05, 0.1);
+      p.rotation.set(0, 0.62, 0.35);
+      for (const dx of [-0.006, 0.006]) add(p, new THREE.CircleGeometry(0.0018, 5), flat(0xc9a273), dx, 0, 0.0025);
+    }
+
+    // ---- Hair: a cap, a fringe, side locks, then the style ---------------------------
     const hat = fit.hat;
     const hatted = hat !== 'none' && hat !== 'bandana';
+    const short = ['short', 'spiky', 'messy', 'parted', 'curly', 'buzz'].includes(hair);
+    // Points on the scalp: elevation (0 = level with the eyes, up is +), angle round
+    // from the front (+ to the left of the face as you look at it)
+    const onScalp = (el, az, r = R + 0.012) => new THREE.Vector3(Math.sin(az) * Math.cos(el) * r, Math.sin(el) * r, Math.cos(az) * Math.cos(el) * r);
+    const tuft = (geo, at, out, s = [1, 1, 1]) => {
+      const m = add(head, geo, hairMat, at.x, at.y, at.z, ...s);
+      m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), out.clone().normalize());
+      return m;
+    };
     // (under a hat the crown is the hat's: only the fringe and the lengths show)
     if (!hatted) {
-      const shell = add(head, new THREE.SphereGeometry(R + 0.02, 22, 14, 0, Math.PI * 2, 0, Math.PI * 0.6), hairMat, 0, 0.006, -0.01);
-      shell.rotation.x = -0.52;
+      const close = hair === 'buzz';
+      const shell = add(head, new THREE.SphereGeometry(R + (close ? 0.007 : 0.02), 22, 14, 0, Math.PI * 2, 0, Math.PI * (close ? 0.52 : 0.6)), hairMat, 0, 0.006, close ? -0.004 : -0.01);
+      shell.rotation.x = close ? -0.62 : -0.52;
     }
-    add(head, ball(R + 0.012, 16, 12), hairMat, 0, -0.016, -0.034, 1.05, hatted ? 0.9 : 1, 0.95); // back of the head
-    // Fringe: strands hanging to the brow, one between the eyes
-    const strands = [[-0.088, 0.03, 0.5], [-0.052, 0.022, 0.2], [-0.012, 0.012, -0.1], [0.03, 0.022, -0.25], [0.07, 0.03, -0.45], [0.1, 0.04, -0.6]];
-    for (const [x, drop, lean] of strands) {
+    if (hair !== 'curly') add(head, ball(R + (hair === 'buzz' ? 0.004 : 0.012), 16, 12), hairMat, 0, -0.016, -0.034, hair === 'buzz' ? 1.0 : 1.05, hatted ? 0.9 : hair === 'buzz' ? 0.92 : 1, 0.95); // back of the head
+    const fringeY = hatted ? 0.066 : 0.09;
+    const strand = (x, drop, lean, sy = 2.0, w = 0.95) => {
       const z = Math.sqrt(Math.max(0.001, (R + 0.012) ** 2 - x * x - 0.05 * 0.05));
-      const s = add(head, ball(0.034, 10, 8), hairMat, x, (hatted ? 0.066 : 0.09) - drop, z - 0.012, 0.95, hatted ? 1.35 : 2.0, 0.46);
+      const s = add(head, ball(0.034, 10, 8), hairMat, x, fringeY - drop, z - 0.012, w, hatted ? Math.min(sy, 1.35) : sy, 0.46);
       s.rotation.set(-0.35, x * 4, lean);
+      return s;
+    };
+    if (hair === 'parted') {
+      // Swept across from a side parting: one big lock and a shorter one
+      const sweep = add(head, ball(0.06, 14, 10), hairMat, 0.025, fringeY - 0.006, 0.09, 1.75, hatted ? 0.6 : 0.85, 0.55);
+      sweep.rotation.set(-0.5, 0.12, -0.38);
+      if (!hatted) {
+        // Lifted on the parting side, and a line where it parts
+        add(head, ball(0.055, 12, 8), hairMat, -0.055, 0.1, 0.05, 1.1, 0.8, 1.2);
+        const part = add(head, new THREE.BoxGeometry(0.004, 0.003, 0.08), flat(new THREE.Color(HAIR_COLORS[hairColor]).multiplyScalar(0.6)), -0.03, R + 0.016, 0.0);
+        part.rotation.x = -0.25;
+      }
+      strand(-0.085, 0.03, 0.45, 1.6);
+      strand(0.1, 0.035, -0.5, 1.7);
+    } else if (hair === 'spiky') {
+      for (const [x, drop, lean] of [[-0.075, 0.02, 0.45], [-0.035, 0.03, 0.15], [0.005, 0.035, -0.05], [0.045, 0.028, -0.25], [0.085, 0.02, -0.5]]) {
+        const z = Math.sqrt(Math.max(0.001, (R + 0.012) ** 2 - x * x - 0.04 * 0.04));
+        const c = add(head, new THREE.ConeGeometry(0.026, 0.075, 6), hairMat, x, fringeY - drop - 0.01, z - 0.006);
+        c.rotation.set(Math.PI - 0.4, 0, lean);
+      }
+    } else if (hair === 'curly') {
+      for (const [x, drop] of [[-0.08, 0.035], [-0.04, 0.022], [0, 0.018], [0.04, 0.022], [0.08, 0.035]]) {
+        const z = Math.sqrt(Math.max(0.001, (R + 0.01) ** 2 - x * x - 0.05 * 0.05));
+        add(head, ball(0.03, 10, 8), hairMat, x, fringeY - drop + 0.012, z - 0.012, 1, 1, 0.8);
+      }
+    } else if (hair === 'buzz') {
+      // Just a hairline
+      const line = add(head, new THREE.TorusGeometry(0.075, 0.012, 5, 16, Math.PI), hairMat, 0, 0.072, 0.07, 1, 0.5, 1);
+      line.rotation.x = -0.75;
+    } else {
+      const messy = hair === 'messy';
+      const strands = messy
+        ? [[-0.09, 0.02, 0.7], [-0.05, 0.035, 0.35], [-0.012, 0.01, -0.3], [0.028, 0.035, 0.1], [0.066, 0.015, -0.6], [0.1, 0.04, -0.85]]
+        : [[-0.088, 0.03, 0.5], [-0.052, 0.022, 0.2], [-0.012, 0.012, -0.1], [0.03, 0.022, -0.25], [0.07, 0.03, -0.45], [0.1, 0.04, -0.6]];
+      for (const [x, drop, lean] of strands) strand(x, drop, lean, messy ? 1.7 : 2.0);
     }
     const long = hair === 'long' || hair === 'twintails';
     for (const side of [-1, 1]) {
-      // Locks framing the face
-      const lock = add(head, ball(0.034, 10, 8), hairMat, side * 0.118, long ? -0.075 : -0.035, 0.04, 0.6, long ? 3.8 : 2.4, 0.9);
+      // Locks framing the face (short cuts get sideburns)
+      if (hair === 'buzz') { add(head, ball(0.02, 8, 6), hairMat, side * 0.118, -0.0, 0.03, 0.5, 1.6, 0.8); continue; }
+      if (hair === 'curly') continue;
+      const lock = add(head, ball(0.034, 10, 8), hairMat, side * 0.118, long ? -0.075 : short ? -0.02 : -0.035, 0.04, 0.6, long ? 3.8 : short ? 1.7 : 2.4, 0.9);
       lock.rotation.z = side * -0.06;
     }
-    if (hair === 'bob') add(head, ball(R, 16, 12), hairMat, 0, -0.045, -0.025, 1.12, 0.95, 0.95);
+    if (hair === 'spiky' && !hatted) {
+      // Spikes over the crown and down the back, pointing out from the scalp
+      for (const [el, az, len] of [[1.2, 0, 1.1], [0.95, 0.6, 1], [0.95, -0.6, 1], [0.75, 1.3, 0.9], [0.75, -1.3, 0.9], [0.8, 2.2, 1.1], [0.8, -2.2, 1.1], [0.9, Math.PI, 1.2], [0.4, 2.5, 1.1], [0.4, -2.5, 1.1], [0.35, Math.PI, 1.15], [0.05, 2.7, 0.9], [0.05, -2.7, 0.9]]) {
+        const p = onScalp(el, az, R + 0.005);
+        // Swept back and down the head, the way gel would have it
+        const back = Math.abs(az) > 1.5;
+        const out = p.clone().normalize().add(new THREE.Vector3(0, back ? -0.45 : -0.15, back ? -0.9 : -0.55)).normalize();
+        tuft(new THREE.ConeGeometry(0.044, 0.1 * len, 6), p.addScaledVector(out, 0.035), out);
+      }
+    }
+    if (hair === 'messy' && !hatted) {
+      for (const [el, az, tilt] of [[1.3, 0.4, 0.9], [1.05, -0.9, -0.8], [0.95, 1.2, 1.0], [0.75, 2.3, 0.6], [0.8, -2.2, -0.7], [0.5, Math.PI, 0.3], [1.15, -2.9, -0.4], [0.9, 2.9, 0.5], [1.35, -0.3, -1.2]]) {
+        const p = onScalp(el, az, R + 0.012);
+        // Mostly along the scalp (down and back), lifted a little at the tip
+        const n = p.clone().normalize();
+        const along = new THREE.Vector3(Math.sin(az + tilt), -0.6, Math.cos(az + tilt) - 0.6).projectOnPlane(n).normalize();
+        const out = along.multiplyScalar(0.8).addScaledVector(n, 0.55).normalize();
+        tuft(ball(0.034, 8, 6), p.addScaledVector(out, 0.022), out, [1.2, 2.0, 0.5]);
+      }
+    }
+    if (hair === 'curly') {
+      // A head of soft curls spread evenly over the cap (a golden-angle spiral)
+      const n = hatted ? 0 : 46;
+      for (let i = 0; i < n; i++) {
+        const y = 1 - ((i + 0.5) / n) * 1.25, az = i * 2.39996;
+        if (y < 0.5 && Math.cos(az) > 0.25) continue; // keep the face clear
+        const el = Math.asin(Math.max(-1, Math.min(1, y)));
+        const p = onScalp(el, az, R + 0.022);
+        add(head, ball(0.03, 8, 6), hairMat, p.x, p.y, p.z);
+      }
+      for (const side of [-1, 1]) for (const y of [0.0, -0.05]) add(head, ball(0.03, 8, 6), hairMat, side * 0.118, y, -0.02);
+      if (hatted) for (let i = 0; i < 9; i++) { const p = onScalp(-0.15, Math.PI / 2 + i * (Math.PI / 8), R + 0.012); add(head, ball(0.032, 8, 6), hairMat, p.x, p.y, p.z); }
+      for (let i = 0; i < 7; i++) { const p = onScalp(-0.45, Math.PI * 0.62 + i * 0.25, R + 0.01); add(head, ball(0.032, 8, 6), hairMat, p.x, p.y, p.z); }
+    }
+    if (hair === 'bob') {
+      add(head, ball(R, 16, 12), hairMat, 0, -0.045, -0.025, 1.12, 0.95, 0.95);
+      // The ends turn in under the jaw
+      for (const side of [-1, 1]) add(head, ball(0.04, 10, 8), hairMat, side * 0.115, -0.1, 0.02, 0.7, 0.9, 1.4).rotation.y = side * 0.3;
+    }
     if (hair === 'bun') {
       if (hatted) add(head, ball(0.05, 10, 8), hairMat, 0, -0.07, -0.125);
       else { add(head, ball(0.062, 12, 10), hairMat, 0, 0.15, -0.03); add(head, new THREE.TorusGeometry(0.03, 0.01, 5, 10), trim, 0, 0.115, -0.025).rotation.x = Math.PI / 2; }
@@ -303,7 +468,7 @@ export class Camper {
       }
       for (const side of [-1, 1]) add(head, ball(0.04, 10, 8), hairMat, side * 0.09, -0.2, -0.05, 0.8, 3.6, 0.7).rotation.z = side * 0.08;
     }
-    if (hair === 'short' || hair === 'bun' || hair === 'ponytail') {
+    if (hair === 'short' || hair === 'bun' || hair === 'ponytail' || hair === 'spiky' || hair === 'messy' || hair === 'parted') {
       // A tidy nape: two little points at the back of the neck
       for (const side of [-1, 1]) add(head, ball(0.03, 8, 6), hairMat, side * 0.035, -0.105, -0.1, 1, 1.8, 0.7).rotation.z = side * 0.15;
     }
@@ -415,5 +580,39 @@ export class Camper {
     const addr = pose === 'address';
     this.upper.rotation.set(lean, addr ? -this.twist * 0.5 : 0, 0);
     this.head.rotation.set(addr ? 0.15 : 0, addr ? this.twist * 0.35 : 0, tilt);
+    this.face(dt, pose);
+  }
+
+  /** A passing feeling for a few seconds: joy | oops | focus | calm | cheeky */
+  feel(name, seconds = 1.5) { if (FACES[name]) this.mood = { name, t: seconds }; }
+
+  face(dt, pose) {
+    if (!this.eyes) return;
+    if (this.mood) { this.mood.t -= dt; if (this.mood.t <= 0) this.mood = null; }
+    const name = this.mood?.name || POSE_FACE[pose] || 'neutral';
+    const f = FACES[name];
+    // A blink every few seconds
+    this.blinkT -= dt;
+    if (this.blinkT <= 0) { this.blink = 0.14; this.blinkT = 2.2 + Math.random() * 3.6; }
+    this.blink = Math.max(0, this.blink - dt);
+    // Smiley eyes are happy arches unless something is up
+    const smiley = this.look.eyeShape === 'smiley' && name !== 'oops' && name !== 'focus';
+    const want = smiley ? 0 : f.open;
+    this.openK = (this.openK ?? want) + (want - (this.openK ?? want)) * Math.min(1, dt * 14);
+    const k = Math.min(1, dt * 12);
+    for (const e of this.eyes) {
+      // The cheeky face winks the left eye
+      const wink = f.wink && e.side < 0;
+      const shut = this.blink > 0 || wink;
+      const o = shut ? 0 : this.openK;
+      e.open.scale.y = e.base * Math.max(0.05, o);
+      e.open.visible = o > 0.12;
+      e.arch.visible = !e.open.visible && (want === 0 || wink) && !(this.blink > 0 && want !== 0);
+      e.rest.visible = !e.open.visible && !e.arch.visible;
+      const [lift, drop] = f.brow;
+      e.brow.position.y += ((0.047 + lift) - e.brow.position.y) * k;
+      e.brow.rotation.z += (e.side * drop - e.brow.rotation.z) * k;
+    }
+    for (const [key, m] of Object.entries(this.mouths)) m.visible = key === f.mouth;
   }
 }

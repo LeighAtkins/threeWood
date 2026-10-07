@@ -11,7 +11,9 @@
 
 export const SKINS = [0xffe2c8, 0xf6cfa6, 0xd9a273, 0x9a6642];
 export const HAIR_COLORS = [0x3a2a22, 0x6b4a32, 0xc98d4b, 0xf2d58a, 0x2f3a5c, 0xe58fa6, 0x8e9aa6];
-export const HAIR_STYLES = ['short', 'bob', 'bun', 'long', 'twintails', 'ponytail'];
+export const HAIR_STYLES = ['short', 'spiky', 'messy', 'parted', 'curly', 'buzz', 'bob', 'bun', 'long', 'twintails', 'ponytail'];
+export const EYE_SHAPES = ['round', 'soft', 'sharp', 'sleepy', 'smiley'];
+export const EXTRAS = ['none', 'glasses', 'freckles', 'plaster'];
 export const EYE_COLORS = [0x4aa3d9, 0x8a5fd0, 0x4fae6a, 0xc98a3a, 0xd9587a, 0x5a4a42];
 
 /**
@@ -64,7 +66,7 @@ export const OUTFITS = [
 export const outfitById = (id) => OUTFITS.find((o) => o.id === id) || OUTFITS[0];
 
 export function defaultLook() {
-  return { body: 'girl', skin: 0, hair: 'long', hairColor: 5, eyes: 0, outfit: 'trail', name: 'Camper' };
+  return { body: 'girl', skin: 0, hair: 'long', hairColor: 5, eyes: 0, eyeShape: 'round', extra: 'none', outfit: 'trail', name: 'Camper' };
 }
 
 export function newCamp() {
@@ -115,6 +117,8 @@ export function cleanLook(look = {}) {
     hair: HAIR_STYLES.includes(look.hair) ? look.hair : base.hair,
     hairColor: Number.isInteger(look.hairColor) && look.hairColor >= 0 && look.hairColor < HAIR_COLORS.length ? look.hairColor : base.hairColor,
     eyes: Number.isInteger(look.eyes) && look.eyes >= 0 && look.eyes < EYE_COLORS.length ? look.eyes : base.eyes,
+    eyeShape: EYE_SHAPES.includes(look.eyeShape) ? look.eyeShape : base.eyeShape,
+    extra: EXTRAS.includes(look.extra) ? look.extra : base.extra,
     outfit: OUTFITS.some((o) => o.id === look.outfit) ? look.outfit : base.outfit,
     name: String(look.name || base.name).replace(/[^\p{L}\p{N} _-]/gu, '').slice(0, 10) || base.name,
   };
