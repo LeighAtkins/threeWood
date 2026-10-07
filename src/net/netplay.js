@@ -59,10 +59,7 @@ export class NetPlay {
     // Watch mode: follow a friend's ball while it flies
     this.watching = null;
     this.watchIdle = 0;
-    this.watchBtn = document.createElement('button');
-    this.watchBtn.className = 'watch-btn hidden';
-    this.watchBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); this.toggleWatch(); });
-    root.insertBefore(this.watchBtn, layer);
+    this.emotesOpen = 0; // seconds the emote row stays open after the 💬 tap
   }
 
   /** In a round with at least the room open. */
@@ -125,7 +122,6 @@ export class NetPlay {
     this.waitT = this.nextT = null;
     this.others.clear();
     this.pill.classList.add('hidden');
-    this.watchBtn.classList.add('hidden');
     this.watching = null;
     this.crown = this.nextCrown = this.crownNews = null;
     this.crowns.clear();
@@ -332,14 +328,24 @@ export class NetPlay {
 
   /** The friend worth watching right now: a ball in the air (or just landed). */
   flyingFriend() {
-    for (const o of this.others.map.values()) if (o.flying) return o;
+    for (const o of this.others.map.values()) if (o.flying) { this.lastFlown = o; return o; }
     return null;
   }
 
-  toggleWatch() {
-    if (this.watching) { this.watching = null; return; }
-    const o = this.flyingFriend();
-    if (o) { this.watching = o.id; this.watchIdle = 0; this.g.audio.tap(); }
+  /**
+   * A swipe on the course while a friend's ball is going: up flies the
+   * camera over to it, down comes home. Returns true if it meant something.
+   */
+  swipe(up) {
+    if (!this.active) return false;
+    if (!up) { if (!this.watching) return false; this.watching = null; return true; }
+    if (this.watching) return true;
+    const o = this.flyingFriend() || this.lastFlown;
+    if (!o || !['aim', 'swing', 'settle'].includes(this.g.state)) return false;
+    this.watching = o.id;
+    this.watchIdle = 0;
+    this.g.audio.whoosh();
+    return true;
   }
 
   /** Point the camera at the watched ball; returns true if it did. */
@@ -350,7 +356,8 @@ export class NetPlay {
     const b = o.sim;
     const speed = Math.hypot(b.vx, b.vz);
     this.watchAngle = speed > 2 ? Math.atan2(-b.vz, -b.vx) : (this.watchAngle ?? 0);
-    this.g.rig.orbit(b.x, b.y, b.z, 11, 4.5, this.watchAngle);
+    this.g.rig.orbit(b.x, b.y, b.z, speed > 2 ? 11 : 6, speed > 2 ? 4.5 : 2.4, this.watchAngle);
+    this.g.rig.stiffness = 9; // keep up with a ball doing 50 m/s
     return true;
   }
 
@@ -497,35 +504,39 @@ export class NetPlay {
       row.querySelector('span').textContent = score ? vsPar(score.total) : '';
       this.pill.appendChild(row);
     }
-    // A row of things to say
-    const row = document.createElement('div');
-    row.className = 'emotes';
-    for (const e of EMOTES) {
-      const b = document.createElement('button');
-      b.textContent = e;
-      b.addEventListener('pointerdown', (ev) => { ev.preventDefault(); ev.stopPropagation(); this.emote(e); });
-      row.appendChild(b);
+    // Things to say, folded away behind one small button so the pill stays small
+    const talk = document.createElement('button');
+    talk.className = 'talk';
+    talk.textContent = '💬';
+    talk.addEventListener('pointerdown', (ev) => { ev.preventDefault(); ev.stopPropagation(); this.emotesOpen = this.emotesOpen > 0 ? 0 : 4; this.paint(); });
+    this.pill.appendChild(talk);
+    if (this.emotesOpen > 0) {
+      const row = document.createElement('div');
+      row.className = 'emotes';
+      for (const e of EMOTES) {
+        const b = document.createElement('button');
+        b.textContent = e;
+        b.addEventListener('pointerdown', (ev) => { ev.preventDefault(); ev.stopPropagation(); this.emote(e); this.emotesOpen = 0; this.paint(); });
+        row.appendChild(b);
+      }
+      this.pill.appendChild(row);
     }
-    this.pill.appendChild(row);
   }
 
   update(dt) {
     const g = this.g;
     const show = this.active && ['aim', 'swing', 'flight', 'settle', 'holed', 'result', 'fishing', 'summary'].includes(g.state);
     if (g.world) this.others.update(dt, g.world, g.env, g.camera, show);
-    // The watch button: there when a friend's ball is in the air
     if (this.active) {
+      // Remember whose ball flew last, so a swipe just after it lands still finds it
       const o = this.flyingFriend();
-      const can = !!o && ['aim', 'swing', 'flight', 'settle'].includes(g.state);
-      this.watchBtn.classList.toggle('hidden', !can && !this.watching);
+      if (o) this.lastFlown = o;
       if (this.watching) {
-        this.watchBtn.textContent = 'BACK TO ME';
         const w = this.others.map.get(this.watching);
         this.watchIdle = w?.flying ? 0 : this.watchIdle + dt;
-        if (this.watchIdle > 1.6 || g.state === 'result' || g.state === 'holed') this.watching = null;
-      } else if (can) {
-        this.watchBtn.textContent = `👀 WATCH ${o.camper.look.name.toUpperCase()}`;
+        if (this.watchIdle > 3 || g.state === 'result' || g.state === 'holed' || g.state === 'flight') this.watching = null;
       }
+      if (this.emotesOpen > 0) { this.emotesOpen -= dt; if (this.emotesOpen <= 0) { this.emotesOpen = 0; this.paint(); } }
     }
     if (!this.active || !this.room.isHost) return;
     if (this.waitT !== null) {

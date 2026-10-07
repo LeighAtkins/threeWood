@@ -265,9 +265,15 @@ export class Game {
     });
     const end = (e) => {
       if (!drag || drag.id !== e.pointerId) return;
-      const tap = drag.moved < 12 && performance.now() - drag.t < 400;
+      const held = performance.now() - drag.t;
+      const tap = drag.moved < 12 && held < 400;
+      const dy = e.clientY - drag.sy, dx = e.clientX - drag.sx;
+      // A quick flick up or down: fly to a friend's ball, or come back
+      // (a vertical drag has no other meaning while aiming, so any speed counts)
+      const flick = Math.abs(dy) > 70 && Math.abs(dy) > Math.abs(dx) * 1.6;
       drag = null;
       if (tap) this.tap();
+      else if (flick && this.state !== 'flight') this.net.swipe(dy < 0);
     };
     c.addEventListener('pointerup', end);
     c.addEventListener('pointercancel', end);
@@ -1978,8 +1984,6 @@ export class Game {
       default:
         break;
     }
-    // Watching a friend's ball overrides the state's own camera
-    this.net.watchCamera();
   }
 
   aimCamera() {
@@ -1995,6 +1999,8 @@ export class Game {
 
   updateVisuals(dt) {
     const { ball, world, camera } = this;
+    // Watching a friend's ball overrides whatever camera the state wanted
+    this.net.watchCamera();
     this.rig.update(dt);
 
     // Ball: drawn a little larger with distance so it never becomes a pixel
