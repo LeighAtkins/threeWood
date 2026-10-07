@@ -50,6 +50,15 @@ export const OUTFITS = [
   { id: 'gold', name: 'Golden Hour', top: 'long', jacket: 0xf0b63a, trim: 0xfff4c8, shirt: 0xff7a3c, collar: true,
     bottoms: 'shorts', bottomColor: 0x7a5a1e, legs: 0x4a3524, shoes: 0xfff4c8, hat: 'earflap', hatColor: 0xfff4c8,
     goal: ['gold', 1], how: 'Catch the golden ball' },
+  { id: 'hanten', name: 'Cozy Hanten', top: 'long', jacket: 0x34508a, trim: 0xe6d6b0, shirt: 0xf6f1e6, check: true, collar: true,
+    bottoms: 'pants', bottomColor: 0x5a4636, legs: null, shoes: 0x3a2a22, hat: 'none', scarf: 0xc6402f,
+    goal: ['nabe', 1], how: 'Share a hot pot by the fire' },
+  { id: 'skipper', name: 'Lake Windbreaker', top: 'hoodie', jacket: 0x2fa6a0, trim: 0xf6f1e6, shirt: 0xf2c94c,
+    bottoms: 'shorts', bottomColor: 0x2b4a6a, legs: 0x2b2b33, shoes: 0xf2c94c, hat: 'bucket', hatColor: 0xf6f1e6,
+    goal: ['skip6', 1], how: 'Skip a stone 6 times' },
+  { id: 'walker', name: 'Dog Walker', top: 'vest', jacket: 0xd8873a, trim: 0x6b4a2e, shirt: 0xf6f1e6,
+    bottoms: 'pants', bottomColor: 0x4a5a3a, legs: null, shoes: 0x7a5632, hat: 'cap', hatColor: 0xd2463c, pack: 0x8a9a55,
+    goal: ['pets', 15], how: 'Give Kuri 15 pats' },
 ];
 
 export const outfitById = (id) => OUTFITS.find((o) => o.id === id) || OUTFITS[0];
@@ -62,7 +71,8 @@ export function newCamp() {
   return {
     look: defaultLook(),
     made: false, // has the player been through the creator yet
-    stats: { rounds: 0, holes: 0, fairways: 0, birdies: 0, fish: 0, perfectGrill: 0, gold: 0, friends: 0 },
+    stats: { rounds: 0, holes: 0, fairways: 0, birdies: 0, fish: 0, perfectGrill: 0, gold: 0, friends: 0, pets: 0, forage: 0, nabe: 0, skip6: 0, bestSkip: 0, skipThrows: 0 },
+    dog: false, // Kuri has come along
     unlocked: ['trail'],
   };
 }
@@ -74,6 +84,7 @@ export function loadCamp(saved) {
   return {
     look: { ...fresh.look, ...saved.look },
     made: !!saved.made,
+    dog: !!saved.dog,
     stats: { ...fresh.stats, ...saved.stats },
     unlocked: [...new Set(['trail', ...(saved.unlocked || [])])],
   };

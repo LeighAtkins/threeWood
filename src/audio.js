@@ -222,4 +222,33 @@ export class Audio {
   }
 
   whoosh() { this.burst(0.5, { gain: 0.1, freq: 400, to: 1800, q: 0.6 }); }
+
+  /** Kuri: a small happy yip. */
+  yip() {
+    const f = 820 + Math.random() * 160;
+    this.tone(f, 0.07, { type: 'triangle', gain: 0.13, to: f * 1.45 });
+    this.tone(f * 1.2, 0.09, { type: 'triangle', gain: 0.1, to: f * 0.9, delay: 0.08 });
+  }
+
+  /** Something picked: a soft pop. */
+  pop() {
+    this.tone(520, 0.08, { gain: 0.16, to: 980 });
+    this.burst(0.04, { gain: 0.06, freq: 2500, q: 2 });
+  }
+
+  /** Into the pot (or the pond). */
+  plop() {
+    this.tone(340, 0.14, { gain: 0.18, to: 120 });
+    this.burst(0.18, { gain: 0.08, freq: 900, to: 300, q: 0.6, type: 'lowpass' });
+  }
+
+  /** The pot boiling over. */
+  sizzle() { this.burst(0.7, { gain: 0.1, freq: 5200, to: 3000, q: 0.5 }); }
+
+  /** A stone skipping: each touch a step higher. */
+  skip(n) {
+    const f = 600 * Math.pow(1.09, Math.min(14, n));
+    this.tone(f, 0.05, { type: 'triangle', gain: 0.12, to: f * 0.7 });
+    this.burst(0.05, { gain: 0.05, freq: 1800, q: 1.5 });
+  }
 }

@@ -450,7 +450,7 @@ export class Hud {
     this.layer.appendChild(node);
   }
 
-  showSummary({ total, par, strokes, points, stats, card, best, seed, outfits = [], board = null, onAgain, onShare, onCamp }) {
+  showSummary({ total, par, strokes, points, stats, card, best, seed, outfits = [], board = null, onAgain, onShare, onCamp, onNabe = null }) {
     this.clearLayer();
     const node = el('div', 'overlay dim', `
       <div class="card">
@@ -461,11 +461,12 @@ export class Hud {
         ${scorecardHtml(card)}
         <div class="stats">${stats.map((s) => `<div class="stat"><b>${s.value}</b><span>${s.label}</span></div>`).join('')}</div>
         ${outfits.map((name) => `<div class="new-fit">NEW OUTFIT · ${name.toUpperCase()}</div>`).join('')}
-        <button class="btn" data-a="camp">SIT BY THE FIRE</button>
+        <div class="btn-row"><button class="btn" data-a="camp">SIT BY THE FIRE</button>${onNabe ? '<button class="btn hotpot" data-a="nabe">HOT POT</button>' : ''}</div>
         <button class="btn ghost" data-a="again">NEW COURSE</button>
         <button class="btn ghost" data-a="share">CHALLENGE A FRIEND · ${seed}</button>
       </div>`);
     node.querySelector('[data-a="camp"]').addEventListener('click', onCamp);
+    node.querySelector('[data-a="nabe"]')?.addEventListener('click', onNabe);
     node.querySelector('[data-a="again"]').addEventListener('click', onAgain);
     node.querySelector('[data-a="share"]').addEventListener('click', (e) => onShare(e.currentTarget));
     this.layer.appendChild(node);

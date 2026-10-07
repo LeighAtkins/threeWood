@@ -33,6 +33,10 @@ import { loadCamp, bump } from './core/camp.js';
 import { NetPlay } from './net/netplay.js';
 import { buildNightGlow, updateNightGlow } from './render/nightGlow.js';
 import { Gimmicks } from './render/gimmicks.js';
+import { Dog } from './play/dog.js';
+import { Forage } from './play/forage.js';
+import { Nabe } from './play/nabe.js';
+import { Skip } from './play/skip.js';
 import { pixelTexture } from './render/textures.js';
 import { Audio } from './audio.js';
 import { Music } from './music.js';
@@ -113,6 +117,12 @@ export class Game {
     document.body.appendChild(this.photoCount);
     this.gimmicks = new Gimmicks(this.scene);
     this.cookHud = new CookHud(this.hud.root, this.hud.layer, () => this.eatFish());
+    // Things to do between shots: a dog, mushrooms to gather, stones to skip,
+    // and a hot pot at the end of the round
+    this.dog = new Dog(this);
+    this.forage = new Forage(this);
+    this.nabe = new Nabe(this);
+    this.skip = new Skip(this);
     this.initBall();
     this.initInput();
 
@@ -259,6 +269,8 @@ export class Game {
       } else if (this.state === 'creator') {
         // Turn the camper round to look at the back of the outfit
         this.camper.group.rotation.y += dx * 0.012;
+      } else if (this.state === 'nabe') {
+        this.nabe.stir(Math.hypot(dx, e.clientY - prevY) / Math.max(320, Math.min(window.innerWidth, 900)));
       } else if (this.state === 'cook') {
         this.grill.turn(dx / Math.max(320, Math.min(window.innerWidth, 900)));
         if (this.grill.spin > 0.3) this.cookHud.hideCue();
@@ -273,7 +285,8 @@ export class Game {
       // (a vertical drag has no other meaning while aiming, so any speed counts)
       const flick = Math.abs(dy) > 70 && Math.abs(dy) > Math.abs(dx) * 1.6;
       drag = null;
-      if (tap) this.tap();
+      if (this.state === 'skip') { if (!tap) this.skip.flick(dx, dy, held); return; }
+      if (tap) this.tap(e.clientX, e.clientY);
       else if (flick && this.state !== 'flight') this.net.swipe(dy < 0);
     };
     c.addEventListener('pointerup', end);
@@ -464,6 +477,8 @@ export class Game {
     this.hud.setChallenge(this.challenge.text, null);
     this.hud.showIntro(this.introCard());
     this.net.atHole();
+    this.forage.atHole();
+    this.dog.atHole();
     this.landing = null;
     this.aimAngle = Math.atan2(this.world.cup.z - this.ball.z, this.world.cup.x - this.ball.x);
     this.hud.drawMinimap(this.world, this.ball, null);
@@ -534,8 +549,10 @@ export class Game {
 
   setState(state) {
     if (state !== 'fishing' && this.fishing?.active) this.fishing.stop();
-    if (state !== 'cook' && state !== 'summary' && this.grill?.active) { this.grill.stop(); this.cookHud.hide(); }
-    if (state !== 'summary' && this.campsite) { this.campsite.visible = false; this.camperUi.hidePoses(); }
+    const atFire = state === 'summary' || state === 'nabe';
+    if (state !== 'cook' && !atFire && this.grill?.active) { this.grill.stop(); this.cookHud.hide(); }
+    if (!atFire && this.campsite) { this.campsite.visible = false; this.camperUi.hidePoses(); }
+    if (!atFire && this.nabe?.active) this.nabe.stop();
     this.state = state;
     this.stateTime = 0;
     this.music.setScene(state);
@@ -648,8 +665,24 @@ export class Game {
     let pose = 'idle', twist = 0, show = true;
     if (s === 'creator') {
       pose = 'idle';
-    } else if (s === 'cook' || s === 'summary') {
+    } else if (s === 'cook' || s === 'summary' || s === 'nabe') {
       pose = this.campPose || 'warm';
+    } else if (s === 'skip') {
+      // On the bank, facing the water; the arm goes up for a throw
+      const sh = this.skip.shore;
+      const x = sh.x - sh.dx * 0.4 + sh.dz * 0.3, z = sh.z - sh.dz * 0.4 - sh.dx * 0.3;
+      const dx = x - g.position.x, dz = z - g.position.z, d = Math.hypot(dx, dz);
+      if (d > 0.2) {
+        const step = Math.min(d, Math.max(6, d * 1.5) * dt);
+        g.position.set(g.position.x + (dx / d) * step, 0, g.position.z + (dz / d) * step);
+        g.position.y = Math.max(world.heightAt(g.position.x, g.position.z), sh.pond.level);
+        g.rotation.y = Math.atan2(dx, dz);
+        pose = 'walk';
+      } else {
+        g.rotation.y = Math.atan2(sh.dx, sh.dz);
+        pose = this.skip.throwT > 0 ? 'wave' : 'idle';
+      }
+      g.scale.setScalar(1.9);
     } else if (!this.round || s === 'title' || s === 'intro' || s === 'fishing') {
       show = false;
     } else if (s === 'aim' || s === 'swing') {
@@ -829,6 +862,7 @@ export class Game {
     this.walkIn = { t: 0, dur: 1.0 };
     this.cheerSpot = null;
     this.net.atAim();
+    this.forage.atAim();
     this.showHint();
   }
 
@@ -947,8 +981,12 @@ export class Game {
   // ===========================================================================
 
   /** Tap on the course (not a button). */
-  tap() {
+  tap(x, y) {
     if (this.paused) return;
+    // A mushroom to gather, or a dog to pat?
+    if (x !== undefined && ['aim', 'settle', 'result', 'summary', 'cook', 'nabe'].includes(this.state)) {
+      if (this.forage.tapAt(x, y) || this.dog.tapAt(x, y)) return;
+    }
     if (this.state === 'intro' && this.stateTime > 0.5) this.endIntro();
     else if (this.state === 'swing' && !this.putting) this.advanceSwing();
     else if (this.state === 'swing' && this.putting && this.puttLatched) this.releasePutt();
@@ -1145,6 +1183,7 @@ export class Game {
     }
 
     const pure = strike.grade === 'pure';
+    if (pure) this.dog.on('pure');
     this.audio.strike(this.swing.power, strike.grade);
     this.effects.strikeFlash(ball.x, ball.y, ball.z, pure);
     this.effects.startTrail(pure ? 0xffd84a : 0xffffff);
@@ -1276,6 +1315,7 @@ export class Game {
     ball.mode = 'air';
     shot.replan = true;
     this.hud.callout('BOING!', 'gold');
+    this.dog.on('boing');
     this.award('Mushroom bounce', 100, true);
     this.audio.bounce(18, 'green');
     this.effects.puff(ball.x, ball.y, ball.z, 'green', 1.4);
@@ -1288,6 +1328,7 @@ export class Game {
     for (const ring of this.gimmicks.ringsHit(ball)) {
       shot.rings = (shot.rings || 0) + 1;
       this.hud.callout(shot.rings > 1 ? `RING ×${shot.rings}` : 'RING!', 'gold small');
+      this.dog.on('ring');
       this.award(`Sky ring ×${shot.rings}`, 150 * shot.rings, true);
       this.effects.strikeFlash(ring.p.x, ring.p.y, ring.p.z, true);
       if (this.gimmicks.ringsDone) {
@@ -1334,6 +1375,7 @@ export class Game {
       case 'splash':
         fx.splash(e.x, e.y, e.z);
         this.audio.splash();
+        this.dog.on('splash');
         this.penalty(this.world.biome.liquid === 'lava' ? 'LAVA' : 'WATER');
         break;
       case 'oob':
@@ -1398,6 +1440,8 @@ export class Game {
         const caught = this.fishing.caught;
         if (caught) {
           this.round.fish = (this.round.fish || 0) + caught;
+          this.round.fishTotal = (this.round.fishTotal || 0) + caught;
+          this.dog.on('fish');
           this.earn('fish', caught);
           this.hud.callout(caught > 1 ? `${caught} FISH!` : 'A FISH!', 'small');
           this.award(caught > 1 ? `Caught ${caught} fish` : 'Caught a fish', 50 * caught, true);
@@ -1564,6 +1608,7 @@ export class Game {
     }
 
     const d = this.strokes - par;
+    if (d < 0) this.dog.on('birdie');
     const scoreBonus = d <= -2 ? 1500 : d === -1 ? 600 : d === 0 ? 200 : d === 1 ? 50 : 0;
     if (scoreBonus) this.award(scoreName(this.strokes, par).replace('!', ''), scoreBonus);
 
@@ -1687,6 +1732,60 @@ export class Game {
     });
   }
 
+  saveCamp() { store.set(CAMP_KEY, this.camp); }
+
+  /** Back from the bank to the ball. */
+  endSkip() {
+    if (this.state !== 'skip') return;
+    this.setState('aim');
+    this.hud.setControlsVisible(true);
+    this.walkIn = { t: 0, dur: 1.0 };
+    this.planDirty = true;
+  }
+
+  /** The hot pot on the campfire. back() returns to the summary card. */
+  startNabe(back) {
+    this.hud.clearLayer();
+    this.camperUi.hidePoses();
+    this.setState('nabe');
+    this.setCampPose('warm');
+    this.nabeBack = back;
+    this.nabe.open(() => { this.setState('summary'); back(); });
+    this.audio.whoosh();
+  }
+
+  eatNabe() {
+    const res = this.nabe.eat();
+    if (!res) return;
+    this.nabe.close();
+    this.round.nabeDone = true;
+    const names = res.glow ? 'MOONLIGHT NABE' : res.gold ? 'GOLDEN NABE' : res.kinds >= 2 ? 'FOREST NABE' : 'CAMP NABE';
+    const stars = '★'.repeat(res.stars) + '☆'.repeat(3 - res.stars);
+    this.hud.callout(res.stars === 3 ? `PERFECT ${names}!` : names, res.stars === 3 ? 'gold' : '');
+    this.audio.fanfare(res.stars);
+    this.earn('nabe');
+    this.dog.react('hop', 2.5);
+    this.dog.hearts(4);
+    this.setCampPose('cheer');
+    const lines = [
+      res.cooked ? `${res.cooked} things cooked through` : '',
+      res.kinds ? `${res.kinds} kind${res.kinds > 1 ? 's' : ''} of wild mushroom` : 'Gather mushrooms on the course for a better pot',
+      `At a simmer ${Math.round(res.simmer * 100)}% of the time`,
+      this.nabe.boils > 1 ? `Boiled over ${this.nabe.boils} times` : this.nabe.boils ? 'Boiled over once' : 'Never boiled over',
+    ].filter(Boolean);
+    const node = document.createElement('div');
+    node.className = 'overlay';
+    node.innerHTML = `<div class="card nabe-card"><h2>${names}</h2><h1 class="gold stars">${stars}</h1>${lines.map((l) => `<p>${l}</p>`).join('')}<button class="btn" data-a="ok">BACK TO THE FIRE</button></div>`;
+    node.querySelector('[data-a="ok"]').addEventListener('click', () => {
+      this.audio.tap();
+      this.setCampPose('sit');
+      this.setState('summary');
+      this.hud.clearLayer();
+      this.nabeBack?.();
+    });
+    setTimeout(() => { if (this.state === 'nabe') { this.hud.clearLayer(); this.hud.layer.appendChild(node); } }, 1400);
+  }
+
   showSummary() {
     const round = this.round;
     const total = this.roundTotal();
@@ -1724,6 +1823,7 @@ export class Game {
       total, par, strokes, points: round.points, best, seed: round.seed, card, outfits,
       board: this.net.active && this.net.players.length > 1 ? this.net.standings(total) : null,
       onCamp: () => this.campPoses(showCard),
+      onNabe: round.nabeDone ? null : () => this.startNabe(showCard),
       stats: [
         { label: 'FAIRWAYS', value: `${st.fairways}/${st.fairwayChances}` },
         { label: 'GREENS IN REG', value: `${st.gir}/${round.holes.length}` },
@@ -1943,6 +2043,12 @@ export class Game {
       case 'fishing':
         this.fishing.update(dt);
         break;
+      case 'nabe': {
+        const v = this.campView;
+        this.rig.orbit(v.x, v.y + 0.25, v.z, 1.75, 1.45, v.angle + 0.35);
+        this.grill.update(dt);
+        break;
+      }
       case 'cook': {
         const v = this.cookView;
         this.rig.orbit(v.x, v.y + 0.5, v.z, 2.1, 1.55, v.angle);
@@ -2055,6 +2161,10 @@ export class Game {
 
     this.updateClub(dt);
     this.updateCamper(dt);
+    this.dog.update(dt);
+    this.forage.update(dt);
+    this.skip.update(dt);
+    this.nabe.update(dt);
     this.net.update(dt);
     updateScenery(this.scenery, this.time, dt, this.sky);
     // After dark: the course, the ball and the campers carry their own light

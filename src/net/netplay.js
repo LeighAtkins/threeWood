@@ -268,6 +268,13 @@ export class NetPlay {
         this.scores.set(from, { total: num(msg.total, -99, 199), strokes: num(msg.strokes, 0, 20), drive: num(msg.drive, 0, 400), pin: msg.pin == null ? null : num(msg.pin, 0, 400) });
         this.contest();
         break;
+      case 'pot':
+        // The shared hot pot
+        if (typeof msg.k === 'string') g.nabe.add(msg.k, this.nameOf(from));
+        break;
+      case 'stir':
+        g.nabe.friendStir(num(msg.a, 0, 0.5));
+        break;
       case 'call':
         // A friend's big moment, shared
         g.hud.callout(`${this.nameOf(from)}: ${String(msg.text).slice(0, 24)}`, 'small');
@@ -433,6 +440,7 @@ export class NetPlay {
   }
 
   go(ids) {
+    if (ids.includes(this.myId) && this.g.state === 'skip') this.g.skip.close(); // GO: back to your ball
     for (const id of ids) if (this.status.get(id) === 'ready') { this.status.set(id, 'busy'); this.others.setStatus(id, 'busy'); }
     if (ids.includes(this.myId) && this.g.state === 'aim') {
       this.cleared = true;
@@ -455,6 +463,10 @@ export class NetPlay {
     this.poseT = 0;
     if (this.active) this.room.send({ t: 'pose', p });
   }
+
+  /** Hot pot: I dropped something in; I am stirring (sent in small batches). */
+  potAdd(k) { if (this.active) this.room.send({ t: 'pot', k }); }
+  potStir(a) { if (this.active) this.stirred = (this.stirred || 0) + a; }
 
   /** A quick word to the room. */
   emote(e) {
@@ -556,7 +568,7 @@ export class NetPlay {
 
   update(dt) {
     const g = this.g;
-    const show = this.active && ['aim', 'swing', 'flight', 'settle', 'holed', 'result', 'fishing', 'summary'].includes(g.state);
+    const show = this.active && ['aim', 'swing', 'flight', 'settle', 'holed', 'result', 'fishing', 'summary', 'nabe', 'skip'].includes(g.state);
     if (g.world) this.others.update(dt, g.world, g.env, g.camera, show);
     if (this.active) {
       // Remember whose ball flew last, so a swipe just after it lands still finds it
@@ -568,9 +580,10 @@ export class NetPlay {
         if (this.watchIdle > 3 || g.state === 'result' || g.state === 'holed' || g.state === 'flight') this.watching = null;
       }
       if (this.emotesOpen > 0) { this.emotesOpen -= dt; if (this.emotesOpen <= 0) { this.emotesOpen = 0; this.paint(); } }
+      if (this.stirred > 0.02) { this.stirT = (this.stirT || 0) + dt; if (this.stirT > 0.4) { this.room.send({ t: 'stir', a: Math.min(0.5, this.stirred) }); this.stirred = 0; this.stirT = 0; } }
       // By the fire, say my pose again now and then: one lost message (or
       // one that arrived before they sat down) never leaves us out of step
-      if (g.state === 'summary' && this.myPose) {
+      if ((g.state === 'summary' || g.state === 'nabe') && this.myPose) {
         this.poseT += dt;
         if (this.poseT > 2) { this.poseT = 0; this.room.send({ t: 'pose', p: this.myPose }); }
       }
