@@ -140,6 +140,7 @@ export class Game {
       this.clock.getDelta();
       if (document.visibilityState !== 'visible') return;
       if (this.round) this.keepAwake();
+      this.net.room?.wake();
       this.recover();
     });
     // A phone that was put away may hand back a fresh GL context
@@ -1709,7 +1710,7 @@ export class Game {
       store.set(DAILY_KEY, all);
     }
     store.del(SAVE_KEY);
-    this.wakeLock?.release?.().catch(() => {});
+    if (!this.net.active) this.wakeLock?.release?.().catch(() => {}); // friends: stay up for the fire
     this.setState('summary');
     this.audio.fanfare(total <= 0 ? 3 : 1);
     this.earn('rounds');

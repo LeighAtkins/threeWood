@@ -16,7 +16,8 @@ const PREFIX = 'threewood-room-';
 const LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ'; // no I or O: they read as digits
 const MAX_PLAYERS = 4;
 const PING_EVERY = 3000;  // a closed tab does not always say goodbye:
-const GONE_AFTER = 12000; // silence this long means they have left
+const GONE_AFTER = 40000; // silence this long means they have left (a phone
+                          // that was put away for a moment gets to come back)
 
 export const makeCode = () => Array.from({ length: 4 }, () => LETTERS[Math.floor(Math.random() * LETTERS.length)]).join('');
 export const cleanCode = (text) => String(text || '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4);
@@ -52,6 +53,15 @@ export class Room {
       this.hostConn.send({ t: 'ping' });
       if (now - (this.heard.get('host') ?? now) > GONE_AFTER) this.fail('The host left the room.');
     }
+  }
+
+  /** Back from the pocket: say hello straight away rather than at the next beat. */
+  wake() {
+    if (this.closed) return;
+    const now = Date.now();
+    if (this.isHost) { for (const id of this.conns.keys()) this.heard.set(id, Math.max(this.heard.get(id) || 0, now - 5000)); }
+    else this.heard.set('host', Math.max(this.heard.get('host') || 0, now - 5000));
+    this.beat();
   }
 
   /** Host: a guest is gone. */
@@ -95,7 +105,7 @@ export class Room {
       if (msg.t === 'ping') return;
       if (msg.t === 'hello') {
         if (!this.conns.has(conn.peer) || this.players.some((p) => p.id === conn.peer)) return;
-        this.players = [...this.players, { id: conn.peer, host: false, look: msg.look }];
+        this.players = [...this.players, { id: conn.peer, host: false, look: msg.look, build: String(msg.build || '') }];
         this.shareRoster();
         return;
       }
@@ -122,7 +132,7 @@ export class Room {
       this.me.id = id;
       const conn = this.hostConn = peer.connect(PREFIX + this.code, { reliable: true });
       conn.on('open', () => {
-        conn.send({ t: 'hello', look: this.me.look });
+        conn.send({ t: 'hello', look: this.me.look, build: this.me.build });
         this.heard.set('host', Date.now());
         this.on.open?.(this.code);
       });

@@ -75,6 +75,7 @@ export class Others {
       o.status = 'aim';
       o.flying = false;
       o.camp = null;
+      o.wantPose = null;
       this.put(o, world, tee.x + sx * off - (cup.x - tee.x) / d * 1.5, tee.z + sz * off - (cup.z - tee.z) / d * 1.5, true);
       o.ball.visible = false; // not hit yet: only the camper waits by the tee
     }
@@ -109,7 +110,7 @@ export class Others {
     for (const at of list) {
       const o = this.map.get(at.id);
       if (!o) continue;
-      o.camp = at.pose;
+      o.camp = o.wantPose || at.pose;
       o.flying = false;
       o.placed = true;
       o.target = null;
@@ -141,7 +142,12 @@ export class Others {
   }
 
   /** The round is over and they chose a pose by the fire. */
-  pose(id, p) { const o = this.map.get(id); if (o && o.camp) o.camp = p; }
+  pose(id, p) {
+    const o = this.map.get(id);
+    if (!o) return;
+    o.wantPose = p; // kept for when we sit down, if they got there first
+    if (o.camp) o.camp = p;
+  }
 
   /** A word over their head for a moment. */
   say(id, text) { const o = this.map.get(id); if (o) o.bubble = { text, t: 2.6 }; }

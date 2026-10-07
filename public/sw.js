@@ -17,6 +17,7 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.method !== 'GET' || !req.url.startsWith('http')) return;
+  if (req.url.includes('fresh=')) return; // the "is there a newer game?" check
   const put = (res) => {
     if (res && (res.ok || res.type === 'opaque')) {
       const copy = res.clone();

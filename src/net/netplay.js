@@ -20,6 +20,7 @@ import { Room, cleanCode } from './room.js';
 import { Others } from '../render/others.js';
 import { cleanLook } from '../core/camp.js';
 import { generateSeed } from '../core/rng.js';
+import { BUILD, isStale, reloadFresh } from './fresh.js';
 
 const WAIT_LIMIT = 30;  // seconds the ready players wait for the rest
 const NEXT_DELAY = 8;   // seconds on the result card once everyone has finished
@@ -60,6 +61,8 @@ export class NetPlay {
     this.watching = null;
     this.watchIdle = 0;
     this.emotesOpen = 0; // seconds the emote row stays open after the 💬 tap
+    this.myPose = null;  // by the fire: my pose, said again now and then
+    this.poseT = 0;
   }
 
   /** In a round with at least the room open. */
@@ -71,10 +74,13 @@ export class NetPlay {
   // Lobby
   // ===========================================================================
 
-  openLobby(code = '') {
+  async openLobby(code = '') {
     this.g.hud.clearLayer();
     this.lobby.classList.remove('hidden');
     this.renderLobby(cleanCode(code));
+    // A tab left open for days is running old code: fetch the new one first,
+    // or friends on different builds talk past each other
+    if (!this.room && await isStale()) { reloadFresh(cleanCode(code)); return; }
     if (code && !this.room) this.join(code);
   }
 
@@ -82,7 +88,7 @@ export class NetPlay {
 
   connect() {
     this.error = '';
-    this.room = new Room({ look: cleanLook(this.g.camp.look) }, {
+    this.room = new Room({ look: cleanLook(this.g.camp.look), build: BUILD }, {
       open: () => this.renderLobby(),
       roster: (players) => this.onRoster(players),
       message: (from, msg) => this.onMessage(from, msg),
@@ -114,6 +120,8 @@ export class NetPlay {
 
   reset() {
     this.room = null;
+    this.buildChecked = false;
+    this.myPose = null;
     this.inRound = false;
     this.players = [];
     this.status.clear();
@@ -144,7 +152,8 @@ export class NetPlay {
     } else if (!room.me.id || !this.players.length) {
       body = `<h2>PLAY WITH FRIENDS</h2><p>Connecting…</p><button class="btn ghost" data-a="leave">CANCEL</button>`;
     } else {
-      const list = this.players.map((p) => `<div class="net-player"><i></i>${esc(cleanLook(p.look).name)}${p.host ? ' <small>HOST</small>' : ''}${p.id === room.me.id ? ' <small>YOU</small>' : ''}</div>`).join('');
+      const old = (p) => p.build && p.build !== BUILD;
+      const list = this.players.map((p) => `<div class="net-player"><i></i>${esc(cleanLook(p.look).name)}${p.host ? ' <small>HOST</small>' : ''}${p.id === room.me.id ? ' <small>YOU</small>' : ''}${old(p) ? ' <small class="stale">NEEDS A REFRESH</small>' : ''}</div>`).join('');
       body = `
         <h2>ROOM CODE</h2>
         <h1 class="gold room-code">${esc(room.code)}</h1>
@@ -182,6 +191,7 @@ export class NetPlay {
 
   onRoster(players) {
     this.players = players;
+    this.checkBuilds();
     const ids = new Set(players.map((p) => p.id));
     for (const id of [...this.status.keys()]) if (!ids.has(id)) { this.status.delete(id); this.scores.delete(id); }
     for (const p of players) if (!this.status.has(p.id)) this.status.set(p.id, this.inRound ? 'aim' : 'aim');
@@ -192,6 +202,23 @@ export class NetPlay {
     if (!this.lobby.classList.contains('hidden')) this.renderLobby();
     this.paint();
     this.judge();
+  }
+
+  /**
+   * Everyone must be on the same build. If someone is not, whoever is behind
+   * reloads into the new one (keeping the room code); the others are told.
+   */
+  async checkBuilds() {
+    const odd = this.players.filter((p) => p.build && p.build !== BUILD);
+    if (!odd.length || this.buildChecked) return;
+    this.buildChecked = true;
+    if (await isStale()) {
+      const code = this.room?.code;
+      if (!this.room?.isHost) { this.room?.leave(); reloadFresh(code); return; }
+      this.g.hud.callout('NEW VERSION: REOPEN THE GAME', 'bad small');
+    } else {
+      this.g.hud.callout(`${odd.map((p) => cleanLook(p.look).name).join(', ')} NEEDS A REFRESH`, 'bad small');
+    }
   }
 
   onMessage(from, msg) {
@@ -423,7 +450,11 @@ export class NetPlay {
   }
 
   /** I struck a pose by the fire. */
-  setPose(p) { if (this.active) this.room.send({ t: 'pose', p }); }
+  setPose(p) {
+    this.myPose = p;
+    this.poseT = 0;
+    if (this.active) this.room.send({ t: 'pose', p });
+  }
 
   /** A quick word to the room. */
   emote(e) {
@@ -487,7 +518,7 @@ export class NetPlay {
       v.set(x, 0, z).applyMatrix4(site.matrixWorld);
       return { id: p.id, x: v.x, y: this.g.world.heightAt(v.x, v.z), z: v.z, yaw: yaw + site.rotation.y, pose };
     }));
-    this.pill.classList.add('hidden');
+    this.paint(); // the pill stays: a 👏 for the photo
   }
 
   /** The pill under the score: who is in the room and what they are doing. */
@@ -537,6 +568,12 @@ export class NetPlay {
         if (this.watchIdle > 3 || g.state === 'result' || g.state === 'holed' || g.state === 'flight') this.watching = null;
       }
       if (this.emotesOpen > 0) { this.emotesOpen -= dt; if (this.emotesOpen <= 0) { this.emotesOpen = 0; this.paint(); } }
+      // By the fire, say my pose again now and then: one lost message (or
+      // one that arrived before they sat down) never leaves us out of step
+      if (g.state === 'summary' && this.myPose) {
+        this.poseT += dt;
+        if (this.poseT > 2) { this.poseT = 0; this.room.send({ t: 'pose', p: this.myPose }); }
+      }
     }
     if (!this.active || !this.room.isHost) return;
     if (this.waitT !== null) {
