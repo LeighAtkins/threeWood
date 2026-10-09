@@ -42,6 +42,9 @@ export const ARCHETYPES = {
   terraces:      { label: 'The Terraces',  blurb: 'Three shelves down the hill. Land on one.' },
   gorge:         { label: 'The Gorge',     blurb: 'A ravine cuts the fairway. Carry it or lay up.' },
   punchbowl:     { label: 'The Punchbowl', blurb: 'Hit the bowl and it feeds to the flag.' },
+  // Holes that play like something else entirely
+  bucket:        { label: 'The Bucket',    blurb: 'A cup as big as a paddling pool. Go on, ace it.' },
+  minigolf:      { label: 'Crazy Golf',    blurb: 'Putter only. Bank it off the walls, roll it over the hump.' },
 };
 
 /** Toys on the hole: something to aim at besides the flag (render/gimmicks.js). */
@@ -59,23 +62,27 @@ export const PAR_BANDS = { 3: [100, 165], 4: [255, 320], 5: [350, 400] };
  * signature hole in each third, and the island green at 17. Which world
  * each three-hole stretch is played in comes from the seed (biomes.js).
  */
+// (par 70) The opening is where players decide whether to stay, so no two
+// of the first holes play alike, and none is a plain drive down a fairway:
+// a giant cup to ace, crazy golf, a ski jump through rings, a half-pipe of
+// mushrooms, a cliff-top par 3, then the lake.
 export const ROUND_PLAN = [
-  { par: 4, archetypes: ['straight'], gimmick: 'bullseye' },
+  { par: 3, archetypes: ['bucket'] },
+  { par: 3, archetypes: ['minigolf'] },
   { par: 4, archetypes: ['skiJump'], gimmick: 'rings' },
-  { par: 3, archetypes: ['lookout'] },
   { par: 5, archetypes: ['halfpipe'], gimmick: 'boing' },
-  { par: 4, archetypes: ['bottleneck'] },
-  { par: 3, archetypes: ['punchbowl'] },
+  { par: 3, archetypes: ['lookout'] },
   { par: 4, archetypes: ['lakeside'], gimmick: 'rings' },
+  { par: 4, archetypes: ['doglegL', 'doglegR'], gimmick: 'bullseye' },
   { par: 5, archetypes: ['terraces'] },
-  { par: 4, archetypes: ['hogsback'], gimmick: 'bullseye' },
-  { par: 4, archetypes: ['doglegL', 'doglegR'], gimmick: 'boing' },
-  { par: 3, archetypes: ['potBunkers', 'overWater'], gimmick: 'rings' },
+  { par: 4, archetypes: ['hogsback'], gimmick: 'boing' },
+  { par: 3, archetypes: ['minigolf'] },
+  { par: 4, archetypes: ['bottleneck'], gimmick: 'rings' },
   { par: 5, archetypes: ['cape', 'lakeside'] },
   { par: 4, archetypes: ['gorge'] },
-  { par: 4, archetypes: ['waterApproach'], gimmick: 'bullseye' },
+  { par: 3, archetypes: ['potBunkers', 'overWater', 'punchbowl'], gimmick: 'bullseye' },
   { par: 5, archetypes: ['doubleDogleg'], gimmick: 'rings' },
-  { par: 4, archetypes: ['ascent'], gimmick: 'boing' },
+  { par: 4, archetypes: ['ascent', 'waterApproach'], gimmick: 'boing' },
   { par: 3, archetypes: ['islandGreen'] },
   { par: 4, archetypes: ['halfpipe', 'skiJump'], gimmick: 'rings' },
 ];
@@ -83,8 +90,8 @@ export const ROUND_PLAN = [
 /** Which course holes make up a round of the given length. */
 export function roundHoles(length) {
   if (length >= 18) return ROUND_PLAN.map((_, i) => i + 1);
-  if (length === 9) return [1, 3, 4, 7, 9, 11, 15, 17, 18];
-  return [1, 3, 17].slice(0, length);
+  if (length === 9) return [1, 2, 3, 5, 6, 9, 12, 17, 18];
+  return [1, 2, 17].slice(0, length);
 }
 
 // ---------------------------------------------------------------------------
@@ -104,6 +111,8 @@ function layoutHole(rng, plan) {
   if (archetype === 'lookout') totalLen = rng.range(135, 160);
   if (archetype === 'punchbowl') totalLen = rng.range(125, 150);
   if (archetype === 'ascent') totalLen = rng.range(255, 285);
+  if (archetype === 'bucket') totalLen = rng.range(110, 132);
+  const mini = archetype === 'minigolf';
 
   const tee = { x: 0, z: 0 };
   const at = (len, ang, from = tee) => ({ x: from.x + Math.cos(ang) * len, z: from.z + Math.sin(ang) * len });
@@ -111,7 +120,12 @@ function layoutHole(rng, plan) {
 
   let path;
   let dogleg = null;
-  if (archetype === 'doglegL' || archetype === 'doglegR' || archetype === 'cape') {
+  if (mini) {
+    // A lane that turns twice and comes back on itself: three putts, or two good ones
+    const s = rng.sign(), a = rng.range(16, 20), b = rng.range(11, 15), c = rng.range(14, 18);
+    const kink = rng.range(-3, 3);
+    path = [tee, { x: a, z: 0 }, { x: a + 10, z: s * b }, { x: a + 10 + c, z: s * (b + kink) }, { x: a + 18 + c, z: s * 2.5 }];
+  } else if (archetype === 'doglegL' || archetype === 'doglegR' || archetype === 'cape') {
     const side = archetype === 'doglegL' ? 1 : archetype === 'doglegR' ? -1 : rng.sign();
     const angle = rad(rng.range(26, 44)) * side;
     const l1 = totalLen * rng.range(0.56, 0.64);
@@ -140,7 +154,7 @@ function layoutHole(rng, plan) {
   const green = {
     x: greenPt.x,
     z: greenPt.z,
-    size: archetype === 'potBunkers' ? 11.5 : par === 3 ? rng.range(13, 15) : rng.range(14, 16.5),
+    size: archetype === 'potBunkers' ? 11.5 : archetype === 'bucket' ? 15 : par === 3 ? rng.range(13, 15) : rng.range(14, 16.5),
     angle: Math.atan2(greenPt.z - prev.z, greenPt.x - prev.x),
     elev: archetype === 'elevatedGreen' ? rng.range(1.8, 2.8) : 0,
     tiltAngle: rng.range(0, Math.PI * 2),
@@ -148,9 +162,16 @@ function layoutHole(rng, plan) {
     undulation: biome.greenUndulation * rng.range(0.8, 1.25) * tune.slope,
   };
 
+  if (mini) {
+    // The whole hole is one green: a lane 5 yards wide with banked walls
+    const cx = path.reduce((t, p) => t + p.x, 0) / path.length, cz = path.reduce((t, p) => t + p.z, 0) / path.length;
+    const reach = Math.max(...path.map((p) => Math.hypot(p.x - cx, p.z - cz)));
+    Object.assign(green, { x: cx, z: cz, size: (reach + 9) / 1.75, angle: 0, tilt: 0.004, undulation: 0, channel: { pts: path, w: 3.4, half: 2.5 } });
+  }
+
   const fairwayHalf = (par === 5 ? 12 : 13) * tune.fairway;
   // Where the short grass starts: par 3s only get an apron near the green
-  let fairwayStart = par === 3 ? totalLen - green.size * 2.4 : rng.range(28, 40);
+  let fairwayStart = mini ? totalLen + 99 : par === 3 ? totalLen - green.size * 2.4 : rng.range(28, 40);
 
   const bunkers = [];
   const water = [];
@@ -181,6 +202,8 @@ function layoutHole(rng, plan) {
     case 'terraces': shape = { kind: 'terraces', h: rng.range(9, 11), steps: 3 }; greenside(); break;
     case 'gorge': shape = { kind: 'gorge', h: rng.range(4, 5), at: rng.range(0.6, 0.66), w: rng.range(20, 24) }; greenside(); break; // gentle enough to roll out of
     case 'punchbowl': shape = { kind: 'punchbowl', h: rng.range(2.4, 3) }; break;
+    case 'bucket': shape = { kind: 'punchbowl', h: rng.range(2.6, 3.2) }; break;
+    case 'minigolf': shape = { kind: 'channel', hump: rng.range(0.35, 0.5), at: rng.range(0.42, 0.58) }; break;
     default: break;
   }
 
@@ -306,8 +329,10 @@ function layoutHole(rng, plan) {
   }
 
   // --- Pin: somewhere honest on the putting surface ---
+  // (the bucket's giant cup is dead centre; crazy golf's at the end of the lane)
   let pin = { x: green.x, z: green.z };
-  for (let i = 0; i < 30; i++) {
+  if (mini) pin = { ...pointAlongPath(path, totalLen - 2) };
+  for (let i = 0; i < (mini || archetype === 'bucket' ? 0 : 30); i++) {
     const a = rng.range(0, Math.PI * 2);
     const d = rng.range(tune.pinNear, tune.pinFar) * green.size;
     const c = { x: green.x + Math.cos(a) * d, z: green.z + Math.sin(a) * d };
@@ -358,6 +383,7 @@ function layoutHole(rng, plan) {
   if (fishing) move(fishing);
   green.angle += theta;
   green.tiltAngle += theta;
+  if (green.channel) green.channel = { ...green.channel, pts: pathPts };
 
   const windSpeed = Math.round(rng.range(biome.wind[0], biome.wind[1]) * tune.wind);
   const windAngle = rng.range(0, Math.PI * 2);
@@ -377,6 +403,7 @@ function layoutHole(rng, plan) {
     fairwayStart,
     shape,
     fishing,
+    cupR: archetype === 'bucket' ? 1.15 : null,
     gimmick: plan.gimmick ? buildGimmick(plan.gimmick, rng, { pathPts, totalLen, fairwayHalf, green, par, water, bunkers }) : null,
     bunkers,
     water,

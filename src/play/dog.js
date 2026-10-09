@@ -226,6 +226,8 @@ export class Dog {
     this.sniffAt = null;
     this.mood = null;
     this.dropStick();
+    this.anchor = null;
+    this.roamAt = null;
     this.asleep = !this.friend && round && round.index >= 1;
     const { tee, cup } = world;
     const d = Math.hypot(cup.x - tee.x, cup.z - tee.z) || 1;
@@ -301,6 +303,7 @@ export class Dog {
     const r = Math.max(46, Math.min(120, 380 / Math.max(1, dist)));
     if (Math.hypot(s.x - x, s.y + 20 - y) > r) return false;
     if (this.asleep) { this.befriend(); return true; }
+    if (this.stick.phase === 'tug') { this.stick.taps += 1; this.react('hop', 0.25); this.g.audio.tap(); return true; }
     this.react('hop', 1.1);
     this.hearts(3);
     this.g.audio.yip?.();
@@ -317,6 +320,13 @@ export class Dog {
   }
 
   // ---- The stick -----------------------------------------------------------------
+  //
+  // When it is quiet she brings a stick and drops it at your feet. Flick it
+  // (from the stick, the way you want it to go: a longer, quicker flick throws
+  // further) or just tap it for a gentle lob. She runs for where it will land
+  // and, if she gets there first, leaps and catches it: each catch in a row
+  // counts, and the further the catch the better. Now and then she will not
+  // let go: tap her to win the tug.
 
   /** Nothing happening at the ball for a while: she goes and finds a stick. */
   maybeStick(dt) {
@@ -326,7 +336,7 @@ export class Dog {
     this.idle += dt;
     // Waiting on a friend: sooner
     const waiting = g.net.active && g.net.status.get(g.net.myId) === 'ready';
-    if (this.idle < (waiting ? 3 : 9)) return;
+    if (this.idle < (waiting ? 3 : 8)) return;
     this.idle = 0;
     const cg = g.camper.group, a = (g.aimAngle ?? 0) + Math.PI + (Math.random() - 0.5) * 1.6;
     st.x = cg.position.x + Math.cos(a) * 9;
@@ -345,26 +355,75 @@ export class Dog {
     st.phase = 'none';
     st.mesh.visible = false;
     this.stickMark.style.display = 'none';
+    if (this.sayText && /TUG/.test(this.sayText)) this.say(null);
   }
 
-  tapStick(x, y) {
+  stickScreen() {
     const st = this.stick, g = this.g;
-    if (st.phase !== 'ground' || g.state !== 'aim') return false;
     const v = this._v.set(st.x, st.y + 0.2, st.z).project(g.camera);
-    const sx = (v.x * 0.5 + 0.5) * window.innerWidth, sy = (-v.y * 0.5 + 0.5) * window.innerHeight;
-    if (v.z > 1 || Math.hypot(sx - x, sy - y) > 60) return false;
-    // Throw it out ahead, a little to one side
-    const a = (g.aimAngle ?? 0) + (Math.random() - 0.5) * 0.9;
-    const sp = 9 + Math.random() * 3;
-    st.vx = Math.cos(a) * sp; st.vz = Math.sin(a) * sp; st.vy = 6.5;
-    st.y += 1.2;
+    if (v.z > 1) return null;
+    return { x: (v.x * 0.5 + 0.5) * window.innerWidth, y: (-v.y * 0.5 + 0.5) * window.innerHeight };
+  }
+
+  /** A finger down on the stick (so the drag throws it rather than turning the aim). */
+  grabStick(x, y) {
+    if (this.stick.phase !== 'ground' || this.g.state !== 'aim') return false;
+    const s = this.stickScreen();
+    return !!s && Math.hypot(s.x - x, s.y - y) < 70;
+  }
+
+  /** A tap on the stick: a gentle lob straight out. */
+  tapStick(x, y) {
+    if (!this.grabStick(x, y)) return false;
+    const a = (this.g.aimAngle ?? 0) + (Math.random() - 0.5) * 0.6;
+    this.throwStick(Math.cos(a), Math.sin(a), 7);
+    return true;
+  }
+
+  /** A flick from the stick: screen px dx, dy (up is away) over ms. */
+  flickStick(dx, dy, ms) {
+    const g = this.g, cam = g.camera;
+    cam.getWorldDirection(this._v);
+    const fl = Math.hypot(this._v.x, this._v.z) || 1, fx = this._v.x / fl, fz = this._v.z / fl;
+    // Screen up is away from the camera, screen right is the camera's right
+    let wx = fx * -dy + -fz * dx, wz = fz * -dy + fx * dx;
+    const wl = Math.hypot(wx, wz);
+    if (wl < 20) return this.tapStick(...Object.values(this.stickScreen() || { x: -999, y: -999 }));
+    wx /= wl; wz /= wl;
+    const pace = wl / Math.max(60, ms); // px per ms
+    this.throwStick(wx, wz, Math.max(4.5, Math.min(15, 4 + pace * 7)));
+    return true;
+  }
+
+  throwStick(dirX, dirZ, speed) {
+    const g = this.g, st = this.stick, { world } = g;
+    st.vx = dirX * speed; st.vz = dirZ * speed; st.vy = 7;
+    st.fromX = st.x; st.fromZ = st.z;
+    st.y = world.heightAt(st.x, st.z) + 1.0;
+    // Where it will come down, so she can run for it
+    const t = (st.vy + Math.sqrt(st.vy * st.vy + 2 * 9.8 * 1.0)) / 9.8;
+    st.landX = st.x + st.vx * t; st.landZ = st.z + st.vz * t;
     st.phase = 'flying';
+    st.t = 0;
     st.throws += 1;
     this.stickMark.style.display = 'none';
     g.audio.whoosh();
-    this.react('hop', 0.5);
     g.audio.yip?.();
-    return true;
+  }
+
+  /** She got there first: snatched out of the air. */
+  catchStick() {
+    const g = this.g, st = this.stick;
+    const dist = Math.hypot(st.x - st.fromX, st.z - st.fromZ);
+    st.streak = (st.streak || 0) + 1;
+    st.phase = 'back'; st.t = 0;
+    this.react('hop', 0.7);
+    this.leap = 0.45;
+    g.audio.pop?.(); g.audio.reward(Math.min(8, st.streak));
+    const best = dist > (g.camp.stats.bestCatch || 0);
+    if (best) { g.camp.stats.bestCatch = Math.round(dist); g.saveCamp(); }
+    g.hud.callout(`NICE CATCH${st.streak > 1 ? ` ×${st.streak}` : ''} · ${Math.round(dist)}m${best && dist > 8 ? ' · BEST' : ''}`, st.streak >= 3 || best ? 'gold small' : 'small');
+    if (st.streak % 3 === 0) g.earn('pets');
   }
 
   updateStick(dt) {
@@ -372,39 +431,89 @@ export class Dog {
     if (st.phase === 'none') return;
     st.t += dt;
     const yaw = this.group.rotation.y;
-    const mouth = () => st.mesh.position.set(this.pos.x + Math.sin(yaw) * 0.6, this.pos.y + 0.55, this.pos.z + Math.cos(yaw) * 0.6);
+    const mouth = () => st.mesh.position.set(this.pos.x + Math.sin(yaw) * 0.6, this.pos.y + 0.55 + (this.leap > 0 ? Math.sin((this.leap / 0.45) * Math.PI) * 0.6 : 0), this.pos.z + Math.cos(yaw) * 0.6);
     const near = (x, z, r) => Math.hypot(this.pos.x - x, this.pos.z - z) < r;
     st.mesh.visible = st.phase !== 'seek';
     if (st.phase === 'seek' && (near(st.x, st.z, 0.6) || st.t > 6)) { st.phase = 'bring'; st.t = 0; g.audio.pop?.(); }
     else if ((st.phase === 'bring' || st.phase === 'back') && (near(st.dropX, st.dropZ, 0.6) || st.t > 8)) {
-      st.phase = 'ground'; st.t = 0;
-      st.x = this.pos.x + Math.sin(yaw) * 0.6; st.z = this.pos.z + Math.cos(yaw) * 0.6;
-      st.y = world.heightAt(st.x, st.z) + 0.05;
-      g.audio.yip?.();
-      if (!g.camp.stats.sticks) { g.camp.stats.sticks = 1; g.saveCamp(); g.hud.callout(`${DOG_NAME.toUpperCase()} BROUGHT A STICK · TAP IT`, 'small'); }
+      // Every third time back, she will not let go without a tug
+      if (st.phase === 'back' && st.throws % 3 === 0 && !st.tugged) { st.phase = 'tug'; st.t = 0; st.taps = 0; st.tugged = true; this.say('TUG! TAP HER'); g.audio.yip?.(); }
+      else this.dropAtFeet();
+    } else if (st.phase === 'tug') {
+      if (st.taps >= 5) { g.hud.callout('YOU WIN THE TUG!', 'small'); this.hearts(3); this.dropAtFeet(); }
+      else if (st.t > 3.5) { g.hud.callout(`${DOG_NAME.toUpperCase()} WINS… AND GIVES IT BACK`, 'small'); this.dropAtFeet(); }
     } else if (st.phase === 'flying') {
       st.vy -= 9.8 * dt;
       st.x += st.vx * dt; st.y += st.vy * dt; st.z += st.vz * dt;
+      st.mesh.rotation.set(st.t * 9, st.t * 3, Math.PI / 2);
       const ground = Math.max(world.heightAt(st.x, st.z), world.waterLevelAt(st.x, st.z));
-      if (st.y <= ground + 0.05) { st.y = ground + 0.05; st.phase = 'chase'; st.t = 0; g.audio.bounce(3, 'rough'); }
-      st.mesh.rotation.y += dt * 9;
+      // Close enough to snatch it before it lands?
+      if (near(st.x, st.z, 1.15) && st.y - ground < 1.7 && st.t > 0.25) { this.catchStick(); }
+      else if (st.y <= ground + 0.05) {
+        st.y = ground + 0.05; st.phase = 'chase'; st.t = 0; g.audio.bounce(3, 'rough');
+        if (st.streak) g.hud.callout('MISSED IT · TRY A SHORTER ONE', 'small');
+        st.streak = 0;
+      }
     } else if (st.phase === 'chase' && (near(st.x, st.z, 0.7) || st.t > 6)) {
       st.phase = 'back'; st.t = 0; g.audio.pop?.();
-      if (st.throws % 3 === 0) g.earn('pets');
     }
-    if (st.phase === 'bring' || st.phase === 'back') { mouth(); st.mesh.rotation.set(0, yaw + Math.PI / 2, Math.PI / 2); }
-    else if (st.phase === 'ground' || st.phase === 'chase') { st.mesh.position.set(st.x, st.y, st.z); st.mesh.rotation.set(0, 0.6, Math.PI / 2); }
+    this.leap = Math.max(0, (this.leap || 0) - dt);
+    if (st.phase === 'bring' || st.phase === 'back' || st.phase === 'tug') {
+      mouth();
+      st.mesh.rotation.set(0, yaw + Math.PI / 2 + (st.phase === 'tug' ? Math.sin(st.t * 18) * 0.25 : 0), Math.PI / 2);
+    } else if (st.phase === 'ground' || st.phase === 'chase') { st.mesh.position.set(st.x, st.y, st.z); st.mesh.rotation.set(0, 0.6, Math.PI / 2); }
     else if (st.phase === 'flying') st.mesh.position.set(st.x, st.y, st.z);
     // A sparkle on it, to say "throw me"
     let shown = false;
     if (st.phase === 'ground' && g.state === 'aim') {
-      const v = this._v.set(st.x, st.y + 0.2, st.z).project(g.camera);
-      if (v.z < 1 && Math.abs(v.x) < 1.05 && Math.abs(v.y) < 1.05) {
+      const s = this.stickScreen();
+      if (s && s.x > -20 && s.x < window.innerWidth + 20 && s.y > -20 && s.y < window.innerHeight + 20) {
         shown = true;
-        this.stickMark.style.transform = `translate(${(v.x * 0.5 + 0.5) * window.innerWidth}px, ${(-v.y * 0.5 + 0.5) * window.innerHeight}px) translate(-50%, -50%)`;
+        this.stickMark.style.transform = `translate(${s.x}px, ${s.y}px) translate(-50%, -50%)`;
       }
     }
     this.stickMark.style.display = shown ? 'block' : 'none';
+  }
+
+  dropAtFeet() {
+    const g = this.g, st = this.stick, yaw = this.group.rotation.y;
+    st.phase = 'ground'; st.t = 0; st.tugged = st.tugged && st.throws % 3 === 0;
+    st.x = this.pos.x + Math.sin(yaw) * 0.6; st.z = this.pos.z + Math.cos(yaw) * 0.6;
+    st.y = g.world.heightAt(st.x, st.z) + 0.05;
+    if (/TUG/.test(this.sayText || '')) this.say(null);
+    g.audio.yip?.();
+    if (!g.camp.stats.sticks) { g.camp.stats.sticks = 1; g.saveCamp(); g.hud.callout(`${DOG_NAME.toUpperCase()} BROUGHT A STICK · FLICK IT`, 'small'); }
+  }
+
+  // ---- Wandering -----------------------------------------------------------------
+
+  /**
+   * Pottering about near a spot: trot somewhere a few metres away (beside the
+   * shot, never in its way or in front of the camera), sit or sniff or flop
+   * for a few seconds, then pick somewhere else.
+   */
+  roam(anchor, rMin = 2.5, rMax = 6) {
+    const g = this.g, { world } = g;
+    let r = this.roamAt;
+    const moved = !r || Math.hypot(r.ax - anchor.x, r.az - anchor.z) > 6;
+    const here = r && Math.hypot(this.pos.x - r.x, this.pos.z - r.z) < 0.45;
+    if (here && r.t === null) r.t = 2.5 + Math.random() * 4;
+    if (moved || (here && (r.t -= 1 / 60) <= 0)) {
+      const aim = g.aimAngle ?? 0;
+      for (let i = 0; i < 12; i++) {
+        // Off to either side of the line of play, ahead of the camera so she stays in view
+        const a = aim + (Math.random() < 0.5 ? 1 : -1) * (0.55 + Math.random() * 0.8);
+        const d = rMin + Math.random() * (rMax - rMin);
+        const x = anchor.x + Math.cos(a) * d, z = anchor.z + Math.sin(a) * d;
+        if (world.surfaceAt(x, z) === 'water') continue;
+        r = this.roamAt = { x, z, ax: anchor.x, az: anchor.z, t: null, pose: ['sit', 'sniff', 'sit', 'lie', 'sniff'][Math.floor(Math.random() * 5)] };
+        break;
+      }
+    }
+    if (!this.roamAt) return null;
+    r = this.roamAt;
+    const far = Math.hypot(this.pos.x - r.x, this.pos.z - r.z) > 25;
+    return { x: r.x, z: r.z, pose: r.pose, speed: far ? 9 : 2.4, near: 0.3 };
   }
 
   /** Where to be and what to do this frame, from the game's state. */
@@ -419,7 +528,9 @@ export class Dog {
     if (st.phase !== 'none' && s !== 'aim') this.dropStick();
     if (st.phase === 'seek') return { x: st.x, z: st.z, pose: 'run', speed: 8, near: 0.3 };
     if (st.phase === 'bring' || st.phase === 'back') return { x: st.dropX, z: st.dropZ, pose: 'run', speed: st.phase === 'back' ? 11 : 7, near: 0.4 };
-    if (st.phase === 'flying' || st.phase === 'chase') return { x: st.x, z: st.z, pose: 'run', speed: 12, near: 0.5 };
+    if (st.phase === 'flying') return { x: st.landX, z: st.landZ, pose: 'run', speed: 11, near: 0.3 };
+    if (st.phase === 'chase') return { x: st.x, z: st.z, pose: 'run', speed: 11, near: 0.5 };
+    if (st.phase === 'tug') return { x: this.pos.x, z: this.pos.z, pose: 'beg', face: { x: g.camera.position.x, z: g.camera.position.z } };
     if (st.phase === 'ground') return { x: st.dropX + 0.9, z: st.dropZ + 0.6, pose: 'beg', face: { x: st.x, z: st.z }, speed: 6 };
     if (this.fetching) {
       const f = this.fetching;
@@ -440,29 +551,19 @@ export class Dog {
       const r = s === 'cook' ? 1.3 : 1.2;
       return { x: v.x + Math.cos(a) * r, z: v.z + Math.sin(a) * r, pose: 'beg', face: { x: v.x, z: v.z }, speed: 8 };
     }
-    if (s === 'holed' || s === 'result') {
-      const a = g.time * 1.8;
-      return { x: world.cup.x + Math.cos(a) * 2.4, z: world.cup.z + Math.sin(a) * 2.4, pose: 'run', speed: 7, near: 0 };
-    }
+    if (s === 'holed' || s === 'result') return this.roam(world.cup, 2.5, 4.5);
     if (s === 'skip' && g.skip?.shore) {
       const sh = g.skip.shore;
       return { x: sh.x - sh.dx * 0.6 + sh.dz * 1.2, z: sh.z - sh.dz * 0.6 - sh.dx * 1.2, pose: 'sit', face: { x: sh.x + sh.dx * 8, z: sh.z + sh.dz * 8 } };
     }
-    if (s === 'flight') {
-      // Off after it
-      return { x: ball.x, z: ball.z, pose: 'run', speed: 13, near: 1.6 };
-    }
-    if (ball.surface === 'water' || g.waterLost) return null;
+    // While the ball flies she stays where she was: no chasing it across the screen
+    if (s === 'flight' || s === 'settle' || ball.surface === 'water' || g.waterLost) return this.anchor ? this.roam(this.anchor) : null;
     if (this.sniffAt && (s === 'aim' || s === 'swing' || s === 'settle')) {
       return { x: this.sniffAt.x - 0.5, z: this.sniffAt.z - 0.4, pose: 'sniff', face: this.sniffAt, speed: 9 };
     }
-    // Lining up: sit on the far side of the ball from the camper, a little
-    // behind it, where the aiming camera can see her
-    const a = g.aimAngle ?? 0;
-    const dx = Math.cos(a), dz = Math.sin(a);
-    const putt = g.putting;
-    const back = putt ? 1.4 : 1.1, side = putt ? 1.7 : 2.3;
-    return { x: ball.x - dx * back - dz * side, z: ball.z - dz * back + dx * side, pose: 'sit', face: { x: ball.x + dx * 6, z: ball.z + dz * 6 }, speed: 10 };
+    // Lining up: she potters about near the ball
+    this.anchor = { x: ball.x, z: ball.z };
+    return this.roam(this.anchor, g.putting ? 2 : 2.5, g.putting ? 4.5 : 6.5);
   }
 
   update(dt) {

@@ -21,8 +21,10 @@
 export const G = 9.81;
 export const BALL_R = 0.05;
 export const CUP_R = 0.22;
+const CUP_RADIUS = CUP_R;
 /** Fastest a dead-centre putt can be travelling and still drop. */
 export const CUP_CAPTURE_SPEED = 2.4;
+const CAPTURE = CUP_CAPTURE_SPEED;
 export const SIM_DT = 1 / 120;
 
 const DRAG = 0.0030;      // quadratic air drag
@@ -216,7 +218,7 @@ function stepAir(ball, world, env, dt, events) {
   // Flew straight into the cup
   if (world.cup && surface === 'green') {
     const d = Math.hypot(ball.x - world.cup.x, ball.z - world.cup.z);
-    if (d < CUP_R * 0.9 && speed < 30) {
+    if (d < (world.cup.r || CUP_R) * 0.9 && speed < 30) {
       holeOut(ball, world, events, true);
       return;
     }
@@ -317,6 +319,9 @@ function stepRoll(ball, world, dt, events) {
   if (cup) {
     const cx = cup.x - ball.x, cz = cup.z - ball.z;
     const d = Math.hypot(cx, cz);
+    // (most cups are regulation; the bucket hole's is enormous and forgiving)
+    const CUP_R = cup.r || CUP_RADIUS;
+    const CUP_CAPTURE_SPEED = CAPTURE * Math.sqrt(CUP_R / CUP_RADIUS);
     if (d < CUP_R) {
       if (!ball.cupLock) {
         if (speed < 0.05) { holeOut(ball, world, events, false); return; }

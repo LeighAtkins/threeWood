@@ -38,7 +38,7 @@ test('the cup takes a dead-weight putt and lips out a rocket', () => {
   assert.ok(CUP_CAPTURE_SPEED > 0 && run(5.6, CUP_R * 0.95).b.mode !== 'holed');
 });
 
-test('the routing is a par 72 that tours six worlds', async () => {
+test('the routing is a par 70 that tours six worlds', async () => {
   const { courseBiomes, biomeForHole, BIOMES } = await import('../src/course/biomes.js');
   for (const seed of ['A', 'B', 'DAILY-2026-10-05']) {
     const worlds = courseBiomes(seed);
@@ -49,7 +49,7 @@ test('the routing is a par 72 that tours six worlds', async () => {
     assert.equal(designHole(seed, 7).biome, worlds[2]);
   }
   assert.equal(ROUND_PLAN.length, 18);
-  assert.equal(ROUND_PLAN.reduce((s, h) => s + h.par, 0), 72);
+  assert.equal(ROUND_PLAN.reduce((s, h) => s + h.par, 0), 70);
   assert.equal(roundHoles(9).length, 9);
 });
 
@@ -65,8 +65,10 @@ test('every hole on several courses passes its fairness checks, deterministicall
 
 test('tee and pin sit on dry, sensible ground', () => {
   for (let n = 1; n <= 18; n++) {
-    const world = buildWorld(designHole('GROUND', n));
-    assert.equal(world.surfaceAt(world.tee.x, world.tee.z), 'tee');
+    const spec = designHole('GROUND', n);
+    const world = buildWorld(spec);
+    // (crazy golf has no tee box: you putt from the start of the lane)
+    assert.equal(world.surfaceAt(world.tee.x, world.tee.z), spec.archetype === 'minigolf' ? 'green' : 'tee');
     assert.equal(world.surfaceAt(world.cup.x, world.cup.z), 'green');
     const g = [0, 0];
     world.gradAt(world.cup.x, world.cup.z, g);

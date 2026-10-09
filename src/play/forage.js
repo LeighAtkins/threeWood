@@ -169,7 +169,9 @@ export class Forage {
   /** The ball has stopped: point her at the nearest mushroom. */
   atAim() {
     const near = this.near().sort((a, b) => Math.hypot(a.x - this.g.ball.x, a.z - this.g.ball.z) - Math.hypot(b.x - this.g.ball.x, b.z - this.g.ball.z));
-    if (this.g.dog && near[0] && !this.g.dog.fetching) this.g.dog.sniffAt = near[0];
+    // (only one close enough to be in the shot: no wandering off screen)
+    const it = near[0], b = this.g.ball;
+    if (this.g.dog && it && Math.hypot(it.x - b.x, it.z - b.z) < 18 && !this.g.dog.fetching) this.g.dog.sniffAt = it;
   }
 
   /** A tap at screen (x, y): on a mushroom in reach? */

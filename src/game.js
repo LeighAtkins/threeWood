@@ -32,6 +32,7 @@ import { CamperUi } from './ui/camperUi.js';
 import { loadCamp, bump } from './core/camp.js';
 import { NetPlay } from './net/netplay.js';
 import { buildNightGlow, updateNightGlow } from './render/nightGlow.js';
+import { buildDressing } from './render/dressing.js';
 import { Gimmicks } from './render/gimmicks.js';
 import { Dog } from './play/dog.js';
 import { Forage } from './play/forage.js';
@@ -249,6 +250,8 @@ export class Game {
     c.addEventListener('pointerdown', (e) => {
       this.audio.unlock();
       drag = { id: e.pointerId, x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, t: performance.now(), moved: 0 };
+      // A finger on Kuri's stick: this drag throws it, it does not turn the aim
+      if (this.state === 'aim' && !this.paused && this.dog.grabStick(e.clientX, e.clientY)) drag.stick = true;
       try { c.setPointerCapture?.(e.pointerId); } catch { /* synthetic pointer */ }
     });
     c.addEventListener('pointermove', (e) => {
@@ -257,6 +260,7 @@ export class Game {
       const prevY = drag.y;
       drag.moved = Math.max(drag.moved, Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy));
       drag.x = e.clientX; drag.y = e.clientY;
+      if (drag.stick) return;
       if (this.state === 'aim' && !this.paused) {
         // Putts need a jeweller's touch; full shots a quicker turn
         const base = (this.putting ? 0.0011 : 0.003) * (this.steady ? 0.6 : 1);
@@ -284,7 +288,9 @@ export class Game {
       // A quick flick up or down: fly to a friend's ball, or come back
       // (a vertical drag has no other meaning while aiming, so any speed counts)
       const flick = Math.abs(dy) > 70 && Math.abs(dy) > Math.abs(dx) * 1.6;
+      const stick = drag.stick;
       drag = null;
+      if (stick) { if (tap) this.dog.tapStick(e.clientX, e.clientY); else this.dog.flickStick(dx, dy, held); return; }
       if (this.state === 'skip') { if (!tap) this.skip.flick(dx, dy, held); return; }
       if (tap) this.tap(e.clientX, e.clientY);
       else if (flick && this.state !== 'flight') this.net.swipe(dy < 0);
@@ -440,6 +446,9 @@ export class Game {
     if (this.nightGlow) { this.scene.remove(this.nightGlow); disposeGroup(this.nightGlow); }
     this.nightGlow = buildNightGlow(this.world);
     this.scene.add(this.nightGlow);
+    if (this.dressing) { this.scene.remove(this.dressing); disposeGroup(this.dressing); }
+    this.dressing = buildDressing(this.world);
+    this.scene.add(this.dressing);
     this.gimmicks?.load(this.world);
     this.sky.setHole(this.world);
     this.rig.setWorld(this.world, this.scenery.placed);
@@ -472,7 +481,8 @@ export class Game {
     this.level = playerLevel(round.index, round.holes.length, round.heat || 0);
     this.assists = assistsFor(this.level);
     const seenOfPar = round.scores.filter((h) => h.par === spec.par).length;
-    this.challenge = challengeFor(spec.par, seenOfPar);
+    const seenOfKind = round.holes.slice(0, round.index).filter((n) => ROUND_PLAN[n - 1].archetypes.includes(spec.archetype)).length;
+    this.challenge = challengeFor(spec.par, seenOfPar, spec.archetype, seenOfKind);
     this.holeLog = newHoleLog(spec.par);
     this.hud.setChallenge(this.challenge.text, null);
     this.hud.showIntro(this.introCard());

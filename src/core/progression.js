@@ -116,7 +116,11 @@ const C = {
   clean:     { text: 'No rough, sand or water', points: 400, test: (h) => !h.dirty && h.holed },
   par:       { text: 'Par or better', points: 300, test: (h) => h.holed && h.strokes <= h.par },
   birdie:    { text: 'Birdie', points: 700, test: (h) => h.holed && h.strokes < h.par },
+  inTwoShots: { text: 'Hole it in 2 shots', points: 500, test: (h) => h.holed && h.strokes <= 2 },
 };
+
+// Holes that play like something else ask for something else
+const SPECIAL = { bucket: ['inTwoShots'], minigolf: ['par', 'inTwoShots'] };
 
 // What is asked of each hole in turn, by par: early entries are the gentle
 // ones, and each list is walked as the round goes on.
@@ -127,9 +131,9 @@ const LADDER = {
 };
 
 /** The challenge for the hole at `index` in the round. `seen` counts earlier holes of that par. */
-export function challengeFor(par, seenOfPar) {
-  const ladder = LADDER[par] || LADDER[4];
-  const id = ladder[Math.min(seenOfPar, ladder.length - 1)];
+export function challengeFor(par, seenOfPar, archetype = null, seenOfKind = 0) {
+  const ladder = SPECIAL[archetype] || LADDER[par] || LADDER[4];
+  const id = ladder[Math.min(SPECIAL[archetype] ? seenOfKind : seenOfPar, ladder.length - 1)];
   return { id, ...C[id] };
 }
 

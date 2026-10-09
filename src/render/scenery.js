@@ -108,9 +108,10 @@ function buildFlag(world) {
     mesh.renderOrder = order;
     return mesh;
   };
-  const wall = decal(new THREE.CircleGeometry(CUP_R, 28), 0x7a6548, 1);
-  const floor = decal(new THREE.CircleGeometry(CUP_R * 0.86, 28), 0x0c0f0b, 1.1);
-  const rim = decal(new THREE.RingGeometry(CUP_R * 0.97, CUP_R * 1.15, 32), 0xffffff, 1.2);
+  const r = cup.r || CUP_R; // the bucket hole's cup is a paddling pool
+  const wall = decal(new THREE.CircleGeometry(r, 40), 0x7a6548, 1);
+  const floor = decal(new THREE.CircleGeometry(r * 0.86, 40), 0x0c0f0b, 1.1);
+  const rim = decal(new THREE.RingGeometry(r * 0.97, r * (r > CUP_R ? 1.08 : 1.15), 48), 0xffffff, 1.2);
   lie.add(wall, floor, rim);
   group.add(lie);
 

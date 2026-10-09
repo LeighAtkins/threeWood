@@ -98,9 +98,18 @@ export function buildWorld(spec) {
   });
   const bunkers = spec.bunkers.map((b) => ({ ...b }));
 
+  // Crazy golf: banked walls either side of the lane, and a hump to roll over
+  const channel = green.channel;
+  const lane = (x, z) => {
+    const info = pathInfo(channel.pts, x, z);
+    const wall = 0.6 * smoothstep(channel.half, channel.half + 1.3, info.dist);
+    const u = (info.along - shape.at * totalLen) / 3.2;
+    return wall + shape.hump * Math.exp(-u * u) * (1 - smoothstep(channel.half * 0.6, channel.half, info.dist));
+  };
   const greenSurface = (x, z) =>
     greenY + tiltX * (x - green.x) + tiltZ * (z - green.z) +
-    green.undulation * noise(x * 0.055 + 200, z * 0.055 + 200);
+    green.undulation * noise(x * 0.055 + 200, z * 0.055 + 200) +
+    (channel ? lane(x, z) : 0);
 
   /** Height with everything except bunkers (bunker floors reference this). */
   const baseHeight = (x, z) => {
@@ -122,7 +131,7 @@ export function buildWorld(spec) {
     const teeD = Math.hypot(x - spec.tee.x, z - spec.tee.z);
     // A cliff-top tee is a proper platform, not a pimple
     const teeOut = shape?.kind === 'drop' ? 5 : 2.2;
-    if (teeD < TEE_RADIUS * teeOut) h = lerp(teeY, h, smoothstep(TEE_RADIUS, TEE_RADIUS * teeOut, teeD));
+    if (!green.channel && teeD < TEE_RADIUS * teeOut) h = lerp(teeY, h, smoothstep(TEE_RADIUS, TEE_RADIUS * teeOut, teeD));
 
     const gd = greenDistance(green, x, z);
     if (gd < FRINGE_EDGE + greenBlend) {
@@ -250,7 +259,7 @@ export function buildWorld(spec) {
 
   // Shrink a wide dip that the coarse grid cannot represent: make sure the
   // tee and the pin sit on the surface the grid actually has.
-  const cup = { x: spec.pin.x, z: spec.pin.z, y: heightAt(spec.pin.x, spec.pin.z) };
+  const cup = { x: spec.pin.x, z: spec.pin.z, y: heightAt(spec.pin.x, spec.pin.z), r: spec.cupR || undefined };
   const tee = { x: spec.tee.x, z: spec.tee.z, y: heightAt(spec.tee.x, spec.tee.z) };
 
   // Tree colliders: three shapes, which every kind of tree in props.js is built to fit.
