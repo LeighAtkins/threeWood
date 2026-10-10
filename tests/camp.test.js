@@ -26,3 +26,14 @@ test('camp: the dog and the new outfits survive a reload', () => {
   assert.deepEqual(bump(camp, 'nabe').map((o) => o.id), ['hanten']);
   assert.deepEqual(bump(camp, 'pets', 15).map((o) => o.id), ['walker']);
 });
+
+test('seeds: only letters, digits and dashes get in', async () => {
+  const { cleanSeed, generateSeed } = await import('../src/core/rng.js');
+  const fresh = generateSeed();
+  assert.equal(cleanSeed(fresh), fresh);
+  assert.equal(cleanSeed('DAILY-2026-10-09'), 'DAILY-2026-10-09');
+  assert.equal(cleanSeed('<img src=x onerror=alert(1)>'), null);
+  assert.equal(cleanSeed('A"B'), null);
+  assert.equal(cleanSeed({ toString: () => 'X' }), null);
+  assert.equal(cleanSeed('A'.repeat(40)), null);
+});

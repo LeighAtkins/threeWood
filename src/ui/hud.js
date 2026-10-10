@@ -397,7 +397,7 @@ export class Hud {
           <button class="btn ghost" data-a="daily">DAILY${daily ? ` · ${vsPar(daily.score)}` : ''}</button>
           <button class="btn ghost" data-a="9">QUICK 9</button>
         </div>
-        <div class="title-foot">${best ? `BEST ROUND ${vsPar(best.score)} · ★ ${best.points.toLocaleString()}<br>` : ''}COURSE ${seed}${sky ? `<br>${sky}` : ''}</div>
+        <div class="title-foot">${best ? `BEST ROUND ${vsPar(best.score)} · ★ ${best.points.toLocaleString()}<br>` : ''}COURSE ${esc(seed)}${sky ? `<br>${sky}` : ''}</div>
         <button class="music-toggle" data-a="music">${musicLabel(music)}</button>
         <button class="music-toggle" data-a="friends">PLAY WITH FRIENDS</button>
         <button class="music-toggle" data-a="camper">MY CAMPER</button>
@@ -463,7 +463,7 @@ export class Hud {
         ${outfits.map((name) => `<div class="new-fit">NEW OUTFIT · ${name.toUpperCase()}</div>`).join('')}
         <div class="btn-row"><button class="btn" data-a="camp">SIT BY THE FIRE</button>${onNabe ? '<button class="btn hotpot" data-a="nabe">HOT POT</button>' : ''}</div>
         <button class="btn ghost" data-a="again">NEW COURSE</button>
-        <button class="btn ghost" data-a="share">CHALLENGE A FRIEND · ${seed}</button>
+        <button class="btn ghost" data-a="share">CHALLENGE A FRIEND · ${esc(seed)}</button>
       </div>`);
     node.querySelector('[data-a="camp"]').addEventListener('click', onCamp);
     node.querySelector('[data-a="nabe"]')?.addEventListener('click', onNabe);

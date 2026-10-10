@@ -52,11 +52,21 @@ export function createGameRng(seedString) {
   };
 }
 
+/**
+ * A seed is letters, digits and dashes ("K7X2-9QPD", "DAILY-2026-10-09"),
+ * nothing else. Seeds arrive from links, from saves and from other players,
+ * and are shown on screen, so anything else is refused (returns null).
+ */
+export function cleanSeed(s) {
+  if (typeof s !== 'string') return null;
+  const t = s.trim();
+  return /^[A-Za-z0-9-]{1,32}$/.test(t) ? t : null;
+}
+
 /** Read ?seed= from the URL, or null. */
 export function getSeedFromUrl() {
   if (typeof window === 'undefined') return null;
-  const s = new URLSearchParams(window.location.search).get('seed');
-  return s && s.trim() ? s.trim() : null;
+  return cleanSeed(new URLSearchParams(window.location.search).get('seed'));
 }
 
 /** Generate a human-shareable seed like "K7X2-9QPD" (unambiguous alphabet). */

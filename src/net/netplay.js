@@ -19,7 +19,7 @@
 import { Room, cleanCode } from './room.js';
 import { Others } from '../render/others.js';
 import { cleanLook } from '../core/camp.js';
-import { generateSeed } from '../core/rng.js';
+import { generateSeed, cleanSeed } from '../core/rng.js';
 import { BUILD, isStale, reloadFresh } from './fresh.js';
 
 const WAIT_LIMIT = 30;  // seconds the ready players wait for the rest
@@ -225,7 +225,8 @@ export class NetPlay {
     const g = this.g;
     switch (msg.t) {
       case 'start':
-        if (from === 'host' && !this.room.isHost) this.begin(String(msg.seed).slice(0, 40), msg.length === 9 ? 9 : 18);
+        // (a seed from another phone is only ever letters, digits and dashes)
+        if (from === 'host' && !this.room.isHost && cleanSeed(msg.seed)) this.begin(cleanSeed(msg.seed), msg.length === 9 ? 9 : 18);
         break;
       case 'at':
         this.status.set(from, 'aim');

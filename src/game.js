@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { createGameRng, getSeedFromUrl, generateSeed } from './core/rng.js';
+import { createGameRng, getSeedFromUrl, generateSeed, cleanSeed } from './core/rng.js';
 import {
   createBall, copyBall, placeBall, launchBall, puttBall, stepBall, SIM_DT, BALL_R,
 } from './core/ballSim.js';
@@ -141,7 +141,7 @@ export class Game {
     this.hints = { swing: 0, putt: 0, spin: 0, fish: 0, cook: 0, ...(store.get(HINT_KEY) || {}) };
 
     this.seedPinned = !!getSeedFromUrl();
-    this.seed = getSeedFromUrl() || store.get(SAVE_KEY)?.seed || generateSeed();
+    this.seed = getSeedFromUrl() || cleanSeed(store.get(SAVE_KEY)?.seed) || generateSeed();
     this.round = null;
 
     this.resize();
@@ -338,7 +338,7 @@ export class Game {
     this.loadWorld(designHole(this.seed, 1));
     this.ballMesh.visible = this.blob.visible = false;
     const saved = store.get(SAVE_KEY);
-    const usable = saved && !saved.net && saved.index < saved.holes.length;
+    const usable = saved && !saved.net && cleanSeed(saved.seed) && saved.index < saved.holes.length;
     this.hud.showTitle({
       saved: usable ? { hole: saved.index + 1, total: saved.scores.reduce((s, h) => s + h.strokes - h.par, 0) - 2 * (saved.gold || 0) } : null,
       best: store.get(BEST_KEY),
@@ -358,7 +358,7 @@ export class Game {
     if (choice === 'camper') { this.openCreator(); return; }
     if (choice === 'friends') { this.net.openLobby(); return; }
     const saved = store.get(SAVE_KEY);
-    if (choice === 'continue' && saved) {
+    if (choice === 'continue' && saved && cleanSeed(saved.seed)) {
       this.seed = saved.seed;
       this.round = saved;
     } else {
