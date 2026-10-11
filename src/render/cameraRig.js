@@ -93,9 +93,13 @@ export class CameraRig {
     this.mode = 'putt';
     this.stiffness = 7;
     const d = Math.min(distance, 28);
-    const back = 2.6 + d * 0.2;
-    const up = 1.5 + d * 0.17 + (this.portrait ? 0.4 : 0);
-    this.wantPos.set(ball.x - dirX * back, ball.y + up, ball.z - dirZ * back);
+    const back = 3.0 + d * 0.2;
+    const up = 1.2 + d * 0.15 + (this.portrait ? 0.35 : 0);
+    // A little off to the side away from the golfer (who stands on the left
+    // of the line), so they share the frame with the ball instead of
+    // blocking it from the left edge
+    const off = 0.55;
+    this.wantPos.set(ball.x - dirX * back - dirZ * off, ball.y + up, ball.z - dirZ * back + dirX * off);
     const ahead = Math.max(1.5, d * 0.62);
     this.wantLook.set(ball.x + dirX * ahead, ball.y + lift, ball.z + dirZ * ahead);
   }
@@ -129,6 +133,7 @@ export class CameraRig {
   landing(ball, plan, fromX, fromZ) {
     if (this.mode !== 'landing') {
       this.mode = 'landing';
+      this.lookLift = 0.25;
       let dx = plan.landX - fromX, dz = plan.landZ - fromZ;
       const len = Math.hypot(dx, dz) || 1;
       dx /= len; dz /= len;
@@ -153,7 +158,12 @@ export class CameraRig {
     }
     // Tight on the ball in the air, a little looser once it is running
     this.stiffness = ball.mode === 'air' ? 14 : 6;
-    this.wantLook.set(ball.x, ball.y + 0.25, ball.z);
+    // Once it is down, frame it a little below centre: the callout ("FAIRWAY!")
+    // sits a third of the way down the screen and must not cover the ball
+    const dist = Math.hypot(this.pos.x - ball.x, this.pos.z - ball.z);
+    const lift = ball.mode === 'air' ? 0.25 : 0.25 + dist * 0.17;
+    this.lookLift = (this.lookLift ?? 0.25) + (lift - (this.lookLift ?? 0.25)) * 0.08;
+    this.wantLook.set(ball.x, ball.y + this.lookLift, ball.z);
     // A long run-out: truck along behind it rather than watch it shrink
     if (ball.mode !== 'air') {
       const dx = this.pos.x - ball.x, dz = this.pos.z - ball.z;
