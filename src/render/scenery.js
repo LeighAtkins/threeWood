@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { createGameRng } from '../core/rng.js';
 import { CUP_R } from '../core/ballSim.js';
-import { pathInfo, pointAlongPath } from '../course/shapes.js';
+import { pathInfo, pointAlongPath, blobRadius } from '../course/shapes.js';
 import { buildProps } from './props.js';
 
 /**
@@ -28,6 +28,7 @@ function buildWater(world) {
   for (const p of world.ponds) {
     const material = new THREE.ShaderMaterial({
       transparent: true,
+      side: THREE.DoubleSide,
       fog: true,
       uniforms: THREE.UniformsUtils.merge([
         THREE.UniformsLib.fog,
@@ -77,7 +78,19 @@ function buildWater(world) {
         }`,
     });
     Object.assign(material.uniforms, waterUniforms);
-    const mesh = new THREE.Mesh(new THREE.CircleGeometry(p.r * 1.65, 36).rotateX(-Math.PI / 2), material);
+    // The pond's own outline, a little past its shore (the banks rise over
+    // the edge): a plain circle big enough for the wobble spilled into any
+    // low ground beyond the bank as a detached crescent of water
+    const N = 64, pts = [new THREE.Vector3(0, 0, 0)];
+    for (let i = 0; i <= N; i++) {
+      const a = (i / N) * Math.PI * 2, r = blobRadius(p, a) * 1.2;
+      pts.push(new THREE.Vector3(Math.cos(a) * r, 0, Math.sin(a) * r));
+    }
+    const shape = new THREE.BufferGeometry().setFromPoints(pts);
+    const idx = [];
+    for (let i = 1; i <= N; i++) idx.push(0, i + 1, i);
+    shape.setIndex(idx);
+    const mesh = new THREE.Mesh(shape, material);
     mesh.position.set(p.x, p.level, p.z);
     group.add(mesh);
   }
