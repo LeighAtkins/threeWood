@@ -1368,6 +1368,8 @@ export class Game {
       // rather than sweep through the golfer's head into the chase
       this.rig.watch(ball, 0.05);
       this.rig.stiffness = 3;
+    } else if (shot.chase && Math.hypot(plan.landX - shot.fromX, plan.landZ - shot.fromZ) < 85 && ball.mode === 'air') {
+      this.rig.approach(ball, plan);
     } else if (shot.chase) {
       if (ball.time > plan.landTime - 1.05 || ball.mode !== 'air') {
         this.rig.landing(ball, plan, shot.fromX, shot.fromZ);

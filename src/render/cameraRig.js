@@ -114,13 +114,22 @@ export class CameraRig {
     // Ease in from the address view, then stay tight on the ball
     this.stiffness = Math.min(9, 2.5 + this.chaseT * 9);
     const vh = Math.hypot(ball.vx, ball.vz) || 1;
-    const dx = ball.vx / vh, dz = ball.vz / vh;
+    // Direction of travel, smoothed: a ball rising almost straight up (a
+    // wedge) has little sideways speed, and the camera must not spin with it
+    const ndx = ball.vx / vh, ndz = ball.vz / vh;
+    if (this.chaseT < 0.05 || !this.chaseDir) this.chaseDir = { x: ndx, z: ndz };
+    else { this.chaseDir.x += (ndx - this.chaseDir.x) * 0.1; this.chaseDir.z += (ndz - this.chaseDir.z) * 0.1; }
+    const dl = Math.hypot(this.chaseDir.x, this.chaseDir.z) || 1;
+    const dx = this.chaseDir.x / dl, dz = this.chaseDir.z / dl;
     const height = Math.max(0, ball.y - this.ground(ball.x, ball.z));
-    const back = 7 + height * 0.3;
+    // A steep flight: pull back and look down the line rather than up at the
+    // ball against the sky, so the ground and the target stay in frame
+    const steep = Math.min(1, Math.max(0, (ball.vy / vh - 0.5) / 1.5));
+    const back = 7 + height * (0.3 + 0.5 * steep);
     // (lifted clear for the first second, so it never sweeps through the golfer)
     const clear = 2.6 * Math.max(0, 1 - this.chaseT / 1.1);
-    this.wantPos.set(ball.x - dx * back, ball.y + 2.2 + height * 0.1 + clear, ball.z - dz * back);
-    this.wantLook.set(ball.x + dx * 6, ball.y - height * 0.15, ball.z + dz * 6);
+    this.wantPos.set(ball.x - dx * back, ball.y + 2.2 + height * (0.1 + 0.25 * steep) + clear, ball.z - dz * back);
+    this.wantLook.set(ball.x + dx * (6 + 10 * steep), ball.y - height * (0.15 + 0.45 * steep), ball.z + dz * (6 + 10 * steep));
   }
 
   /**
@@ -138,10 +147,15 @@ export class CameraRig {
       const len = Math.hypot(dx, dz) || 1;
       dx /= len; dz /= len;
       const roll = Math.hypot(plan.restX - plan.landX, plan.restZ - plan.landZ);
-      const ahead = Math.max(6, Math.min(13, 5 + roll * 0.55));
+      // A short shot (an approach, a pitch) is watched from behind and above,
+      // looking at the target: the reverse angle would show only sky behind
+      // a ball dropping in steeply. Longer shots keep the reverse angle.
+      const short = len < 85;
+      const ahead = short ? -Math.min(16, 6 + len * 0.12) : Math.max(6, Math.min(13, 5 + roll * 0.55));
       const ly = this.ground(plan.landX, plan.landZ) + 0.6;
       let best = null;
-      for (const [side, up] of [[3.6, 1.7], [-3.6, 1.7], [5.5, 4.5], [-5.5, 4.5], [0, 9]]) {
+      const spots = short ? [[2.2, 5.5], [-2.2, 5.5], [0, 8]] : [[3.6, 1.7], [-3.6, 1.7], [5.5, 4.5], [-5.5, 4.5], [0, 9]];
+      for (const [side, up] of spots) {
         const px = plan.landX + dx * ahead - dz * side;
         const pz = plan.landZ + dz * ahead + dx * side;
         const py = this.ground(px, pz) + up;
@@ -163,7 +177,11 @@ export class CameraRig {
     const dist = Math.hypot(this.pos.x - ball.x, this.pos.z - ball.z);
     const lift = ball.mode === 'air' ? 0.25 : 0.25 + dist * 0.17;
     this.lookLift = (this.lookLift ?? 0.25) + (lift - (this.lookLift ?? 0.25)) * 0.08;
-    this.wantLook.set(ball.x, ball.y + this.lookLift, ball.z);
+    // A ball still high above its landing spot: look between the two, so the
+    // ground it is falling onto stays in frame instead of an empty sky
+    const ly = this.ground(plan.landX, plan.landZ);
+    const up = ball.mode === 'air' ? Math.min(1, Math.max(0, (ball.y - ly - 3) / 10)) * 0.6 : 0;
+    this.wantLook.set(ball.x + (plan.landX - ball.x) * up, ball.y + this.lookLift + (ly - ball.y) * up, ball.z + (plan.landZ - ball.z) * up);
     // A long run-out: truck along behind it rather than watch it shrink
     if (ball.mode !== 'air') {
       const dx = this.pos.x - ball.x, dz = this.pos.z - ball.z;
@@ -173,6 +191,24 @@ export class CameraRig {
         this.wantPos.set(x, this.ground(x, z) + 1.4, z);
       }
     }
+  }
+
+  /**
+   * A short shot (a pitch, an approach): stay behind the golfer, rise a
+   * little, and look between the ball and where it will land, so the green
+   * is in frame the whole way and the ball drops into it. (Chasing a wedge
+   * up into the sky showed nothing but sky and backdrop.)
+   */
+  approach(ball, plan) {
+    if (this.mode !== 'approach') {
+      this.mode = 'approach';
+      this.approachFrom = this.pos.clone();
+    }
+    this.stiffness = 2.2;
+    const f = this.approachFrom;
+    this.wantPos.set(f.x, f.y + 1.2, f.z);
+    const ly = this.ground(plan.landX, plan.landZ);
+    this.wantLook.set((ball.x + plan.landX) / 2, Math.min(ball.y, (ball.y + ly) / 2 + 1), (ball.z + plan.landZ) / 2);
   }
 
   /** Hold position, keep the ball in frame. */
