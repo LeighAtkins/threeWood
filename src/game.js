@@ -775,8 +775,10 @@ export class Game {
       if (this.follow) { pose = 'address'; twist = 1; }
     } else if (s === 'holed' || s === 'result') {
       if (!this.cheerSpot) {
-        const a = (this.celebrateAngle || 0) + 0.75;
-        const x = world.cup.x + Math.cos(a) * 2.1, z = world.cup.z + Math.sin(a) * 2.1;
+        // Beyond the cup from where the camera starts, a step to the side: the
+        // flag, the cup and the camper share the frame and she never blocks them
+        const a = (this.celebrateAngle || 0) + Math.PI + 0.42;
+        const x = world.cup.x + Math.cos(a) * 2.2, z = world.cup.z + Math.sin(a) * 2.2;
         this.cheerSpot = { x, z };
         g.position.set(x, world.heightAt(x, z), z);
         g.scale.setScalar(1.9);
@@ -2158,8 +2160,9 @@ export class Game {
         if (this.stateTime > this.settleFor) this.afterSettle();
         break;
       case 'holed':
-        this.celebrateAngle += dt * 0.5;
-        this.rig.orbit(world.cup.x, world.cup.y, world.cup.z, 5.2, 2.3, this.celebrateAngle);
+        // A gentle drift, not a full orbit: the scene stays composed
+        this.celebrateAngle += dt * 0.12;
+        this.rig.orbit(world.cup.x, world.cup.y + 1.15, world.cup.z, 5.0, 0.9, this.celebrateAngle);
         if (!this.announced && this.stateTime > 0.45) {
           this.announced = true;
           const d = this.strokes - world.spec.par;
@@ -2169,7 +2172,7 @@ export class Game {
         if (this.stateTime > 2.6) this.finishHole();
         break;
       case 'result':
-        this.celebrateAngle += dt * 0.25;
+        this.celebrateAngle += dt * 0.08;
         this.rig.orbit(world.cup.x, world.cup.y, world.cup.z, 9, 4, this.celebrateAngle);
         this.hud.setAutoProgress(this.stateTime / 9);
         if (this.stateTime > 9 && !this.net.active) this.nextHole?.();

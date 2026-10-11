@@ -569,7 +569,12 @@ export class Dog {
       const r = s === 'cook' ? 1.3 : 2.1;
       return { x: v.x + Math.cos(a) * r, z: v.z + Math.sin(a) * r, pose: 'beg', face: { x: v.x, z: v.z }, speed: 8 };
     }
-    if (s === 'holed' || s === 'result') return this.roam(world.cup, 2.5, 4.5);
+    if (s === 'holed' || s === 'result') {
+      // Bounding round by the camper, on the far side of the cup from the camera
+      const cam = g.camera.position, c = world.cup;
+      const a = Math.atan2(c.z - cam.z, c.x - cam.x) - 0.5;
+      return { x: c.x + Math.cos(a) * 2.6, z: c.z + Math.sin(a) * 2.6, pose: 'hop', face: { x: cam.x, z: cam.z }, speed: 6 };
+    }
     if (s === 'skip' && g.skip?.shore) {
       const sh = g.skip.shore;
       return { x: sh.x - sh.dx * 0.6 + sh.dz * 1.2, z: sh.z - sh.dz * 0.6 - sh.dx * 1.2, pose: 'sit', face: { x: sh.x + sh.dx * 8, z: sh.z + sh.dz * 8 } };
