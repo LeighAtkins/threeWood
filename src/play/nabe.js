@@ -122,11 +122,19 @@ export class Nabe {
       g.add(b);
       this.bubbles.push(b);
     }
+    // Steam: soft round wisps (sprites with a feathered edge), each fading
+    // as it rises, rather than solid balls
     this.steam = [];
-    const steamMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.35, depthWrite: false });
-    for (let i = 0; i < 6; i++) {
-      const s = new THREE.Mesh(new THREE.SphereGeometry(0.07, 7, 5), steamMat);
-      s.userData.t = i / 6;
+    const px = new Uint8Array(32 * 32 * 4);
+    for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
+      const d = Math.hypot(x - 15.5, y - 15.5) / 15.5;
+      px.set([255, 255, 255, Math.round(Math.max(0, 1 - d) ** 1.8 * 255)], (y * 32 + x) * 4);
+    }
+    const wisp = new THREE.DataTexture(px, 32, 32, THREE.RGBAFormat);
+    wisp.needsUpdate = true;
+    for (let i = 0; i < 7; i++) {
+      const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: wisp, transparent: true, depthWrite: false, opacity: 0 }));
+      s.userData.t = i / 7;
       g.add(s);
       this.steam.push(s);
     }
@@ -215,7 +223,7 @@ export class Nabe {
 
   pieceMesh(kind) {
     let m;
-    if (MUSH[kind]) { m = mushroomMesh(kind); m.scale.setScalar(0.42); return m; }
+    if (MUSH[kind]) { m = mushroomMesh(kind); m.scale.setScalar(0.3); return m; } // bite-sized in the pot
     if (kind === 'tofu') {
       m = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.05, 0.09), toon(0xfbf6ea));
     } else if (kind === 'negi') {
@@ -321,8 +329,10 @@ export class Nabe {
     this.steam.forEach((s, i) => {
       const u = s.userData;
       u.t = (u.t + dt * (0.3 + boil * 0.5)) % 1;
-      s.position.set(Math.sin(i * 2.1 + t) * 0.1, 0.3 + u.t * 0.9, Math.cos(i * 1.3) * 0.08);
-      s.scale.setScalar((0.6 + u.t * 1.6) * (0.3 + boil));
+      s.position.set(Math.sin(i * 2.1 + t * 0.7) * (0.06 + u.t * 0.12), 0.28 + u.t * 0.85, Math.cos(i * 1.3 + t * 0.5) * 0.08);
+      s.scale.setScalar((0.12 + u.t * 0.38) * (0.6 + boil * 0.6));
+      // In softly, out slowly, thicker the hotter it gets
+      s.material.opacity = Math.sin(u.t * Math.PI) * (0.18 + boil * 0.3);
       s.visible = boil > 0.05;
     });
     // HUD
