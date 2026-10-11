@@ -845,7 +845,8 @@ export class Game {
     this.lie = lieFor(ball.surface);
 
     const toPin = Math.hypot(world.cup.x - ball.x, world.cup.z - ball.z);
-    this.target = this.lie.id === 'green' ? { x: world.cup.x, z: world.cup.z, isPin: true } : aimTarget(world, ball.x, ball.z);
+    // (crazy golf is all green, but the line is round the next bend, not through the walls)
+    this.target = this.lie.id === 'green' && !world.spec.green.channel ? { x: world.cup.x, z: world.cup.z, isPin: true } : aimTarget(world, ball.x, ball.z);
     this.targetDist = Math.hypot(this.target.x - ball.x, this.target.z - ball.z);
     this.aimAngle = Math.atan2(this.target.z - ball.z, this.target.x - ball.x);
     this.setClub(autoSelectClub(this.targetDist, this.lie, this.onTee));
@@ -881,8 +882,9 @@ export class Game {
     this.planDirty = true;
     this.puttMax = null;
     if (this.putting) {
-      // Putts always start aimed at the hole, whatever the path says
-      this.target = { x: this.world.cup.x, z: this.world.cup.z, isPin: true };
+      // Putts always start aimed at the hole, whatever the path says (bar
+      // crazy golf, where the path is the lane round the bends)
+      if (!this.world.spec.green.channel) this.target = { x: this.world.cup.x, z: this.world.cup.z, isPin: true };
       this.targetDist = Math.hypot(this.target.x - this.ball.x, this.target.z - this.ball.z);
       this.effects.beads.layout(this.world, this.ball);
     } else {
@@ -932,7 +934,9 @@ export class Game {
     this.dirX = dirX; this.dirZ = dirZ;
 
     if (this.putting) {
-      const dist = Math.hypot(world.cup.x - ball.x, world.cup.z - ball.z);
+      // Pace for the cup, or (crazy golf) for the bend the putt is played to
+      const to = this.target && !this.target.isPin ? this.target : world.cup;
+      const dist = Math.hypot(to.x - ball.x, to.z - ball.z);
       this.idealSpeed = puttSpeedFor(world, ball, dirX, dirZ, dist);
       if (!this.puttMax) this.puttMax = puttMeterMax(this.idealSpeed);
       this.idealPct = Math.min(96, (this.idealSpeed / this.puttMax) * 100);

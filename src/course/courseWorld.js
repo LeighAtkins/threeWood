@@ -102,7 +102,7 @@ export function buildWorld(spec) {
   const channel = green.channel;
   const lane = (x, z) => {
     const info = pathInfo(channel.pts, x, z);
-    const wall = 0.6 * smoothstep(channel.half, channel.half + 1.3, info.dist);
+    const wall = 1.0 * smoothstep(channel.half, channel.half + 1.1, info.dist);
     const u = (info.along - shape.at * totalLen) / 3.2;
     return wall + shape.hump * Math.exp(-u * u) * (1 - smoothstep(channel.half * 0.6, channel.half, info.dist));
   };
@@ -303,7 +303,9 @@ export function aimTarget(world, x, z) {
     walked += Math.hypot(ax, az);
     // Gentle drifts are not corners: only a real turn redirects the aim
     const turn = Math.abs(Math.atan2(ax * bz - az * bx, ax * bx + az * bz));
-    if (turn > 0.2 && walked > info.along + 45) return { x: path[i].x, z: path[i].z, isPin: false };
+    // (on a crazy-golf lane every bend counts, however close)
+    const ahead = world.spec.green.channel ? 2.5 : 45;
+    if (turn > 0.2 && walked > info.along + ahead) return { x: path[i].x, z: path[i].z, isPin: false };
   }
   return { x: world.cup.x, z: world.cup.z, isPin: true };
 }

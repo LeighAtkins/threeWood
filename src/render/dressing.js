@@ -51,29 +51,29 @@ export function buildDressing(world) {
     railMesh.castShadow = postMesh.castShadow = true;
     group.add(railMesh, postMesh);
 
-    // A gate over the hump: two posts outside the walls, a bar high overhead, bunting
+    // The hump is marked with bunting on short posts either side: low, so the
+    // camera following a putt never has to pass through anything
     const hump = pointAlongPath(pts, spec.shape.at * len);
-    const gate = new THREE.Group();
-    gate.position.set(hump.x, world.heightAt(hump.x, hump.z), hump.z);
-    gate.rotation.y = Math.atan2(-hump.dirZ, hump.dirX) + Math.PI / 2;
-    const span = channel.half + 2.2;
-    for (const s of [-1, 1]) {
-      const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.2, 3.2, 8), post);
-      leg.position.set(s * span, 1.6, 0);
-      gate.add(leg);
-    }
-    const bar = new THREE.Mesh(new THREE.BoxGeometry(span * 2 + 1, 0.32, 0.34), rail);
-    bar.position.y = 3.25;
-    gate.add(bar);
     const flags = [0xffd23f, 0x5fb3e6, 0xff7a9a, 0x7bd152];
-    for (let i = 0; i < 9; i++) {
-      const f = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.42, 3), lambert(flags[i % 4], { side: THREE.DoubleSide }));
-      f.position.set(-span + (i + 0.5) * (span * 2) / 9, 2.8, 0);
-      f.rotation.x = Math.PI;
-      gate.add(f);
+    for (const s of [-1, 1]) {
+      const marker = new THREE.Group();
+      const x = hump.x - hump.dirZ * s * (channel.half + 2.4), z = hump.z + hump.dirX * s * (channel.half + 2.4);
+      marker.position.set(x, world.heightAt(x, z), z);
+      marker.rotation.y = Math.atan2(-hump.dirZ, hump.dirX);
+      for (const along of [-1.4, 1.4]) {
+        const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 1.1, 8), post);
+        leg.position.set(along, 0.55, 0);
+        marker.add(leg);
+      }
+      for (let i = 0; i < 5; i++) {
+        const f = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.3, 3), lambert(flags[i % 4], { side: THREE.DoubleSide }));
+        f.position.set(-1.1 + i * 0.55, 0.88, 0);
+        f.rotation.x = Math.PI;
+        marker.add(f);
+      }
+      marker.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+      group.add(marker);
     }
-    gate.traverse((o) => { if (o.isMesh) o.castShadow = true; });
-    group.add(gate);
 
     // Flower pots at the bends
     for (let i = 1; i < pts.length - 1; i++) {
