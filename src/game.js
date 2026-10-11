@@ -2071,7 +2071,13 @@ export class Game {
         // A slow turn round your camper and Kuri on the first green, low
         // enough to see the course behind them
         const t = this.titleSpot;
-        this.rig.orbit(t.x, t.y + 0.68, t.z, 6.4, 0.75, t.angle + Math.sin(this.time * 0.11) * 0.6);
+        const ang = t.angle + Math.sin(this.time * 0.11) * 0.6;
+        if (this.rig.portrait) this.rig.orbit(t.x, t.y + 0.68, t.z, 6.4, 0.75, ang);
+        else {
+          // Landscape: the menu is on the right, so frame the pair left of centre
+          const side = -1.9, sx = -Math.sin(ang) * side, sz = Math.cos(ang) * side;
+          this.rig.orbit(t.x + sx, t.y + 0.68, t.z + sz, 6.4, 0.75, ang);
+        }
         break;
       }
       case 'intro': {

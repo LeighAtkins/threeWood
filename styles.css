@@ -895,3 +895,24 @@ button { font: inherit; color: inherit; border: 0; background: none; padding: 0;
   transform: scale(0.94); filter: brightness(1.15);
 }
 .camper-ui .sw:active { transform: scale(0.9); }
+
+/* ---- Landscape: the title in two columns, the hole card compact ------------- */
+@media (orientation: landscape) and (max-height: 520px) {
+  /* Logo top left, choices down the right, the camper and Kuri in between */
+  .title { flex-direction: row; align-items: flex-start; justify-content: space-between; padding: calc(var(--sat) + 18px) calc(var(--sar) + 18px) calc(var(--sab) + 14px) calc(var(--sal) + 22px); }
+  .logo { text-align: left; }
+  .logo h1 { font-size: 46px; }
+  .logo p { font-size: 12px; }
+  .title-actions { width: 300px; margin-top: 0; }
+  .title-actions .btn { padding: 10px 14px; font-size: 16px; margin-top: 8px; }
+  .title-foot { margin-top: 6px; font-size: 11px; }
+  /* The hole card: one tight block, no caddie tip (it shows again on the next hole) */
+  .intro .num { font-size: 12px; letter-spacing: 3px; }
+  .intro .name { font-size: 38px; margin: 0 0 2px; }
+  .intro .meta { font-size: 15px; }
+  .intro .cond { font-size: 11px; margin-top: 2px; }
+  .intro .blurb { font-size: 12px; margin-top: 2px; }
+  .intro .toy { margin-top: 4px; padding: 4px 10px; font-size: 11px; }
+  .intro .tip { display: none; }
+  .intro .quest { margin-top: 4px; }
+}
