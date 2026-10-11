@@ -7,6 +7,7 @@
 
 import * as THREE from 'three';
 import { pathLength, pointAlongPath, pathInfo } from '../course/shapes.js';
+import { bakeStatic } from './bake.js';
 
 const lambert = (color, extra = {}) => new THREE.MeshLambertMaterial({ color, ...extra });
 
@@ -111,5 +112,6 @@ export function buildDressing(world) {
     group.add(beacon);
     group.userData.beacon = beacon;
   }
+  bakeStatic(group, new Set([group.userData.beacon].filter(Boolean)));
   return group;
 }

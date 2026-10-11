@@ -13,6 +13,7 @@
 
 import * as THREE from 'three';
 import { SKINS, HAIR_COLORS, EYE_COLORS, outfitById, cleanLook } from '../core/camp.js';
+import { bakeStatic } from './bake.js';
 
 /** Where the hands meet in the address pose, in model units. */
 export const GRIP = { y: 0.43, z: 0.21 };
@@ -531,6 +532,18 @@ export class Camper {
       add(head, new THREE.TorusGeometry(R + 0.008, 0.02, 6, 22), hatMat, 0, 0.06, -0.006).rotation.x = Math.PI / 2 - 0.32;
       add(head, ball(0.026, 6, 6), hatMat, 0.03, 0.0, -0.14, 1, 1.7, 0.6);
     }
+
+    // Merge the pieces of each rigid part into one mesh per material: a few
+    // dozen draw calls instead of a hundred-odd. Everything that moves on its
+    // own (brows, the mouths, the closed-eye lines) is kept as it is.
+    const keep = new Set([...Object.values(this.mouths), ...this.eyes.flatMap((e) => [e.brow, e.arch, e.rest])]);
+    bakeStatic(this.group, keep);
+    // Tiny details cast no shadow worth the second draw
+    this.group.traverse((o) => {
+      if (!o.isMesh) return;
+      o.geometry.computeBoundingSphere();
+      if (o.geometry.boundingSphere.radius < 0.03) o.castShadow = false;
+    });
   }
 
   /**

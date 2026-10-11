@@ -16,6 +16,7 @@
 
 import * as THREE from 'three';
 import { glyph } from '../ui/glyphs.js';
+import { bakeStatic } from '../render/bake.js';
 
 let ramp = null;
 function toon(color) {
@@ -122,6 +123,7 @@ export class DogModel {
     this.tail.add(curl);
     this.tail.add(mesh(sph(0.03, 8, 6), cream, 0, 0.1, 0.03));
 
+    bakeStatic(this.group, new Set([this.tongue])); // one mesh per material per part
     this.group.scale.setScalar(SCALE);
   }
 

@@ -14,6 +14,7 @@
 import * as THREE from 'three';
 import { createGameRng } from '../core/rng.js';
 import { pathLength, pointAlongPath } from '../course/shapes.js';
+import { bakeStatic } from '../render/bake.js';
 
 export const KINDS = {
   shiitake: { name: 'Shiitake', cap: 0x8a5a3a, spots: 0xf1dfc4, stem: 0xf3e7d3, shape: 'flat' },
@@ -81,6 +82,14 @@ export function mushroomMesh(kind) {
     one(0.15, 0.06, 0.6, -0.25);
   }
   g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+  // Flatten to one mesh per material: a clump of mushrooms is otherwise a dozen draws
+  g.traverse((o) => { if (o.children.length && o !== g) o.updateMatrix(); });
+  for (const sub of [...g.children]) {
+    // (bring each little mushroom's parts up into the clump, then merge)
+    for (const m of [...sub.children]) { m.applyMatrix4(sub.matrix); g.add(m); }
+    g.remove(sub);
+  }
+  bakeStatic(g);
   return g;
 }
 
