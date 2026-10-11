@@ -1257,7 +1257,13 @@ export class Game {
     }
 
     const pure = strike.grade === 'pure';
-    if (pure) { this.dog.on('pure'); this.camper.feel('joy', 1.6); }
+    if (pure) {
+      this.dog.on('pure'); this.camper.feel('joy', 1.6);
+      // Hit-stop: the ball holds on the face for a blink, and the frame jolts
+      this.hitStop = 0.08;
+      this.rig.addShake(0.05);
+      this.audio.vibrate(18);
+    }
     else if (strike.grade === 'terrible') this.camper.feel('oops', 1.6);
     this.audio.strike(this.swing.power, strike.grade);
     this.effects.strikeFlash(ball.x, ball.y, ball.z, pure);
@@ -1317,6 +1323,8 @@ export class Game {
     else if (this.fastForward && ball.mode === 'roll') scale = 3;
     this.timeScale += (scale - this.timeScale) * Math.min(1, dt * 10);
 
+    // (a pure strike holds the ball on the face for a moment first)
+    if (this.hitStop > 0) { this.hitStop -= dt; return; }
     this.simAccumulator += dt * this.timeScale;
     this.events.length = 0;
     let steps = 0;
