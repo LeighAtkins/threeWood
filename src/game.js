@@ -793,7 +793,9 @@ export class Game {
     // the lens with a hat
     if (show && s === 'flight') {
       const head = this._pivot.set(g.position.x, g.position.y + g.scale.y * 0.9, g.position.z);
-      if (this.camera.position.distanceTo(head) < 2.6 * (g.scale.y / 1.9)) { g.visible = false; this.clubRig.hide(); this.follow = null; }
+      // (the putting camera walks in right past her: a wider margin there)
+      const margin = (this.shot?.putt ? 3.6 : 2.6) * (g.scale.y / 1.9);
+      if (this.camera.position.distanceTo(head) < margin) { g.visible = false; this.clubRig.hide(); this.follow = null; }
     }
   }
 
