@@ -1499,6 +1499,7 @@ export class Game {
   goFishing() {
     const a = this.audio;
     this.setState('fishing');
+    this.hud.setControlsVisible(false); // (the club and swing button come back with the ball)
     // Two games take turns. Lose two balls running and the third trip is the
     // golden ball: catch it and those two strokes come back as well, so the
     // water has cost nothing. It can never give back more than it took.
