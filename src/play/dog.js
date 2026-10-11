@@ -297,13 +297,15 @@ export class Dog {
 
   /** A tap at screen (x, y): was it on her? Then pat her. */
   tapAt(x, y) {
-    if (this.tapStick(x, y)) return true;
-    if (!this.group.visible) return false;
-    const s = this.screenPos();
-    if (!s) return false;
+    const s = this.group.visible ? this.screenPos() : null;
     const dist = this.g.camera.position.distanceTo(this.pos);
     const r = Math.max(46, Math.min(120, 380 / Math.max(1, dist)));
-    if (Math.hypot(s.x - x, s.y + 20 - y) > r) return false;
+    const onDog = s ? Math.hypot(s.x - x, s.y + 20 - y) : Infinity;
+    // A stick at her feet and her head are close on screen: the nearer wins
+    const st = this.stick.phase === 'ground' ? this.stickScreen() : null;
+    const onStick = st ? Math.hypot(st.x - x, st.y - y) : Infinity;
+    if (onStick < onDog && this.tapStick(x, y)) return true;
+    if (onDog > r) return this.tapStick(x, y);
     if (this.asleep) { this.befriend(); return true; }
     if (this.stick.phase === 'tug') { this.stick.taps += 1; this.react('hop', 0.25); this.g.audio.tap(); return true; }
     this.react('hop', 1.1);
@@ -502,14 +504,16 @@ export class Dog {
     if (here && r.t === null) r.t = 2.5 + Math.random() * 4;
     if (moved || (here && (r.t -= 1 / 60) <= 0)) {
       const aim = g.aimAngle ?? 0;
-      for (let i = 0; i < 12; i++) {
+      for (let i = 0; i < 28; i++) {
         // Off to one side of the line of play (the same side each time, so she
         // never trots across it), ahead of the camera so she stays in view;
         // on the green, well wide of the putt
         if (moved || !this.roamSide) this.roamSide = Math.random() < 0.5 ? 1 : -1;
         const putt = g.putting;
-        const a = aim + this.roamSide * (putt ? 1.15 + Math.random() * 0.4 : 0.55 + Math.random() * 0.8);
-        const d = rMin + Math.random() * (rMax - rMin);
+        // (later tries range wider, so a narrow putting view still finds a spot)
+        const wide = i / 28;
+        const a = aim + this.roamSide * (putt ? 0.5 + Math.random() * (0.6 + wide * 0.6) : 0.4 + Math.random() * 0.9);
+        const d = rMin + Math.random() * (rMax - rMin) * (1 + wide);
         const x = anchor.x + Math.cos(a) * d, z = anchor.z + Math.sin(a) * d;
         if (world.surfaceAt(x, z) === 'water') continue;
         // Never right up against the lens, or under the golfer's feet
@@ -517,6 +521,11 @@ export class Dog {
         const cg = g.camper.group.position;
         if (g.camper.group.visible && Math.hypot(x - cg.x, z - cg.z) < 2.6) continue;
         if (Math.hypot(x - g.ball.x, z - g.ball.z) < 2.2) continue;
+        // In shot: a portrait screen is narrow, and a dog off its edge is no company
+        if (i < 26) {
+          const v = this._v.set(x, world.heightAt(x, z) + 0.4, z).project(g.camera);
+          if (v.z > 1 || Math.abs(v.x) > 0.8 || v.y < -0.75 || v.y > 0.6) continue;
+        }
         r = this.roamAt = { x, z, ax: anchor.x, az: anchor.z, t: null, pose: ['sit', 'sniff', 'sit', 'lie', 'sniff'][Math.floor(Math.random() * 5)] };
         break;
       }
