@@ -883,3 +883,15 @@ button { font: inherit; color: inherit; border: 0; background: none; padding: 0;
 .title-more .music-toggle { display: block; margin: 0; padding: 9px 2px; border-radius: 12px; font-size: 10.5px; letter-spacing: 0.6px; border: 1px solid rgba(255, 255, 255, 0.18); background: rgba(10, 30, 20, 0.45); }
 /* No lonely last words on cards and tips */
 .intro .blurb, .intro .tip, .card p, .hint, .toy, .pond, .result-score { text-wrap: balance; }
+
+/* ---- Press feedback: every button answers the thumb ------------------------- */
+.btn, .menu-btn, .title-more button, .pose-bar button, .camper-ui button, .skip-btn,
+.net-pill .talk, .net-pill .emotes button, .music-toggle, .cook-eat, .nabe-tray button, .club button {
+  transition: transform 0.08s ease-out, filter 0.08s, box-shadow 0.08s;
+}
+.btn.ghost:active { box-shadow: 0 1px 0 rgba(0, 0, 0, 0.25); }
+.menu-btn:active, .title-more button:active, .pose-bar button:active, .camper-ui .seg button:active,
+.camper-ui .step button:active, .skip-btn:active, .net-pill .talk:active, .music-toggle:active, .cook-eat:active {
+  transform: scale(0.94); filter: brightness(1.15);
+}
+.camper-ui .sw:active { transform: scale(0.9); }
