@@ -345,7 +345,7 @@ export class Hud {
     // A new headline clears the stage: what was showing bows out quickly
     // rather than stacking up into a column of words
     if (!/small|pts/.test(kind)) {
-      for (const old of this.callouts.children) if (!old.classList.contains('out')) old.classList.add('out');
+      for (const old of this.callouts.children) if (!old.classList.contains('out') && !old.classList.contains('keep')) old.classList.add('out');
     }
     const node = el('div', `callout ${kind}`);
     node.textContent = text;

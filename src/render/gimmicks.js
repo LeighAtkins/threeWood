@@ -108,6 +108,7 @@ export class Gimmicks {
     const y = world.heightAt(x, z);
     const sign = new THREE.Group();
     sign.position.set(x, y, z);
+    this.signAt = { x, z }; // (the stone-skipping camera keeps clear of it)
     sign.rotation.y = Math.atan2(Math.cos(toPath), Math.sin(toPath)) + Math.PI;
     const lam = (color, o) => new THREE.MeshLambertMaterial({ color, flatShading: true, ...o });
     const wood = lam(0x7a5632), dark = lam(0x5e3e26);

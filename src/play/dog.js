@@ -391,7 +391,7 @@ export class Dog {
     if (wl < 20) return this.tapStick(...Object.values(this.stickScreen() || { x: -999, y: -999 }));
     wx /= wl; wz /= wl;
     const pace = wl / Math.max(60, ms); // px per ms
-    this.throwStick(wx, wz, Math.max(4.5, Math.min(15, 4 + pace * 7)));
+    this.throwStick(wx, wz, Math.max(4.5, Math.min(18, 4 + pace * 8)));
     return true;
   }
 
@@ -533,7 +533,7 @@ export class Dog {
     if (st.phase !== 'none' && s !== 'aim') this.dropStick();
     if (st.phase === 'seek') return { x: st.x, z: st.z, pose: 'run', speed: 8, near: 0.3 };
     if (st.phase === 'bring' || st.phase === 'back') return { x: st.dropX, z: st.dropZ, pose: 'run', speed: st.phase === 'back' ? 11 : 7, near: 0.4 };
-    if (st.phase === 'flying') return { x: st.landX, z: st.landZ, pose: 'run', speed: 11, near: 0.3 };
+    if (st.phase === 'flying') return { x: st.landX, z: st.landZ, pose: 'run', speed: 13.5, near: 0.3 }; // a sprint: a fair throw is catchable
     if (st.phase === 'chase') return { x: st.x, z: st.z, pose: 'run', speed: 11, near: 0.5 };
     if (st.phase === 'tug') return { x: this.pos.x, z: this.pos.z, pose: 'beg', face: { x: g.camera.position.x, z: g.camera.position.z } };
     if (st.phase === 'ground') return { x: st.dropX + 0.9, z: st.dropZ + 0.6, pose: 'beg', face: { x: st.x, z: st.z }, speed: 6 };

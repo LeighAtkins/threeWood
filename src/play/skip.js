@@ -110,11 +110,25 @@ export class Skip {
     const { world, ball } = this.g;
     if (world.biome.liquid === 'lava') return null; // not that kind of pond
     let best = null;
+    // Anything that could stand between the camera and the water
+    const sign = this.g.gimmicks?.signAt;
+    const blockers = [...(this.g.scenery?.placed || []), ...world.trees.map((t) => ({ x: t.x, z: t.z, r: t.cr })), ...(sign ? [{ x: sign.x, z: sign.z, r: 1.4 }] : [])];
+    const clearAt = (x, z, pad) => !blockers.some((b) => Math.hypot(b.x - x, b.z - z) < (b.r || 1) + pad);
     for (const p of world.ponds || []) {
-      const a = Math.atan2(ball.z - p.z, ball.x - p.x);
-      const edge = blobRadius(p, a);
-      const d = Math.hypot(ball.x - p.x, ball.z - p.z) - edge;
+      const a0 = Math.atan2(ball.z - p.z, ball.x - p.x);
+      const edge0 = blobRadius(p, a0);
+      const d = Math.hypot(ball.x - p.x, ball.z - p.z) - edge0;
       if (d > STONE.REACH || d < 0) continue;
+      // The nearest stretch of bank, turned a little either way until the
+      // spot (and the camera behind it) is clear of the sign, trees and props
+      let a = a0;
+      for (const off of [0, 0.25, -0.25, 0.5, -0.5, 0.8, -0.8, 1.1, -1.1]) {
+        const t = a0 + off, e = blobRadius(p, t);
+        const bx = p.x + Math.cos(t) * (e + 1.5), bz = p.z + Math.sin(t) * (e + 1.5);
+        const cx = p.x + Math.cos(t) * (e + 5.5), cz = p.z + Math.sin(t) * (e + 5.5);
+        if (clearAt(bx, bz, 1.5) && clearAt(cx, cz, 1.8) && clearAt((bx + cx) / 2, (bz + cz) / 2, 1.5)) { a = t; break; }
+      }
+      const edge = blobRadius(p, a);
       if (!best || d < best.d) {
         // Stand on the bank, facing across the middle of the pond
         // Walk in until the water starts, and stand a step back from it

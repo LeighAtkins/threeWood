@@ -682,7 +682,7 @@ export class Game {
     store.set(CAMP_KEY, this.camp);
     for (const fit of got) {
       this.newOutfits.push(fit.name);
-      this.hud.callout(`NEW OUTFIT · ${fit.name.toUpperCase()}`, 'gold small');
+      this.hud.callout(`NEW OUTFIT · ${fit.name.toUpperCase()}`, 'gold small keep'); // (never cleared early)
       this.audio.reward(6);
     }
   }
