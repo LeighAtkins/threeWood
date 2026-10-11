@@ -252,11 +252,70 @@ class Particles {
 
 const MAX_BEADS = 260;
 
+// Confetti: little paper rectangles that tumble and flutter down, rather
+// than round blobs. One instanced mesh, double-sided, shaded by its tilt.
+const PAPER_MAX = 160;
+class Paper {
+  constructor(scene) {
+    const geo = new THREE.PlaneGeometry(0.07, 0.04);
+    this.mesh = new THREE.InstancedMesh(geo, new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }), PAPER_MAX);
+    this.mesh.frustumCulled = false;
+    this.mesh.count = 0;
+    scene.add(this.mesh);
+    this.bits = [];
+    this.dummy = new THREE.Object3D();
+    this.color = new THREE.Color();
+  }
+
+  burst(x, y, z, n) {
+    this.bits.length = 0;
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2, s = 0.5 + Math.random() * 2.2;
+      this.bits.push({
+        x, y: y + 0.15, z, vx: Math.cos(a) * s, vy: 3.5 + Math.random() * 4, vz: Math.sin(a) * s,
+        rx: Math.random() * 6, ry: Math.random() * 6, wx: (Math.random() - 0.5) * 16, wy: (Math.random() - 0.5) * 10,
+        sway: Math.random() * 6, life: 2.6 + Math.random() * 1.4, hex: CONFETTI[i % CONFETTI.length],
+      });
+    }
+  }
+
+  update(dt) {
+    const { bits, mesh, dummy: d } = this;
+    let n = 0;
+    for (const b of bits) {
+      b.life -= dt;
+      if (b.life <= 0) continue;
+      b.vy -= 6 * dt;
+      // Paper falls slowly: strong drag, and a sideways flutter on the way down
+      const drag = Math.exp(-dt * (b.vy < 0 ? 3.2 : 1.2));
+      b.vx *= drag; b.vz *= drag; b.vy = Math.max(b.vy * (b.vy < 0 ? drag : 1), -1.6);
+      b.sway += dt * 5;
+      b.x += (b.vx + Math.sin(b.sway) * 0.5) * dt; b.y += b.vy * dt; b.z += (b.vz + Math.cos(b.sway * 0.8) * 0.5) * dt;
+      b.rx += b.wx * dt; b.ry += b.wy * dt;
+      d.position.set(b.x, b.y, b.z);
+      d.rotation.set(b.rx, b.ry, 0);
+      d.scale.setScalar(Math.min(1, b.life * 2));
+      d.updateMatrix();
+      mesh.setMatrixAt(n, d.matrix);
+      // Catches the light as it turns
+      this.color.setHex(b.hex).multiplyScalar(0.7 + 0.3 * Math.abs(Math.cos(b.rx)));
+      mesh.setColorAt(n, this.color);
+      n++;
+    }
+    mesh.count = n;
+    if (n) {
+      mesh.instanceMatrix.needsUpdate = true;
+      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    }
+  }
+}
+
 class SlopeBeads {
   constructor(scene) {
-    const geo = new THREE.CircleGeometry(0.1, 6).rotateX(-Math.PI / 2);
+    // A short dash that points downhill (scaled along z), not a blob
+    const geo = new THREE.CircleGeometry(0.05, 10).rotateX(-Math.PI / 2).scale(1, 1, 2.6);
     this.mesh = new THREE.InstancedMesh(
-      geo, new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, depthWrite: false }), MAX_BEADS);
+      geo, new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.72, depthWrite: false }), MAX_BEADS);
     this.mesh.frustumCulled = false;
     this.mesh.visible = false;
     this.mesh.renderOrder = 3;
@@ -273,7 +332,7 @@ class SlopeBeads {
     const dx = cup.x - ball.x, dz = cup.z - ball.z;
     const len = Math.hypot(dx, dz) || 1;
     const ux = dx / len, uz = dz / len;
-    const step = len > 16 ? 1.3 : 0.95;
+    const step = len > 16 ? 1.55 : 1.15;
     const halfWide = Math.min(7, 3.5 + len * 0.18);
     const g = [0, 0];
     for (let a = -3; a <= len + 4 && this.beads.length < MAX_BEADS; a += step) {
@@ -309,7 +368,10 @@ class SlopeBeads {
       const x = b.x + b.dx * t, z = b.z + b.dz * t;
       d.position.set(x, this.world.heightAt(x, z) + 0.02, z);
       const fade = 1 - Math.abs(t) / (b.span / 2);
-      d.scale.setScalar(0.35 + fade * 0.75);
+      d.rotation.set(0, Math.atan2(b.dx, b.dz), 0);
+      // Flat ground: a small round dot; a slope stretches it into a dash
+      const run = Math.min(1, b.slope / 0.02);
+      d.scale.set(0.3 + fade * 0.7, 1, (0.3 + fade * 0.7) * (0.45 + 0.55 * run));
       d.updateMatrix();
       this.mesh.setMatrixAt(i, d.matrix);
       const heat = Math.min(1, b.slope / 0.045);
@@ -338,6 +400,7 @@ export class Effects {
     this.puttLine = new Ribbon(scene, { color: 0xffffff, width: 4.5, opacity: 0.95, depthTest: false, vertexColors: true });
     this.comet = new Comet(scene);
     this.particles = new Particles(scene);
+    this.paper = new Paper(scene);
     this.beads = new SlopeBeads(scene);
     this.tmpColor = new THREE.Color();
 
@@ -433,18 +496,11 @@ export class Effects {
     }
   }
 
-  confetti(x, y, z, amount = 90) {
-    for (let i = 0; i < amount; i++) {
-      const a = Math.random() * Math.PI * 2;
-      const s = 0.6 + Math.random() * 2.6;
-      const c = this.tmpColor.setHex(CONFETTI[i % CONFETTI.length]);
-      this.particles.emit(x, y + 0.1, z, Math.cos(a) * s, 4 + Math.random() * 4.5, Math.sin(a) * s,
-        c, 0.1 + Math.random() * 0.1, 1.3 + Math.random() * 0.9, 5.5);
-    }
-  }
+  confetti(x, y, z, amount = 90) { this.paper.burst(x, y, z, Math.min(amount, PAPER_MAX)); }
 
   update(dt, time) {
     this.particles.update(dt);
+    this.paper.update(dt);
     this.beads.update(time);
     if (this.ring.visible) {
       const pulse = 1 + Math.sin(time * 5) * 0.06;

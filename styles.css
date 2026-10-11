@@ -856,3 +856,19 @@ button { font: inherit; color: inherit; border: 0; background: none; padding: 0;
 .camper-ui .step.half { gap: 3px; min-width: 0; }
 .camper-ui .step.half b { font-size: 13px; white-space: nowrap; overflow: hidden; }
 .camper-ui .step.half button { width: 30px; flex: none; }
+
+/* ---- Polish: cinematic intro, vignette, title ------------------------------ */
+#hud .play { transition: opacity 0.35s; }
+#hud.cinematic .play { opacity: 0; }
+.vignette {
+  position: fixed; inset: 0; pointer-events: none; z-index: 1;
+  background: radial-gradient(ellipse 120% 90% at 50% 46%, rgba(0, 0, 0, 0) 58%, rgba(10, 22, 16, 0.26) 100%);
+}
+.title-actions .btn.friends { margin-top: 10px; background: rgba(255, 255, 255, 0.14); color: var(--cream); box-shadow: 0 3px 0 rgba(0, 0, 0, 0.2); }
+.title-more { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 12px; }
+.title-more button {
+  pointer-events: auto; margin: 0; padding: 9px 2px; border-radius: 12px;
+  background: rgba(10, 30, 20, 0.45); border: 1px solid rgba(255, 255, 255, 0.18);
+  color: var(--cream); font: inherit; font-size: 10.5px; font-weight: 700; letter-spacing: 0.6px; cursor: pointer;
+}
+.title-more .music-toggle { display: block; margin: 0; padding: 9px 2px; border-radius: 12px; font-size: 10.5px; letter-spacing: 0.6px; border: 1px solid rgba(255, 255, 255, 0.18); background: rgba(10, 30, 20, 0.45); }

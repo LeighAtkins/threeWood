@@ -29,7 +29,7 @@ function toon(color) {
 
 const COAT = 0xd8873a, CREAM = 0xfff0d4, DARK = 0x2a1d17, COLLAR = 0xd2463c;
 export const DOG_NAME = 'Kuri';
-const SCALE = 1.75;
+const SCALE = 1.45;
 
 /** The model and its procedural poses. */
 export class DogModel {
@@ -520,6 +520,11 @@ export class Dog {
   plan() {
     const g = this.g, s = g.state, { ball, world } = g;
     const cg = g.camper.group;
+    if (s === 'title' && world && g.titleSpot && this.friend) {
+      // Beside the camper as the camera sees them, not in front
+      const t = g.titleSpot, c = Math.cos(t.angle), s2 = Math.sin(t.angle);
+      return { x: t.x - s2 * 1.25 + c * 0.15, z: t.z + c * 1.25 + s2 * 0.15, pose: 'sit', face: { x: g.camera.position.x, z: g.camera.position.z } };
+    }
     if (!world || !g.round && s !== 'summary') return null;
     if (this.asleep) return { x: this.pos.x, z: this.pos.z, pose: 'lie', face: null };
     if (!this.friend) return null;

@@ -388,7 +388,7 @@ export class Hud {
     const node = el('div', 'title', `
       <div class="logo">
         <h1>THREE<span>WOOD</span></h1>
-        <p>18 HOLES · NEW COURSE EVERY ROUND</p>
+        <p>GOLF · CAMPING · FRIENDS</p>
       </div>
       <div class="title-actions">
         ${saved ? `<button class="btn" data-a="continue">CONTINUE · HOLE ${saved.hole} (${vsPar(saved.total)})</button>` : ''}
@@ -398,11 +398,13 @@ export class Hud {
           <button class="btn ghost" data-a="9">QUICK 9</button>
         </div>
         <div class="title-foot">${best ? `BEST ROUND ${vsPar(best.score)} · ★ ${best.points.toLocaleString()}<br>` : ''}COURSE ${esc(seed)}${sky ? `<br>${sky}` : ''}</div>
-        <button class="music-toggle" data-a="music">${musicLabel(music)}</button>
-        <button class="music-toggle" data-a="friends">PLAY WITH FRIENDS</button>
-        <button class="music-toggle" data-a="camper">MY CAMPER</button>
-        <button class="music-toggle" data-a="fishing">PRACTICE FISHING</button>
-        <button class="music-toggle" data-a="grill">PRACTICE GRILL</button>
+        <button class="btn friends" data-a="friends">PLAY WITH FRIENDS</button>
+        <div class="title-more">
+          <button data-a="camper">MY CAMPER</button>
+          <button data-a="fishing">FISHING</button>
+          <button data-a="grill">GRILL</button>
+          <button class="music-toggle" data-a="music">${musicLabel(music)}</button>
+        </div>
       </div>`);
     node.addEventListener('click', (e) => {
       const a = e.target.closest('[data-a]')?.dataset.a;

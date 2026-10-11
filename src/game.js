@@ -183,6 +183,10 @@ export class Game {
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = this.coarse ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
     this.container.appendChild(renderer.domElement);
+    // A soft darkening at the edges of the frame, over the 3D, under the HUD
+    const vignette = document.createElement('div');
+    vignette.className = 'vignette';
+    this.container.appendChild(vignette);
     this.renderer = renderer;
     this.canvas = renderer.domElement;
   }
@@ -242,6 +246,17 @@ export class Game {
     this.scene.add(this.blob);
     this.ballScale = 1.4;
     this.sink = 0;
+    // A soft halo in flight, so a ball against the sky reads at 200 yards
+    const g = new Uint8Array(64 * 64 * 4);
+    for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) {
+      const d = Math.hypot(x - 31.5, y - 31.5) / 31.5, a = Math.max(0, 1 - d) ** 2.2;
+      g.set([255, 250, 230, Math.round(a * 255)], (y * 64 + x) * 4);
+    }
+    const glowTex = new THREE.DataTexture(g, 64, 64, THREE.RGBAFormat);
+    glowTex.needsUpdate = true;
+    this.ballGlow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, transparent: true, depthWrite: false, opacity: 0 }));
+    this.ballGlow.renderOrder = 5;
+    this.scene.add(this.ballGlow);
   }
 
   initInput() {
@@ -337,6 +352,13 @@ export class Game {
     this.hud.setPlayVisible(false);
     this.loadWorld(designHole(this.seed, 1));
     this.ballMesh.visible = this.blob.visible = false;
+    // Where the camper stands for the title shot: on the green, short of the flag
+    {
+      const { cup, tee } = this.world;
+      const d = Math.hypot(tee.x - cup.x, tee.z - cup.z) || 1;
+      const x = cup.x + ((tee.x - cup.x) / d) * 5.5, z = cup.z + ((tee.z - cup.z) / d) * 5.5;
+      this.titleSpot = { x, z, y: this.world.heightAt(x, z), angle: Math.atan2(tee.z - cup.z, tee.x - cup.x) + 0.5 };
+    }
     const saved = store.get(SAVE_KEY);
     const usable = saved && !saved.net && cleanSeed(saved.seed) && saved.index < saved.holes.length;
     this.hud.showTitle({
@@ -566,6 +588,8 @@ export class Game {
     this.state = state;
     this.stateTime = 0;
     this.music.setScene(state);
+    // The flyover is the hole's title sequence: no play HUD over it
+    this.hud.root.classList.toggle('cinematic', state === 'intro');
   }
 
   // ===========================================================================
@@ -693,6 +717,13 @@ export class Game {
         pose = this.skip.throwT > 0 ? 'wave' : 'idle';
       }
       g.scale.setScalar(1.9);
+    } else if (s === 'title' && this.titleSpot) {
+      // On the title screen: on the green, waving now and then at the camera
+      const t = this.titleSpot;
+      g.position.set(t.x, t.y, t.z);
+      g.scale.setScalar(1.9);
+      g.rotation.y = Math.atan2(this.camera.position.x - t.x, this.camera.position.z - t.z);
+      pose = (this.time % 7) < 2.2 ? 'wave' : 'idle';
     } else if (!this.round || s === 'title' || s === 'intro' || s === 'fishing') {
       show = false;
     } else if (s === 'aim' || s === 'swing') {
@@ -1990,8 +2021,10 @@ export class Game {
         break;
       }
       case 'title': {
-        const g = world.spec.green;
-        this.rig.orbit(g.x, world.cup.y, g.z, 34, 11, this.time * 0.12);
+        // A slow turn round your camper and Kuri on the first green, low
+        // enough to see the course behind them
+        const t = this.titleSpot;
+        this.rig.orbit(t.x, t.y + 0.68, t.z, 6.4, 0.75, t.angle + Math.sin(this.time * 0.11) * 0.6);
         break;
       }
       case 'intro': {
@@ -2134,7 +2167,10 @@ export class Game {
     const camDist = Math.hypot(camera.position.x - ball.x, camera.position.y - ball.y, camera.position.z - ball.z);
     // (only enough to stay visible: beyond that it must grow and shrink with
     // distance like a real thing, or a ball flying at the camera looks wrong)
-    const want = Math.max(1.4, Math.min(12, camDist / (this.rig.portrait ? 8.5 : 11)));
+    // In the air it may grow a little more: a few pixels of white against the
+    // sky is the whole shot, so it must read
+    const air = this.state === 'flight' && ball.mode === 'air';
+    const want = Math.max(1.4, Math.min(air ? 16 : 12, camDist / ((this.rig.portrait ? 8.5 : 11) * (air ? 0.62 : 1))));
     // Shrink at once (camera cuts), grow smoothly (ball flying away)
     this.ballScale = want < this.ballScale ? want : this.ballScale + (want - this.ballScale) * Math.min(1, dt * 8);
     const s = this.ballScale;
@@ -2152,6 +2188,11 @@ export class Game {
       this.ballMesh.position.set(ball.x, y, ball.z);
     }
     this.ballMesh.scale.setScalar(s);
+    this.ballGlowK = (this.ballGlowK || 0) + ((air ? 1 : 0) - (this.ballGlowK || 0)) * Math.min(1, dt * 6);
+    this.ballGlow.visible = this.ballGlowK > 0.02 && this.ballMesh.visible;
+    this.ballGlow.position.copy(this.ballMesh.position);
+    this.ballGlow.scale.setScalar(BALL_R * s * 9);
+    this.ballGlow.material.opacity = this.ballGlowK * 0.75;
     if (ball.mode === 'roll' || ball.mode === 'air') {
       const speed = Math.hypot(ball.vx, ball.vz);
       if (speed > 0.05) {
@@ -2180,6 +2221,7 @@ export class Game {
     this.sun.position.set(fx + light.x * 260, light.y * 260, fz + light.z * 260);
 
     this.updateClub(dt);
+    if (this.dressing) this.dressing.visible = this.state !== 'title'; // no beacon behind the logo
     this.updateCamper(dt);
     this.dog.update(dt);
     this.forage.update(dt);
