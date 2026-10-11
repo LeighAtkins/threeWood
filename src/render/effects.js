@@ -401,6 +401,17 @@ export class Effects {
     this.comet = new Comet(scene);
     this.particles = new Particles(scene);
     this.paper = new Paper(scene);
+    // Rings that spread on the water where something goes in
+    this.ripples = [];
+    const rippleGeo = new THREE.RingGeometry(0.86, 1, 40).rotateX(-Math.PI / 2);
+    for (let i = 0; i < 6; i++) {
+      const m = new THREE.Mesh(rippleGeo, new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false }));
+      m.visible = false;
+      m.renderOrder = 3;
+      m.userData = { t: 1, size: 1 };
+      scene.add(m);
+      this.ripples.push(m);
+    }
     this.beads = new SlopeBeads(scene);
     this.tmpColor = new THREE.Color();
 
@@ -477,6 +488,13 @@ export class Effects {
   }
 
   splash(x, y, z) {
+    // Three rings, one after another, spreading from where it went in
+    [0, 0.18, 0.4].forEach((delay, k) => {
+      const r = this.ripples.find((m) => m.userData.t >= 1) || this.ripples[k];
+      r.position.set(x, y + 0.03, z);
+      r.userData = { t: -delay, size: 2.2 + k * 0.9 };
+      r.visible = false;
+    });
     const c = this.tmpColor.setHex(0xe6f7ff);
     for (let i = 0; i < 46; i++) {
       const a = Math.random() * Math.PI * 2;
@@ -501,6 +519,15 @@ export class Effects {
   update(dt, time) {
     this.particles.update(dt);
     this.paper.update(dt);
+    for (const r of this.ripples) {
+      const u = r.userData;
+      if (u.t >= 1) { r.visible = false; continue; }
+      u.t = Math.min(1, u.t + dt * 0.55);
+      r.visible = u.t > 0;
+      const k = Math.max(0, u.t);
+      r.scale.setScalar(0.3 + k * u.size);
+      r.material.opacity = 0.75 * (1 - k) * (1 - k);
+    }
     this.beads.update(time);
     if (this.ring.visible) {
       const pulse = 1 + Math.sin(time * 5) * 0.06;
