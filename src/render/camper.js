@@ -62,6 +62,8 @@ const FACES = {
   oops: { open: 1.15, brow: [0.01, -0.32], mouth: 'o' },
 };
 
+const IDENTITY = new THREE.Quaternion();
+
 export class Camper {
   constructor(look) {
     this.group = new THREE.Group();
@@ -225,9 +227,14 @@ export class Camper {
     const shoulderX = rTop + 0.016, reach = 0.27, handY = SHOULDER - 0.012 - reach;
     const clear = Math.max(rAt(handY), rAt(handY + 0.08)) + 0.034;
     this.splay = Math.max(0, Math.asin(Math.min(1, Math.max(0, clear - shoulderX) / reach)) - 0.12);
+    // Both arms hang from one rig at the middle of the shoulders, which turns
+    // as a piece in a golf swing (see update: opts.arms)
+    const armRig = this.armRig = new THREE.Group();
+    armRig.position.set(0, Y(SHOULDER) - 0.012, 0);
+    upper.add(armRig);
     this.arms = [-1, 1].map((side) => {
       const shoulder = new THREE.Group();
-      shoulder.position.set(side * (rTop + 0.016), Y(SHOULDER) - 0.012, 0);
+      shoulder.position.set(side * (rTop + 0.016), 0, 0);
       add(shoulder, ball(puff, 10, 8), sleeve);
       add(shoulder, tube(puff, puff * 0.92, 0.13, 10), sleeve, 0, -0.065, 0);
       const elbow = new THREE.Group();
@@ -239,7 +246,7 @@ export class Camper {
       add(elbow, ball(0.03, 12, 8), skinMat, 0, -0.136, 0, 0.88, 1.12, 0.92);
       add(elbow, ball(0.012, 8, 6), skinMat, 0, -0.124, 0.024, 1, 1.4, 1);
       shoulder.add(elbow);
-      upper.add(shoulder);
+      armRig.add(shoulder);
       return { shoulder, elbow };
     });
 
@@ -532,7 +539,7 @@ export class Camper {
    * @param {object} [o]
    * @param {number} [o.twist] address: how far through the swing (-1 back .. +1 through)
    */
-  update(dt, pose = 'idle', { twist = 0 } = {}) {
+  update(dt, pose = 'idle', { twist = 0, arms = null } = {}) {
     this.t += dt;
     this.pose = pose;
     const want = POSES[pose] || POSES.idle;
@@ -578,8 +585,21 @@ export class Camper {
     this.rig.position.y = bob - drop;
     // The swing turns the shoulders; the head stays on the ball until it has gone
     const addr = pose === 'address';
-    this.upper.rotation.set(lean, addr ? -this.twist * 0.5 : 0, 0);
-    this.head.rotation.set(addr ? 0.15 : 0, addr ? this.twist * 0.35 : 0, tilt);
+    // (the arms carry most of the swing now; the shoulders turn a little)
+    this.upper.rotation.set(lean, addr ? -this.twist * 0.3 : 0, 0);
+    this.head.rotation.set(addr ? 0.15 : 0, addr ? this.twist * 0.3 : 0, tilt);
+    // The swing: arms turned as a piece about the club's swing axis (given in
+    // world space by the club), so the hands stay on the grip all the way round
+    this.shoulderWorld ||= new THREE.Vector3();
+    if (arms && addr) {
+      this.group.updateMatrixWorld(true);
+      const q = this.upper.getWorldQuaternion(this._uq ||= new THREE.Quaternion()).invert();
+      const axis = (this._ax ||= new THREE.Vector3()).copy(arms.axis).applyQuaternion(q).normalize();
+      this.armRig.quaternion.setFromAxisAngle(axis, arms.armAngle);
+    } else {
+      this.armRig.quaternion.slerp(IDENTITY, Math.min(1, dt * 8));
+    }
+    this.armRig.getWorldPosition(this.shoulderWorld);
     this.face(dt, pose);
   }
 

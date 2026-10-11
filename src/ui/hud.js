@@ -361,7 +361,7 @@ export class Hud {
    * A ghost hand over the course showing a drag. kind: 'drag' | 'shape' |
    * null; warn adds a symbol above it (a tree in the way).
    */
-  demo(kind, { high = false, warn = '' } = {}) {
+  demo(kind, { high = false, low = false, warn = '' } = {}) {
     if (!this.demoEl) {
       this.demoEl = el('div', 'demo hidden');
       this.root.insertBefore(this.demoEl, this.layer);
@@ -369,6 +369,7 @@ export class Hud {
     const key = kind ? `${kind}|${warn}` : '';
     this.demoEl.classList.toggle('hidden', !kind);
     this.demoEl.classList.toggle('high', high);
+    this.demoEl.classList.toggle('low', low);
     if (kind && this.demoKey !== key) this.demoEl.innerHTML = `${warn ? `<span class="warn">${warn}</span>` : ''}${glyph(kind)}`;
     this.demoKey = key;
   }

@@ -113,7 +113,9 @@ export class CameraRig {
     const dx = ball.vx / vh, dz = ball.vz / vh;
     const height = Math.max(0, ball.y - this.ground(ball.x, ball.z));
     const back = 7 + height * 0.3;
-    this.wantPos.set(ball.x - dx * back, ball.y + 2.2 + height * 0.1, ball.z - dz * back);
+    // (lifted clear for the first second, so it never sweeps through the golfer)
+    const clear = 2.6 * Math.max(0, 1 - this.chaseT / 1.1);
+    this.wantPos.set(ball.x - dx * back, ball.y + 2.2 + height * 0.1 + clear, ball.z - dz * back);
     this.wantLook.set(ball.x + dx * 6, ball.y - height * 0.15, ball.z + dz * 6);
   }
 

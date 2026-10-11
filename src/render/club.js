@@ -169,6 +169,12 @@ export class ClubRig {
 
     this._f = new THREE.Vector3();
     this._d0 = new THREE.Vector3();
+    this._arm = new THREE.Vector3();
+    this._q = new THREE.Quaternion();
+    // The swing as the golfer's arms see it (read by the camper each frame):
+    // the arms turn by armAngle about axis, around the shoulders
+    this.axis = new THREE.Vector3(0, 0, 1);
+    this.armAngle = 0;
     this._x = new THREE.Vector3();
     this._y = new THREE.Vector3();
     this._z = new THREE.Vector3();
@@ -184,7 +190,14 @@ export class ClubRig {
    * @param {number} size   visual scale (matches the drawn ball)
    * @param {number} opacity
    */
-  pose(ball, dirX, dirZ, theta, kind, size, opacity) {
+  /**
+   * theta: the club's angle in the swing plane (0 = address, - back, + through).
+   * The swing is two levers: the arms turn about the shoulders (center, when
+   * the camper is there to say where that is) by part of theta, and the club
+   * hinges at the wrists for the rest, cocked on the way back and released
+   * through the ball. A putter has no hinge: arms and club rock together.
+   */
+  pose(ball, dirX, dirZ, theta, kind, size, opacity, center = null) {
     if (opacity <= 0.01) { this.group.visible = false; return; }
     this.group.visible = true;
     this.wood.visible = kind === 'wood';
@@ -213,7 +226,16 @@ export class ClubRig {
     const x = this._x.crossVectors(y, z);
     this._m.makeBasis(x, y, z);
     this.group.quaternion.setFromRotationMatrix(this._m);
-    this.group.position.set(px, py, pz);
+    // The hands ride round the shoulders on the arms
+    const armK = kind === 'putter' ? 1 : theta < 0 ? 0.58 : 0.66;
+    this.armAngle = theta * armK;
+    this.axis.copy(z);
+    const arm = this._arm;
+    if (center) arm.set(px - center.x, py - center.y, pz - center.z);
+    else arm.copy(d0).multiplyScalar(0.55 * size);
+    const cx = px - arm.x, cy = py - arm.y, cz = pz - arm.z;
+    arm.applyQuaternion(this._q.setFromAxisAngle(z, this.armAngle));
+    this.group.position.set(cx + arm.x, cy + arm.y, cz + arm.z);
     this.group.scale.setScalar(size);
   }
 

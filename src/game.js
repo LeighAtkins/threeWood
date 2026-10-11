@@ -618,8 +618,9 @@ export class Game {
       const k = Math.min(1, f.t / 0.26);
       const ease = 1 - (1 - k) * (1 - k);
       const theta = (f.putt ? 0.55 : 2.5) * ease;
-      const fade = Math.max(0, 1 - Math.max(0, f.t - 0.45) / 0.3);
-      this.clubRig.pose(f, f.dirX, f.dirZ, theta, f.kind, f.size, fade);
+      // Hold the finish a moment before the club goes
+      const fade = Math.max(0, 1 - Math.max(0, f.t - 1.1) / 0.35);
+      this.clubRig.pose(f, f.dirX, f.dirZ, theta, f.kind, f.size, fade, this.camper.group.visible ? this.camper.shoulderWorld : null);
       if (fade <= 0) this.follow = null;
       return;
     }
@@ -649,7 +650,7 @@ export class Game {
     this.clubTheta = theta;
     // The club arrives with the camper: nothing floats at the ball while they walk up
     if (this.walkIn) { this.clubRig.hide(); return; }
-    this.clubRig.pose(ball, dirX, dirZ, theta, this.clubKind(), size, 1);
+    this.clubRig.pose(ball, dirX, dirZ, theta, this.clubKind(), size, 1, this.camper.group.visible && this.camper.shoulderWorld?.lengthSq() ? this.camper.shoulderWorld : null);
   }
 
   // ===========================================================================
@@ -765,7 +766,14 @@ export class Game {
       pose = this.strokes <= world.spec.par ? 'cheer' : 'wave';
     }
     g.visible = show;
-    if (show) c.update(dt, pose, { twist });
+    const swinging = pose === 'address' && this.clubRig.group.visible;
+    if (show) c.update(dt, pose, { twist, arms: swinging ? this.clubRig : null });
+    // The chase camera passes close by: get out of its way rather than fill
+    // the lens with a hat
+    if (show && s === 'flight') {
+      const head = this._pivot.set(g.position.x, g.position.y + g.scale.y * 0.9, g.position.z);
+      if (this.camera.position.distanceTo(head) < 2.6 * (g.scale.y / 1.9)) { g.visible = false; this.clubRig.hide(); this.follow = null; }
+    }
   }
 
   /** The camper creator: build your golfer, try on what you have earned. */
@@ -1224,7 +1232,7 @@ export class Game {
     // A decent strike can be worked in the air
     this.shot.shapeable = strike.grade === 'pure' || strike.grade === 'good';
     if (this.shot.shapeable && this.shot.chase && this.hints.spin < 4) {
-      this.hud.demo('shape');
+      this.hud.demo('shape', { low: true }); // (below the ball, not over it)
     }
 
     const pure = strike.grade === 'pure';
@@ -1334,6 +1342,11 @@ export class Game {
       // (no controls on screen now, so frame the ball lower)
       this.rig.putt(ball, (world.cup.x - ball.x) / d, (world.cup.z - ball.z) / d, Math.max(1.2, cupDist), 0.9 + cupDist * 0.07);
       this.rig.stiffness = 2.2;
+    } else if (shot.chase && ball.time < 0.32 && ball.mode === 'air') {
+      // A beat on the strike: hold where we are and watch it leave the face,
+      // rather than sweep through the golfer's head into the chase
+      this.rig.watch(ball, 0.05);
+      this.rig.stiffness = 3;
     } else if (shot.chase) {
       if (ball.time > plan.landTime - 1.05 || ball.mode !== 'air') {
         this.rig.landing(ball, plan, shot.fromX, shot.fromZ);

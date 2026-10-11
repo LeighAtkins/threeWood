@@ -325,6 +325,8 @@ button { font: inherit; color: inherit; border: 0; background: none; padding: 0;
   animation: hintIn 0.3s;
 }
 .demo.high { top: calc(var(--sat) + 215px); }
+.demo.low { top: 64%; padding: 12px 32px; background: rgba(16, 38, 26, 0.36); }
+.demo.low .glyph { width: 52px; height: 52px; }
 .demo .glyph { width: 66px; height: 66px; }
 .demo .warn { position: absolute; left: 50%; top: -18px; transform: translateX(-50%); font-size: 26px; }
 .intro .skip .glyph { width: 40px; height: 40px; }

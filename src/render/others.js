@@ -277,8 +277,8 @@ export class Others {
       }
       s.theta = theta;
     }
-    o.club.pose(ball, dirX, dirZ, theta, o.kind, size, 1);
-    o.camper.update(dt, 'address', { twist: Math.max(-1, Math.min(1, theta / 2.2)) });
+    o.club.pose(ball, dirX, dirZ, theta, o.kind, size, 1, o.camper.shoulderWorld?.lengthSq() ? o.camper.shoulderWorld : null);
+    o.camper.update(dt, 'address', { twist: Math.max(-1, Math.min(1, theta / 2.2)), arms: o.club });
     return true;
   }
 
