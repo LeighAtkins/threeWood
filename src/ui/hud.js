@@ -466,7 +466,7 @@ export class Hud {
         ${outfits.map((name) => `<div class="new-fit">NEW OUTFIT · ${name.toUpperCase()}</div>`).join('')}
         <div class="btn-row"><button class="btn" data-a="camp">SIT BY THE FIRE</button>${onNabe ? '<button class="btn hotpot" data-a="nabe">HOT POT</button>' : ''}</div>
         <button class="btn ghost" data-a="again">NEW COURSE</button>
-        <button class="btn ghost" data-a="share">CHALLENGE A FRIEND · ${esc(seed)}</button>
+        <button class="btn ghost" data-a="share">CHALLENGE A FRIEND</button>
       </div>`);
     node.querySelector('[data-a="camp"]').addEventListener('click', onCamp);
     node.querySelector('[data-a="nabe"]')?.addEventListener('click', onNabe);

@@ -2028,7 +2028,7 @@ export class Game {
         if (v) {
           // For the photo: a little wider and higher, with the friends in frame
           if (this.photo) this.rig.orbit(v.x, v.y + 0.85, v.z, 5.2, 1.5, v.angle - 0.3);
-          else this.rig.orbit(v.x, v.y + 0.5, v.z, 5.4, 1.2, v.angle + Math.sin(this.time * 0.25) * 0.22);
+          else this.rig.orbit(v.x, v.y + 0.95, v.z, 4.3, 0.42, v.angle + Math.sin(this.time * 0.25) * 0.22);
           this.grill.update(dt);
         }
         break;
@@ -2117,7 +2117,8 @@ export class Game {
       }
       case 'cook': {
         const v = this.cookView;
-        this.rig.orbit(v.x, v.y + 0.5, v.z, 2.1, 1.55, v.angle);
+        // Wide enough for the whole skewer, the camper tending it beside the fire
+        this.rig.orbit(v.x, v.y + 0.6, v.z, 3.3, 1.35, v.angle - 0.85);
         // Nothing cooks until the camera has arrived
         if (this.stateTime > 1.2) {
           if (this.grill.update(dt) && this.cookEnd === null) this.cookResult('burnt');

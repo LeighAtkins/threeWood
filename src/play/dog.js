@@ -165,7 +165,7 @@ export class DogModel {
     const hop = Math.abs(Math.sin(t * 7)) * 0.12 * p.hop;
     const bob = Math.abs(Math.sin(t * (10 + Math.min(10, speed)))) * 0.025 * p.run;
     this.body.rotation.x = -0.45 * p.sit - 0.15 * p.beg + 0.06 * p.sniff;
-    this.body.position.y = 0.27 - 0.03 * p.sit - 0.165 * p.lie + hop + bob;
+    this.body.position.y = 0.27 - 0.115 * p.sit - 0.165 * p.lie + hop + bob; // seated: haunches on the grass
     this.body.position.z = -0.13 + 0.02 * p.lie;
     // Head: down to sniff, low when sad, a tilt now and then
     const tilt = Math.sin(t * 0.7) > 0.85 ? 0.3 : 0;
@@ -545,15 +545,17 @@ export class Dog {
     if (s === 'summary') {
       const site = g.campsite;
       site.updateMatrixWorld();
-      const v = this._v.set(0.95, 0, 1.05).applyMatrix4(site.matrixWorld);
-      return { x: v.x, z: v.z, pose: g.photo ? 'sit' : 'lie', face: { x: site.position.x, z: site.position.z }, speed: 6 };
+      // Across the fire from the camera, sitting up and facing it
+      // (sitting reads as a dog from there; lying read as a cushion)
+      const v = this._v.set(1.0, 0, -0.55).applyMatrix4(site.matrixWorld);
+      return { x: v.x, z: v.z, pose: 'sit', face: { x: g.camera.position.x, z: g.camera.position.z }, speed: 6 };
     }
     if (s === 'cook' || s === 'nabe') {
       const v = s === 'cook' ? g.cookView : g.campView;
       if (!v) return null;
       // Across the fire from the camera, looking hopeful
-      const a = s === 'cook' ? v.angle + 1.1 : v.angle + Math.PI + 0.55;
-      const r = s === 'cook' ? 1.3 : 1.2;
+      const a = s === 'cook' ? v.angle + 1.1 : v.angle + Math.PI + 1.05;
+      const r = s === 'cook' ? 1.3 : 2.1;
       return { x: v.x + Math.cos(a) * r, z: v.z + Math.sin(a) * r, pose: 'beg', face: { x: v.x, z: v.z }, speed: 8 };
     }
     if (s === 'holed' || s === 'result') return this.roam(world.cup, 2.5, 4.5);
