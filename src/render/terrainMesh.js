@@ -46,6 +46,11 @@ export function buildTerrainMesh(world) {
   const positions = new Float32Array(count * 3);
   const colors = new Float32Array(count * 3);
   const uvs = new Float32Array(count * 2);
+  // Mowing, drawn per pixel in the shader so the lines are crisp:
+  // (stripe coordinate along the hole, fairway weight, green weight) and the
+  // green's own (u, v) for its checkerboard
+  const mow = new Float32Array(count * 3);
+  const mowGreen = new Float32Array(count * 2);
 
   const noise = createGameRng(`${spec.seed}:paint-${spec.number}`).noise2D;
   const palette = {};
@@ -76,15 +81,18 @@ export function buildTerrainMesh(world) {
         const w = (1 - smoothstep(half - 1.6, half + 1.6, info.dist)) * smoothstep(spec.fairwayStart - 2, spec.fairwayStart + 2, info.along);
         const far = Math.min(1, Math.max(0, (info.dist - 30) / 70));
         c.copy(palette.rough).lerp(deepRough, far * 0.8);
-        // Mow stripes run across the line of play
-        const stripe = Math.floor(info.along / 9) % 2 === 0 ? 1.045 : 0.955;
-        shade *= lerp(1 + noise(x * 0.2, z * 0.2) * 0.07, stripe, w);
+        // Mow stripes run across the line of play (drawn in the shader)
+        shade *= lerp(1 + noise(x * 0.2, z * 0.2) * 0.07, 1, w);
+        mow[i * 3] = info.along / 9;
+        mow[i * 3 + 1] = w;
         c.lerp(palette.fairway, w);
       } else if (type === 'green') {
         const g = spec.green;
         const lx = (x - g.x) * Math.cos(-g.angle) - (z - g.z) * Math.sin(-g.angle);
         const lz = (x - g.x) * Math.sin(-g.angle) + (z - g.z) * Math.cos(-g.angle);
-        shade *= (Math.floor(lx / 3 + 100) + Math.floor(lz / 3 + 100)) % 2 === 0 ? 1.03 : 0.97;
+        mowGreen[i * 2] = lx / 2.6;
+        mowGreen[i * 2 + 1] = lz / 2.6;
+        mow[i * 3 + 2] = 1;
       }
       colors[i * 3] = c.r * shade;
       colors[i * 3 + 1] = c.g * shade;
@@ -106,6 +114,8 @@ export function buildTerrainMesh(world) {
   geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
   geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+  geometry.setAttribute('aMow', new THREE.BufferAttribute(mow, 3));
+  geometry.setAttribute('aMowGreen', new THREE.BufferAttribute(mowGreen, 2));
   geometry.setIndex(new THREE.BufferAttribute(index, 1));
   geometry.computeVertexNormals();
   geometry.computeBoundingSphere();
@@ -118,8 +128,18 @@ export function buildTerrainMesh(world) {
   // Night golf: after dark the turf gives back its own colour, the mown grass most
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uGlow = terrainGlow;
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute vec3 aMow;\nattribute vec2 aMowGreen;\nvarying vec3 vMow;\nvarying vec2 vMowGreen;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvMow = aMow; vMowGreen = aMowGreen;');
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', '#include <common>\nuniform float uGlow;')
+      .replace('#include <common>', '#include <common>\nuniform float uGlow;\nvarying vec3 vMow;\nvarying vec2 vMowGreen;')
+      .replace('#include <color_fragment>', `#include <color_fragment>
+        // Mow lines: a square wave, softened by its own screen-space width so
+        // distant stripes blend instead of shimmering
+        float sw = clamp(sin(3.14159 * vMow.x) / max(fwidth(vMow.x) * 3.2, 0.02), -1.0, 1.0);
+        float gu = clamp(sin(3.14159 * vMowGreen.x) / max(fwidth(vMowGreen.x) * 3.2, 0.02), -1.0, 1.0);
+        float gv = clamp(sin(3.14159 * vMowGreen.y) / max(fwidth(vMowGreen.y) * 3.2, 0.02), -1.0, 1.0);
+        diffuseColor.rgb *= 1.0 + sw * 0.085 * vMow.y + gu * gv * 0.07 * vMow.z;`)
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
         float lawn = smoothstep(0.0, 0.22, vColor.g - max(vColor.r, vColor.b));
         totalEmissiveRadiance += vColor.rgb * vec3(0.75, 1.15, 0.95) * uGlow * (0.3 + 0.9 * lawn);`);
@@ -133,7 +153,11 @@ export function buildTerrainMesh(world) {
     new THREE.PlaneGeometry(4000, 4000).rotateX(-Math.PI / 2),
     new THREE.MeshLambertMaterial({ color: deepRough.clone().lerp(palette.rough, 0.2) }),
   );
-  apron.position.y = biome.base - biome.amp1 - 0.6;
+  // Always under the lowest ground on the tile: a gorge or a deep pond bed
+  // that dipped below it was drawn as a flat dark sheet
+  let lowest = Infinity;
+  for (let i = 0; i < heights.length; i++) if (heights[i] < lowest) lowest = heights[i];
+  apron.position.y = Math.min(biome.base - biome.amp1 - 0.6, lowest - 1.5);
   mesh.add(apron);
 
   return mesh;

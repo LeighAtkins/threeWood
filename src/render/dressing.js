@@ -109,6 +109,7 @@ export function buildDressing(world) {
       new THREE.MeshBasicMaterial({ color: 0xffc83d, transparent: true, opacity: 0.42, depthWrite: false, side: THREE.DoubleSide }));
     beacon.position.set(cup.x, cup.y + 7, cup.z);
     group.add(beacon);
+    group.userData.beacon = beacon;
   }
   return group;
 }

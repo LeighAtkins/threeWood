@@ -2254,7 +2254,16 @@ export class Game {
     this.sun.position.set(fx + light.x * 260, light.y * 260, fz + light.z * 260);
 
     this.updateClub(dt);
-    if (this.dressing) this.dressing.visible = this.state !== 'title'; // no beacon behind the logo
+    if (this.dressing) {
+      this.dressing.visible = this.state !== 'title'; // no beacon behind the logo
+      // The bucket's beam finds the cup from the tee; up close it would fill the screen
+      const beacon = this.dressing.userData.beacon;
+      if (beacon) {
+        const d = Math.hypot(camera.position.x - beacon.position.x, camera.position.z - beacon.position.z);
+        beacon.material.opacity = 0.42 * Math.min(1, Math.max(0, (d - 10) / 30));
+        beacon.visible = beacon.material.opacity > 0.01;
+      }
+    }
     this.updateCamper(dt);
     this.dog.update(dt);
     this.forage.update(dt);
