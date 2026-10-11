@@ -92,7 +92,7 @@ export function buildNightGlow(world) {
   return group;
 }
 
-export function updateNightGlow(group, night, time) {
+export function updateNightGlow(group, night, time, camera = null) {
   terrainGlow.value = night * (0.3 + Math.sin(time * 0.8) * 0.02);
   if (!group) return;
   group.visible = night > 0.02;
@@ -103,7 +103,11 @@ export function updateNightGlow(group, night, time) {
   u.lampMat.opacity = night;
   u.postMat.opacity = night;
   u.poolMat.opacity = night * 0.24 * breathe;
-  u.beamMat.opacity = night * 0.2 * breathe;
-  u.haloMat.opacity = night * 0.45 * breathe;
+  // A beacon from down the fairway; up close (putting) it would wash the
+  // green out, so it fades as the camera nears the cup
+  const d = camera ? camera.position.distanceTo(u.halo.position) : 99;
+  const far = Math.min(1, Math.max(0, (d - 5) / 12));
+  u.beamMat.opacity = night * 0.2 * breathe * (0.25 + 0.75 * far);
+  u.haloMat.opacity = night * 0.45 * breathe * far;
   u.halo.scale.setScalar(1 + Math.sin(time * 2.1) * 0.12);
 }

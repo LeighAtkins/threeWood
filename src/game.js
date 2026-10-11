@@ -2245,10 +2245,11 @@ export class Game {
     updateScenery(this.scenery, this.time, dt, this.sky);
     // After dark: the course, the ball and the campers carry their own light
     const night = this.sky.night;
-    updateNightGlow(this.nightGlow, night, this.time);
+    updateNightGlow(this.nightGlow, night, this.time, camera);
     this.gimmicks.update(dt, this.time);
     this.ballMesh.material.emissiveIntensity = 0.42 + night * 0.9;
-    this.ballLight.intensity = this.ballMesh.visible ? night * 7 : 0;
+    // (gentler on the green, where the camera is close and it would bleach the turf)
+    this.ballLight.intensity = this.ballMesh.visible ? night * (this.putting || ball.surface === 'green' ? 1.6 : 7) : 0;
     this.ballLight.position.set(this.ballMesh.position.x, this.ballMesh.position.y + 0.7, this.ballMesh.position.z);
     this.camper.setGlow(night);
     for (const o of this.net.others.map.values()) o.camper.setGlow(night);
