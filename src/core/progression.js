@@ -77,10 +77,11 @@ export function difficultyPips(courseD, level) {
 // Short, plain words and a picture each: they must work for someone reading
 // in their second language. icon names are drawn by ui/glyphs.js.
 const TIPS = [
+  // (in the order of the opening holes: the bucket, crazy golf, the ski jump...)
   { icon: 'tap3', text: 'One tap for each dot on the button. This first time, the bar waits for you.' },
-  { icon: 'wind', text: 'Wind pushes the ball. Aim a little into it.' },
+  { icon: 'dots', text: 'The dots on the green roll downhill. Aim your putt with them.' },
   { icon: 'shape', text: 'Good hit? Swipe to curve the ball.' },
-  { icon: 'dots', text: 'The dots roll downhill. Your putt line is shorter now.' },
+  { icon: 'wind', text: 'Wind pushes the ball. Aim a little into it.' },
   { icon: 'pin', text: 'The flag is near the edge. The middle is safe.' },
   { icon: 'fast', text: 'The bar is faster now.' },
 ];

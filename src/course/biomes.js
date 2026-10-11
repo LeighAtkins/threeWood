@@ -220,6 +220,11 @@ export function courseBiomes(seedString) {
     const j = Math.floor(rng() * (i + 1));
     [pool[i], pool[j]] = [pool[j], pool[i]];
   }
+  // The opening stretch is where a player decides to stay: it is always one
+  // of the bright, friendly worlds (the moodier ones come later in the round)
+  const WELCOMING = ['parkland', 'tropics', 'blossom', 'autumn', 'toadstool'];
+  const first = pool.findIndex((id) => WELCOMING.includes(id));
+  if (first > 0) [pool[0], pool[first]] = [pool[first], pool[0]];
   return pool.slice(0, WORLDS_PER_ROUND);
 }
 

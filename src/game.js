@@ -187,6 +187,9 @@ export class Game {
     const vignette = document.createElement('div');
     vignette.className = 'vignette';
     this.container.appendChild(vignette);
+    this.fadeEl = document.createElement('div');
+    this.fadeEl.className = 'fade';
+    document.body.appendChild(this.fadeEl);
     this.renderer = renderer;
     this.canvas = renderer.domElement;
   }
@@ -407,7 +410,23 @@ export class Game {
     this.rng = createGameRng(`${this.seed}:play:${Date.now()}`).rng;
     this.hud.clearLayer();
     this.keepAwake();
-    this.startHole();
+    this.dip(() => this.startHole());
+  }
+
+  /**
+   * A dip through dark green: fade out, do the cut (a new hole, a new scene)
+   * while nothing can be seen, fade back in. Instant in manual (test) mode.
+   */
+  dip(cut) {
+    if (this.manual || !this.fadeEl) { cut(); return; }
+    this.fadeEl.classList.add('on');
+    clearTimeout(this.dipTimer);
+    this.dipTimer = setTimeout(() => {
+      cut();
+      this.rig.cut();
+      // Two frames for the new scene to draw before it is revealed
+      requestAnimationFrame(() => requestAnimationFrame(() => this.fadeEl.classList.remove('on')));
+    }, 260);
   }
 
   /** A round with friends: everyone builds the same course from the host's seed. */
@@ -952,7 +971,7 @@ export class Game {
   refreshClubHud() {
     const lie = this.lie;
     const penalty = Math.round((1 - lie.speedFactor) * 100);
-    const lieText = this.onTee ? 'TEE' : penalty ? `${lie.name.toUpperCase()} −${penalty}%` : lie.name.toUpperCase();
+    const lieText = this.onTee && !this.world.spec.green.channel ? 'TEE' : penalty ? `${lie.name.toUpperCase()} −${penalty}%` : lie.name.toUpperCase();
     if (this.putting) {
       this.hud.setClub({ name: 'Putter', yards: `${feet(this.targetDist)} ft to hole`, lie: lieText, canChange: this.availableClubs().length > 1 });
       this.hud.setAction('hold');
@@ -1782,7 +1801,7 @@ export class Game {
       this.nextHole = null;
       this.audio.tap();
       this.hud.clearLayer();
-      if (last) this.showSummary(); else this.startHole();
+      this.dip(() => { if (last) this.showSummary(); else this.startHole(); });
     };
     this.hud.showResult({
       title: scoreName(this.strokes, par),

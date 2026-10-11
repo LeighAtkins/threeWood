@@ -187,7 +187,8 @@ function buildTeeMarkers(world) {
   const cut = new THREE.MeshLambertMaterial({ color: 0xe2c08a, flatShading: true });
   const red = new THREE.MeshLambertMaterial({ color: 0xff5a3c, flatShading: true });
   const white = new THREE.MeshLambertMaterial({ color: 0xfff6e4, flatShading: true });
-  for (const side of [1, -1]) {
+  // (crazy golf starts on the lane itself: no tee box, no markers)
+  for (const side of world.spec.green.channel ? [] : [1, -1]) {
     const m = new THREE.Group();
     m.add(new THREE.Mesh(stumpGeo, [bark, cut, cut]), new THREE.Mesh(ballGeo, red), new THREE.Mesh(bandGeo, white));
     const x = world.tee.x - p.dirZ * side * 1.6 + p.dirX * 0.3;
