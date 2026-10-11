@@ -510,8 +510,11 @@ export class Dog {
         const d = rMin + Math.random() * (rMax - rMin);
         const x = anchor.x + Math.cos(a) * d, z = anchor.z + Math.sin(a) * d;
         if (world.surfaceAt(x, z) === 'water') continue;
-        // Never right up against the lens
+        // Never right up against the lens, or under the golfer's feet
         if (Math.hypot(x - g.camera.position.x, z - g.camera.position.z) < 4.5) continue;
+        const cg = g.camper.group.position;
+        if (g.camper.group.visible && Math.hypot(x - cg.x, z - cg.z) < 2.6) continue;
+        if (Math.hypot(x - g.ball.x, z - g.ball.z) < 2.2) continue;
         r = this.roamAt = { x, z, ax: anchor.x, az: anchor.z, t: null, pose: ['sit', 'sniff', 'sit', 'lie', 'sniff'][Math.floor(Math.random() * 5)] };
         break;
       }
@@ -576,7 +579,7 @@ export class Dog {
     }
     // Lining up: she potters about near the ball
     this.anchor = { x: ball.x, z: ball.z };
-    return this.roam(this.anchor, g.putting ? 2 : 2.5, g.putting ? 4.5 : 6.5);
+    return this.roam(this.anchor, g.putting ? 2.6 : 3.4, g.putting ? 5 : 7);
   }
 
   update(dt) {
