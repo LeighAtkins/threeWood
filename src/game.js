@@ -2284,6 +2284,9 @@ export class Game {
     this.skip.update(dt);
     this.nabe.update(dt);
     this.net.update(dt);
+    // The course's own sound: quieter under menus and minigames
+    const busy = this.paused || ['fishing', 'cook', 'nabe', 'creator'].includes(this.state);
+    this.audio.ambience(dt, { night: this.sky.night, wind: this.world?.spec.wind.speed || 0, level: busy ? 0.15 : this.state === 'title' ? 0.6 : 1 });
     updateScenery(this.scenery, this.time, dt, this.sky);
     // After dark: the course, the ball and the campers carry their own light
     const night = this.sky.night;

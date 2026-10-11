@@ -223,6 +223,57 @@ export class Audio {
 
   whoosh() { this.burst(0.5, { gain: 0.1, freq: 400, to: 1800, q: 0.6 }); }
 
+  // --- Ambience: the course is never silent -------------------------------------
+
+  /**
+   * Called every frame. A breeze that swells with the wind, birdsong by day,
+   * crickets after dark, each very quiet and all synthesised. level: 0..1,
+   * how much of it there should be (the menus and minigames turn it down).
+   */
+  ambience(dt, { night = 0, wind = 0, level = 1 } = {}) {
+    if (!this.ctx || this.ctx.state !== 'running') return;
+    if (!this.breeze) {
+      const src = this.ctx.createBufferSource();
+      src.buffer = this.noise; src.loop = true;
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = 'lowpass'; filter.frequency.value = 500; filter.Q.value = 0.4;
+      const gain = this.ctx.createGain(); gain.gain.value = 0;
+      src.connect(filter).connect(gain).connect(this.master);
+      src.start();
+      this.breeze = { filter, gain, t: 0 };
+      this.nextBird = 2; this.nextCricket = 0;
+    }
+    const b = this.breeze;
+    b.t += dt;
+    // Gusts: two slow waves, a little stronger in a strong wind
+    const gust = 0.55 + 0.3 * Math.sin(b.t * 0.37) + 0.15 * Math.sin(b.t * 1.13 + 1);
+    const want = level * (0.012 + Math.min(15, wind) * 0.0016) * gust;
+    b.gain.gain.setTargetAtTime(want, this.ctx.currentTime, 0.4);
+    b.filter.frequency.setTargetAtTime(380 + 420 * gust, this.ctx.currentTime, 0.6);
+    if (level < 0.2) return;
+    // A bird now and then while the sun is up
+    this.nextBird -= dt;
+    if (this.nextBird <= 0) {
+      this.nextBird = 3 + Math.random() * 7;
+      if (night < 0.5) this.chirp(level * (1 - night));
+    }
+    // Crickets after dark: short trills in a steady rhythm
+    this.nextCricket -= dt;
+    if (this.nextCricket <= 0) {
+      this.nextCricket = 0.9 + Math.random() * 0.5;
+      if (night > 0.4) for (let i = 0; i < 3; i++) this.tone(4300 + Math.random() * 120, 0.035, { gain: 0.014 * level * night, delay: i * 0.06 });
+    }
+  }
+
+  /** One small bird: a few quick falling (or rising) notes. */
+  chirp(level = 1) {
+    const base = 2600 + Math.random() * 1600, n = 2 + Math.floor(Math.random() * 3), up = Math.random() < 0.4;
+    for (let i = 0; i < n; i++) {
+      const f = base * (1 + (Math.random() - 0.5) * 0.08);
+      this.tone(f, 0.07, { gain: 0.016 * level, to: up ? f * 1.25 : f * 0.72, delay: i * (0.09 + Math.random() * 0.04) });
+    }
+  }
+
   /** Kuri: a small happy yip. */
   yip() {
     const f = 820 + Math.random() * 160;
