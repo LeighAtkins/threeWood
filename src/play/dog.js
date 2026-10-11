@@ -501,11 +501,17 @@ export class Dog {
     if (moved || (here && (r.t -= 1 / 60) <= 0)) {
       const aim = g.aimAngle ?? 0;
       for (let i = 0; i < 12; i++) {
-        // Off to either side of the line of play, ahead of the camera so she stays in view
-        const a = aim + (Math.random() < 0.5 ? 1 : -1) * (0.55 + Math.random() * 0.8);
+        // Off to one side of the line of play (the same side each time, so she
+        // never trots across it), ahead of the camera so she stays in view;
+        // on the green, well wide of the putt
+        if (moved || !this.roamSide) this.roamSide = Math.random() < 0.5 ? 1 : -1;
+        const putt = g.putting;
+        const a = aim + this.roamSide * (putt ? 1.15 + Math.random() * 0.4 : 0.55 + Math.random() * 0.8);
         const d = rMin + Math.random() * (rMax - rMin);
         const x = anchor.x + Math.cos(a) * d, z = anchor.z + Math.sin(a) * d;
         if (world.surfaceAt(x, z) === 'water') continue;
+        // Never right up against the lens
+        if (Math.hypot(x - g.camera.position.x, z - g.camera.position.z) < 4.5) continue;
         r = this.roamAt = { x, z, ax: anchor.x, az: anchor.z, t: null, pose: ['sit', 'sniff', 'sit', 'lie', 'sniff'][Math.floor(Math.random() * 5)] };
         break;
       }
