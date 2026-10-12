@@ -1454,8 +1454,9 @@ export class Game {
     let steps = 0;
     while (this.simAccumulator >= SIM_DT && steps < 40 && (ball.mode === 'air' || ball.mode === 'roll')) {
       stepBall(ball, world, this.env, SIM_DT, this.events);
-      // Off a friend's head: a new flight, so a new plan
+      // Off a friend's head, or into a friend's ball: a new flight, so a new plan
       if (this.net.bonkCheck(ball, null, null, this.shot.putt)) { this.plan = this.planShot(); this.shot.events.push('bonk'); }
+      if (this.net.knockCheck(ball)) { this.plan = this.planShot(); this.shot.events.push('knock'); }
       this.simAccumulator -= SIM_DT;
       steps++;
       if (this.gimmicks.rings.length) this.checkRings(); // every step: a fast ball must not skip a hoop
@@ -1616,6 +1617,38 @@ export class Game {
     }
   }
 
+  /**
+   * A friend's ball ran into mine while I was lining up: it rolls away (or
+   * in!) at speed v, and no stroke is counted. Returns false if I was busy
+   * (mid-swing): the knock is ignored here and my next shot puts it right.
+   */
+  knocked(vx, vz, by) {
+    if (this.state !== 'aim' || this.paused || this.walkIn) return false;
+    const { ball } = this;
+    const speed = Math.hypot(vx, vz);
+    if (!(speed > 0.05)) return false;
+    this.shot = {
+      putt: true, knocked: true, gimme: true, reported: true, by,
+      fromX: ball.x, fromZ: ball.z, fromSurface: ball.surface, toPin: this.toPin, treeCalled: false, events: [],
+      shapeable: false, bend: 0, bite: 0, replan: false, shaped: false,
+    };
+    this.follow = { t: 0, putt: true, dirX: vx / speed, dirZ: vz / speed, x: ball.x, y: ball.y, z: ball.z, kind: 'putter', size: this.clubSize || 1.3 };
+    this.hud.setMeterFlag(null);
+    this.hud.hideMeter();
+    this.hud.demo(null);
+    this.hud.setControlsVisible(false);
+    this.effects.hideAim();
+    this.effects.beads.hide();
+    puttBall(ball, { speed, dirX: vx / speed, dirZ: vz / speed });
+    this.plan = this.planShot();
+    this.setState('flight');
+    this.simAccumulator = 0;
+    this.hud.callout(`🎱 KNOCKED BY ${by.toUpperCase()}!`, 'bad');
+    this.camper.feel('oops', 2);
+    this.audio.bounce(6, 'green');
+    return true;
+  }
+
   /** Tell the room what my shot did, if it was anything worth hearing (once a shot). */
   reportShot(mode) {
     const { shot, ball, world } = this;
@@ -1750,6 +1783,8 @@ export class Game {
     const { ball, world, shot, round } = this;
     this.effects.endTrail();
     const toPin = Math.hypot(world.cup.x - ball.x, world.cup.z - ball.z);
+    // Knocked by a friend's ball: no stroke, no fuss, line it up again
+    if (shot.knocked) { this.hud.callout(`${feet(toPin)} ft left`, 'small'); this.beginAim(); return; }
     const carried = Math.hypot(ball.x - shot.fromX, ball.z - shot.fromZ);
     if (this.strokes === 1) this.holeLog.teeToPin = toPin; // the par-3 contest
     const surface = ball.surface;
@@ -1834,7 +1869,9 @@ export class Game {
     this.effects.confetti(world.cup.x, world.cup.y, world.cup.z, 70 + Math.max(0, par - this.strokes) * 50);
     this.rig.addShake(0.08);
 
-    if (shot.putt && !shot.gimme) {
+    if (shot.knocked) {
+      this.hud.callout(`KNOCKED IN! THANKS ${shot.by.toUpperCase()}`, 'gold');
+    } else if (shot.putt && !shot.gimme) {
       const ft = feet(shot.toPin);
       round.stats.longestPutt = Math.max(round.stats.longestPutt, ft);
       if (ft >= 20) this.hud.callout(`${ft} FT BOMB!`, 'gold');

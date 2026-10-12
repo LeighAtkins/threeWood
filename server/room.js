@@ -234,7 +234,7 @@ export class RoomObject {
     this.broadcast({ ...msg, from: att.id }, ws);
     this.watch(att.id, msg);
     // The bots listen to the room too, and answer back
-    if ((msg.t === 'hap' || msg.t === 'bonk' || msg.t === 'card' || msg.t === 'done') && this.bots?.list.length) { this.bots.heard(att.id, msg); this.scheduleTick(); }
+    if ((msg.t === 'hap' || msg.t === 'bonk' || msg.t === 'card' || msg.t === 'done' || msg.t === 'knock') && this.bots?.list.length) { this.bots.heard(att.id, msg); this.scheduleTick(); }
   }
 
   /** A deliberate leave (the app closes with 'bye') gives the seat up at once; a dropped

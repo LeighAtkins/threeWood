@@ -277,6 +277,7 @@ export class Bots {
     // The board, as the bots know it: everyone's total from their 'done'
     this.totals ||= new Map();
     if (msg.t === 'done' && Number.isFinite(+msg.total)) this.totals.set(from, +msg.total);
+    if (msg.t === 'knock') { this.knocked(msg); return; }
     if (msg.t === 'card' && CARDS[msg.id]?.kind === 'mischief') {
       const b = this.list.find((x) => x.id === msg.to);
       if (b) {
@@ -302,6 +303,23 @@ export class Bots {
       const b = pool.splice(Math.floor(Math.random() * pool.length), 1)[0];
       this.pending.push({ id: b.id, t: 0.7 + Math.random() * 1.6 + i * 0.8, msg: { t: 'quip', k: kind, i: Math.floor(Math.random() * QUIPS[kind].length), to } });
     }
+  }
+
+  /**
+   * Someone's ball ran into a bot's ball at rest: it rolls (no stroke) and the
+   * bot walks over and thinks again. A knock while it is swinging is ignored.
+   */
+  knocked(msg) {
+    const { world, round } = this.game;
+    const b = this.list.find((x) => x.id === msg.who);
+    if (!b || !world || !round || msg.hole !== round.index || !['arriving', 'thinking', 'ready'].includes(b.state)) return;
+    const vx = +msg.vx || 0, vz = +msg.vz || 0, speed = Math.hypot(vx, vz);
+    if (!(speed > 0.05) || speed > 20) return;
+    puttBall(b.ball, { speed, dirX: vx / speed, dirZ: vz / speed });
+    const run = simulate(b.ball, world, { windX: world.spec.wind.x, windZ: world.spec.wind.z }, { maxTime: 20 });
+    b.read = null; b.hap = null;
+    b.state = 'flying';
+    b.t = Math.min(20, run.time ?? 3) + 0.5;
   }
 
   /** A bot's Camp Card, a moment after it finishes: often mischief for whoever is just above it. */

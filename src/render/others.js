@@ -188,6 +188,18 @@ export class Others {
     o.hop = 0.45;
   }
 
+  /** Their ball was knocked by another ball: roll the replay from where it lay. */
+  knock(id, s) {
+    const o = this.map.get(id);
+    if (!o || !s) return;
+    const n = (v) => (Number.isFinite(+v) ? +v : 0);
+    const vx = n(s.vx), vz = n(s.vz), speed = Math.hypot(vx, vz);
+    if (!(speed > 0.05)) return;
+    placeBall(o.sim, this.world || o.world, n(s.x), n(s.z));
+    puttBall(o.sim, { speed, dirX: vx / speed, dirZ: vz / speed });
+    o.flying = true; o.flyT = 0; o.acc = 0; o.ball.visible = true;
+  }
+
   /** Their ball took a new flight (off someone's head): fly the replay from there. */
   resync(id, s) {
     const o = this.map.get(id);
@@ -229,6 +241,7 @@ export class Others {
 
   update(dt, world, env, camera, show) {
     const events = [];
+    this.world = world;
     this.t = (this.t || 0) + dt;
     for (const o of this.map.values()) {
       const g = o.camper.group;

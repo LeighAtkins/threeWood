@@ -32,6 +32,8 @@ const NEXT_DELAY = 8;   // seconds on the result card once everyone has finished
 const KINDS = ['wood', 'iron', 'putter'];
 const POSES = ['perch', 'perchWarm', 'sit', 'warm', 'peace', 'cheer', 'hello', 'wave'];
 export const EMOTES = ['👏', '😂', '😱', '🔥'];
+// Things to say, sent as their number: no typing, nothing typed on the wire
+export const SAYINGS = ['Nice shot!', 'Unlucky!', 'FORE!', 'Hurry up 🐢', 'Watch this', 'GG'];
 const num = (v, lo, hi, d = 0) => (Number.isFinite(+v) ? Math.max(lo, Math.min(hi, +v)) : d);
 const vsPar = (n) => (n === 0 ? 'E' : n > 0 ? `+${n}` : `${n}`);
 
@@ -301,6 +303,13 @@ export class NetPlay {
         } else g.hud.callout(`${this.nameOf(from)} ${EMOTES[i]}`, 'small');
         break;
       }
+      case 'say': {
+        const text = SAYINGS[num(msg.i, -1, 99, -1)];
+        if (!text) break;
+        this.others.say(from, text);
+        g.hud.callout(`${this.nameOf(from)}: ${text}`, 'small');
+        break;
+      }
       case 'hap':
         if (HAPPENINGS[msg.k]) this.onHap(from, msg.k, num(msg.v, 0, 999));
         break;
@@ -315,6 +324,15 @@ export class NetPlay {
       case 'card':
         if (CARDS[msg.id]) this.onCard(from, msg.id, typeof msg.to === 'string' ? msg.to : null);
         break;
+      case 'knock': {
+        const who = typeof msg.who === 'string' ? msg.who : null;
+        if (!who || !this.inRound || msg.hole !== g.round?.index) break;
+        const s = { x: num(msg.x, -400, 400), z: num(msg.z, -400, 400), vx: num(msg.vx, -20, 20), vz: num(msg.vz, -20, 20) };
+        if (who === this.myId) g.knocked(s.vx, s.vz, this.nameOf(from));
+        else this.others.knock(who, s);
+        this.knockNews(from, who);
+        break;
+      }
       case 'bonk':
         this.onBonk(typeof msg.by === 'string' ? msg.by : from, typeof msg.who === 'string' ? msg.who : null, msg.s, from);
         break;
@@ -594,6 +612,47 @@ export class NetPlay {
     return false;
   }
 
+  /**
+   * My ball (rolling, or just bouncing along the turf) into a friend's ball
+   * at rest: pool rules. Theirs takes the push along the line of centres,
+   * mine keeps the rest. Called every step of my ball; true if it hit.
+   */
+  knockCheck(ball) {
+    if (!this.active || this.players.length < 2 || ball.mode === 'rest') return false;
+    for (const o of this.others.map.values()) {
+      if (!o.placed || o.flying || !o.ball.visible || this.status.get(o.id) === 'done' || o.camp) continue;
+      const p = o.ball.position;
+      const dx = p.x - ball.x, dz = p.z - ball.z, d2 = dx * dx + dz * dz;
+      if (d2 > 0.0081 || Math.abs(p.y - ball.y) > 0.12) continue; // (two radii: 0.09 m)
+      const d = Math.sqrt(d2) || 0.001, nx = dx / d, nz = dz / d;
+      const vn = ball.vx * nx + ball.vz * nz;
+      if (vn < 0.3) continue; // (not moving into it)
+      const key = `knock>${o.id}`;
+      if (this.bonked.has(key)) continue;
+      this.bonked.add(key);
+      setTimeout(() => this.bonked.delete(key), 1500);
+      const vx = vn * nx * 0.92, vz = vn * nz * 0.92;
+      ball.vx -= vn * nx; ball.vz -= vn * nz;
+      const s = { x: p.x, z: p.z, vx, vz };
+      this.room.send({ t: 'knock', who: o.id, hole: this.g.round.index, ...s });
+      this.others.knock(o.id, s);
+      this.knockNews(this.myId, o.id);
+      return true;
+    }
+    return false;
+  }
+
+  knockNews(by, who) {
+    const c = this.haps.get(by) || {};
+    c.knock = (c.knock || 0) + 1;
+    this.haps.set(by, c);
+    const a = by === this.myId ? 'You' : this.nameOf(by);
+    const b = who === this.myId ? 'your' : `${this.nameOf(who)}'s`;
+    this.addFeed(`🎱 ${a} knocked ${b} ball`, 'lol', by === this.myId ? null : by);
+    this.g.audio.bounce(5, 'green');
+    this.g.audio.giggle(1);
+  }
+
   onBonk(by, who, s, from) {
     if (!this.inRound || !who) return;
     // (only the ball's owner says, or the host for a bot)
@@ -687,6 +746,8 @@ export class NetPlay {
     const list = awards(this.haps, this.players.map((p) => p.id));
     const bonks = [...this.haps.entries()].filter(([, c]) => c.bonk).sort((a, b) => b[1].bonk - a[1].bonk)[0];
     if (bonks && !list.some((a) => a.id === bonks[0])) list.push({ id: bonks[0], e: '💫', label: 'Head Hunter', award: 'bonk', n: bonks[1].bonk });
+    const pool = [...this.haps.entries()].filter(([, c]) => c.knock).sort((a, b) => b[1].knock - a[1].knock)[0];
+    if (pool && !list.some((a) => a.id === pool[0])) list.push({ id: pool[0], e: '🎱', label: 'Pool Shark', award: 'knock', n: pool[1].knock });
     return list.map((a) => ({ ...a, name: a.id === this.myId ? 'You' : this.nameOf(a.id), me: a.id === this.myId }));
   }
 
@@ -962,7 +1023,7 @@ export class NetPlay {
     const talk = document.createElement('button');
     talk.className = 'talk';
     talk.textContent = '💬';
-    talk.addEventListener('pointerdown', (ev) => { ev.preventDefault(); ev.stopPropagation(); this.emotesOpen = this.emotesOpen > 0 ? 0 : 4; this.paintNow(); });
+    talk.addEventListener('pointerdown', (ev) => { ev.preventDefault(); ev.stopPropagation(); this.emotesOpen = this.emotesOpen > 0 ? 0 : 6; this.paintNow(); });
     this.pill.appendChild(talk);
     if (this.emotesOpen > 0) {
       const row = document.createElement('div');
@@ -974,7 +1035,24 @@ export class NetPlay {
         row.appendChild(b);
       }
       this.pill.appendChild(row);
+      const lines = document.createElement('div');
+      lines.className = 'sayings';
+      SAYINGS.forEach((text, i) => {
+        const b = document.createElement('button');
+        b.textContent = text;
+        b.addEventListener('pointerdown', (ev) => { ev.preventDefault(); ev.stopPropagation(); this.sayLine(i); this.emotesOpen = 0; this.paintNow(); });
+        lines.appendChild(b);
+      });
+      this.pill.appendChild(lines);
     }
+  }
+
+  /** A line to the room (by number). */
+  sayLine(i) {
+    if (!this.active || !SAYINGS[i]) return;
+    this.room.send({ t: 'say', i });
+    this.g.hud.callout(`YOU: ${SAYINGS[i]}`, 'small');
+    this.g.audio.pop();
   }
 
   update(dt) {
