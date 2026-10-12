@@ -2247,10 +2247,11 @@ export class Game {
     const camDist = Math.hypot(camera.position.x - ball.x, camera.position.y - ball.y, camera.position.z - ball.z);
     // (only enough to stay visible: beyond that it must grow and shrink with
     // distance like a real thing, or a ball flying at the camera looks wrong)
-    // In the air it may grow a little more: a few pixels of white against the
-    // sky is the whole shot, so it must read
+    // (no extra growth in the air: with the camera holding still while the
+    // ball flies away, that made it balloon next to the scenery; a faint halo
+    // does the job of keeping it readable instead)
     const air = this.state === 'flight' && ball.mode === 'air';
-    const want = Math.max(1.4, Math.min(air ? 16 : 12, camDist / ((this.rig.portrait ? 8.5 : 11) * (air ? 0.62 : 1))));
+    const want = Math.max(1.4, Math.min(12, camDist / (this.rig.portrait ? 8.5 : 11)));
     // Shrink at once (camera cuts), grow smoothly (ball flying away)
     this.ballScale = want < this.ballScale ? want : this.ballScale + (want - this.ballScale) * Math.min(1, dt * 8);
     const s = this.ballScale;
@@ -2271,8 +2272,8 @@ export class Game {
     this.ballGlowK = (this.ballGlowK || 0) + ((air ? 1 : 0) - (this.ballGlowK || 0)) * Math.min(1, dt * 6);
     this.ballGlow.visible = this.ballGlowK > 0.02 && this.ballMesh.visible;
     this.ballGlow.position.copy(this.ballMesh.position);
-    this.ballGlow.scale.setScalar(BALL_R * s * 9);
-    this.ballGlow.material.opacity = this.ballGlowK * 0.75;
+    this.ballGlow.scale.setScalar(BALL_R * s * 5);
+    this.ballGlow.material.opacity = this.ballGlowK * 0.45;
     if (ball.mode === 'roll' || ball.mode === 'air') {
       const speed = Math.hypot(ball.vx, ball.vz);
       if (speed > 0.05) {
