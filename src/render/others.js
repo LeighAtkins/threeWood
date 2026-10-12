@@ -97,6 +97,16 @@ export class Others {
   }
 
 
+  /** Is a camper at p (feet) standing across the line from the lens c to the ball f? */
+  blocks(c, f, p) {
+    const dx = f.x - c.x, dz = f.z - c.z, len2 = dx * dx + dz * dz;
+    if (len2 < 0.01) return false;
+    const t = ((p.x - c.x) * dx + (p.z - c.z) * dz) / len2;
+    if (t <= 0.05 || t >= 0.92) return false; // (behind the lens, or at or past the ball)
+    const qx = c.x + dx * t - p.x, qz = c.z + dz * t - p.z;
+    return qx * qx + qz * qz < 0.45 * 0.45;
+  }
+
   /** A spot on the ring behind the green, facing the players coming in. */
   gallerySpot(world, o) {
     const { cup, tee, spec } = world;
@@ -239,7 +249,7 @@ export class Others {
     o.ball.visible = false;
   }
 
-  update(dt, world, env, camera, show) {
+  update(dt, world, env, camera, show, focus = null, focusId = null) {
     const events = [];
     this.world = world;
     this.t = (this.t || 0) + dt;
@@ -252,6 +262,9 @@ export class Others {
       o.camper.setFar(camD2 > FACE_FAR * FACE_FAR);
       // (right in the lens: a wall of jacket, not a friend. Step out of the picture)
       if (camD2 < 2.2 * 2.2 && !o.camp) { g.visible = false; o.tag.style.display = 'none'; }
+      // (nor between me and my ball: on a crowded green or a crazy-golf lane,
+      // a friend standing on my line of sight steps out of the picture)
+      else if (focus && !o.camp && o.id !== focusId && this.blocks(camera.position, focus, g.position)) { g.visible = false; o.tag.style.display = 'none'; }
       if (o.camp) { o.ball.visible = false; o.camper.update(dt, o.camp); this.tagAt(o, 1.75, camera); continue; }
       if (o.flying) {
         o.acc += dt; o.flyT += dt;
