@@ -429,6 +429,7 @@ export function simulate(ball, world, env, opts = {}) {
   while ((ball.mode === 'air' || ball.mode === 'roll') && t < maxTime) {
     stepBall(ball, world, env, dt, events);
     t += dt;
+    opts.onStep?.(ball, t);
     if (sample && t >= nextSample) {
       points.push(ball.x, ball.y, ball.z);
       nextSample += sample;

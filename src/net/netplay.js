@@ -330,6 +330,7 @@ export class NetPlay {
         const s = { x: num(msg.x, -400, 400), z: num(msg.z, -400, 400), vx: num(msg.vx, -20, 20), vz: num(msg.vz, -20, 20) };
         if (who === this.myId) g.knocked(s.vx, s.vz, this.nameOf(from));
         else this.others.knock(who, s);
+        if (msg.s && typeof msg.s === 'object') this.others.resync(from, msg.s, msg.s.mode === 'roll' ? 'roll' : 'air');
         this.knockNews(from, who);
         break;
       }
@@ -642,7 +643,9 @@ export class NetPlay {
       const vx = vn * nx * 0.92, vz = vn * nz * 0.92;
       ball.vx -= vn * nx; ball.vz -= vn * nz;
       const s = { x: p.x, z: p.z, vx, vz };
-      this.room.send({ t: 'knock', who: o.id, hole: this.g.round.index, ...s });
+      // (and my own ball's new course, so the room's replay of it turns too)
+      const mine = { x: ball.x, y: ball.y, z: ball.z, vx: ball.vx, vy: ball.vy, vz: ball.vz, mode: ball.mode };
+      this.room.send({ t: 'knock', who: o.id, hole: this.g.round.index, ...s, s: mine });
       this.others.knock(o.id, s);
       this.knockNews(this.myId, o.id);
       return true;

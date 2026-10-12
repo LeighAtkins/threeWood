@@ -134,7 +134,28 @@ export class Bots {
     b.strokes += 1;
     // Where it ends up, and how long that takes: the phones fly the same
     // launch through the same physics, so they will agree
-    const run = simulate(ball, world, env, { maxTime: 40 });
+    // Pool on the green: the bot's ball can run into anyone's ball at rest
+    // (other bots', and people's where they last said it lay)
+    const targets = this.restingBalls(b);
+    const knocks = [];
+    const onStep = targets.length ? (bb, t) => {
+      if (bb.mode === 'air' && bb.y - world.heightAt(bb.x, bb.z) > 0.12) return;
+      for (const o of targets) {
+        if (o.hit) continue;
+        const dx = o.x - bb.x, dz = o.z - bb.z, d2 = dx * dx + dz * dz;
+        if (d2 > 0.0081) continue;
+        const d = Math.sqrt(d2) || 0.001, nx = dx / d, nz = dz / d;
+        const vn = bb.vx * nx + bb.vz * nz;
+        if (vn < 0.3) continue;
+        o.hit = true;
+        bb.vx -= vn * nx; bb.vz -= vn * nz;
+        knocks.push({ who: o.id, x: o.x, z: o.z, vx: vn * nx * 0.92, vz: vn * nz * 0.92, t, s: { x: bb.x, y: bb.y, z: bb.z, vx: bb.vx, vy: bb.vy, vz: bb.vz, mode: bb.mode } });
+      }
+    } : null;
+    const run = simulate(ball, world, env, { maxTime: 40, onStep });
+    // (each knock reaches the room when the ball reaches it on their screens)
+    this.pending ||= [];
+    for (const k of knocks) this.pending.push({ id: b.id, t: k.t, msg: { t: 'knock', who: k.who, hole: round.index, x: k.x, z: k.z, vx: k.vx, vz: k.vz, s: k.s } });
     b.flightTime = Math.min(28, run.time ?? 8);
     // What the room will hear about it, once it has landed on their screens
     b.hap = classify({
@@ -284,7 +305,11 @@ export class Bots {
     // The board, as the bots know it: everyone's total from their 'done'
     this.totals ||= new Map();
     if (msg.t === 'done' && Number.isFinite(+msg.total)) this.totals.set(from, +msg.total);
-    if (msg.t === 'knock') { this.knocked(msg); return; }
+    // Where people's balls lie (for a bot's ball to run into): from their 'at', gone once they hit
+    this.lies ||= new Map();
+    if (msg.t === 'at' && Number.isFinite(+msg.x) && Number.isFinite(+msg.z) && !this.get(from)) this.lies.set(from, { x: +msg.x, z: +msg.z, hole: msg.hole });
+    if (msg.t === 'shot' || msg.t === 'holed' || msg.t === 'done') this.lies.delete(from);
+    if (msg.t === 'knock') { this.lies.delete(msg.who); this.knocked(msg); return; }
     if (msg.t === 'card' && CARDS[msg.id]?.kind === 'mischief') {
       const b = this.list.find((x) => x.id === msg.to);
       if (b) {
@@ -312,6 +337,15 @@ export class Bots {
       const b = pool.splice(Math.floor(Math.random() * pool.length), 1)[0];
       this.pending.push({ id: b.id, t: 0.7 + Math.random() * 1.6 + i * 0.8, msg: { t: 'quip', k: kind, i: Math.floor(Math.random() * QUIPS[kind].length), to } });
     }
+  }
+
+  /** Balls at rest on this hole, other than b's: bots lining up, and people's last lies. */
+  restingBalls(b) {
+    const { round } = this.game;
+    const out = [];
+    for (const o of this.list) if (o !== b && ['arriving', 'thinking', 'ready'].includes(o.state)) out.push({ id: o.id, x: o.ball.x, z: o.ball.z });
+    for (const [id, l] of this.lies || []) if (l.hole === round.index) out.push({ id, x: l.x, z: l.z });
+    return out;
   }
 
   /**
@@ -352,7 +386,7 @@ export class Bots {
       for (const p of this.pending.filter((q) => q.t <= 0)) {
         if (!this.list.some((b) => b.id === p.id)) continue;
         this.net.deliverBot(p.id, p.msg);
-        if (p.msg.t === 'card' || p.msg.t === 'hap') this.heard(p.id, p.msg); // (bots pick on bots too)
+        if (p.msg.t === 'card' || p.msg.t === 'hap' || p.msg.t === 'knock') this.heard(p.id, p.msg); // (bots pick on bots too)
       }
       this.pending = this.pending.filter((q) => q.t > 0);
     }

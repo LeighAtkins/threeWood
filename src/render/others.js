@@ -211,11 +211,11 @@ export class Others {
   }
 
   /** Their ball took a new flight (off someone's head): fly the replay from there. */
-  resync(id, s) {
+  resync(id, s, mode = 'air') {
     const o = this.map.get(id);
     if (!o || !s) return;
     const n = (v) => (Number.isFinite(+v) ? +v : 0);
-    Object.assign(o.sim, { x: n(s.x), y: n(s.y), z: n(s.z), vx: n(s.vx), vy: n(s.vy), vz: n(s.vz), mode: 'air' });
+    Object.assign(o.sim, { x: n(s.x), y: n(s.y), z: n(s.z), vx: n(s.vx), vy: n(s.vy), vz: n(s.vz), mode });
     o.flying = true;
     o.flyT = Math.min(o.flyT, 20);
   }
