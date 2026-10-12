@@ -337,6 +337,15 @@ export class Game {
     });
   }
 
+  /** Title screen: the free strip of screen between the logo and the menu (px). */
+  titleBand() {
+    const logo = this.hud.layer.querySelector('.title .logo')?.getBoundingClientRect();
+    const first = this.hud.layer.querySelector('.title-actions .btn')?.getBoundingClientRect();
+    const H = window.innerHeight;
+    const top = logo ? logo.bottom + 6 : H * 0.2, bottom = first ? first.top - 10 : H * 0.6;
+    return { h: bottom - top, mid: (top + bottom) / 2 };
+  }
+
   resize() {
     const w = window.innerWidth, h = window.innerHeight;
     this.renderer.setSize(w, h);
@@ -604,6 +613,8 @@ export class Game {
     if (state !== 'cook' && !atFire && this.grill?.active) { this.grill.stop(); this.cookHud.hide(); }
     if (!atFire && this.campsite) { this.campsite.visible = false; this.camperUi.hidePoses(); }
     if (!atFire && this.nabe?.active) this.nabe.stop();
+    // The title's framing slides the picture; nothing else does
+    if (state !== 'title' && this.camera.view) { this.camera.clearViewOffset(); this.titleShift = 0; }
     this.state = state;
     this.stateTime = 0;
     this.music.setScene(state);
@@ -2072,8 +2083,22 @@ export class Game {
         // enough to see the course behind them
         const t = this.titleSpot;
         const ang = t.angle + Math.sin(this.time * 0.11) * 0.6;
-        if (this.rig.portrait) this.rig.orbit(t.x, t.y + 0.68, t.z, 6.4, 0.75, ang);
-        else {
+        if (this.rig.portrait) {
+          // Frame the camper and Kuri in the gap the menu actually leaves:
+          // between the bottom of the logo and the top of the first button,
+          // whatever the phone's shape and however many buttons there are
+          const band = this.titleBand();
+          const H = window.innerHeight;
+          const tanHalf = Math.tan((this.camera.fov * Math.PI) / 360);
+          // Far enough for the pair to fit the gap's height, and the screen's width
+          const tall = (2.5 * H) / (Math.max(80, band.h) * 2 * tanHalf);
+          const wide = 1.75 / (tanHalf * (window.innerWidth / H));
+          const d = Math.max(4.5, Math.min(13, Math.max(tall, wide)));
+          this.rig.orbit(t.x, t.y + 0.55, t.z, d, 0.45, ang);
+          // Slide the picture so the middle of the camper sits in the middle of the gap
+          this.titleShift = (this.titleShift ?? 0) + ((H / 2 - band.mid) - (this.titleShift ?? 0)) * Math.min(1, dt * 6);
+          this.camera.setViewOffset(window.innerWidth, H, 0, this.titleShift, window.innerWidth, H);
+        } else {
           // Landscape: the menu is on the right, so frame the pair left of centre
           const side = -1.9, sx = -Math.sin(ang) * side, sz = Math.cos(ang) * side;
           this.rig.orbit(t.x + sx, t.y + 0.68, t.z + sz, 6.4, 0.75, ang);

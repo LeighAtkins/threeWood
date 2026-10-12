@@ -543,7 +543,7 @@ export class Dog {
     if (s === 'title' && world && g.titleSpot && this.friend) {
       // Beside the camper as the camera sees them, not in front
       const t = g.titleSpot, c = Math.cos(t.angle), s2 = Math.sin(t.angle);
-      return { x: t.x - s2 * 1.25 + c * 0.15, z: t.z + c * 1.25 + s2 * 0.15, pose: 'sit', face: { x: g.camera.position.x, z: g.camera.position.z } };
+      return { x: t.x - s2 * 1.0 + c * 0.15, z: t.z + c * 1.0 + s2 * 0.15, pose: 'sit', face: { x: g.camera.position.x, z: g.camera.position.z } };
     }
     if (!world || !g.round && s !== 'summary') return null;
     if (this.asleep) return { x: this.pos.x, z: this.pos.z, pose: 'lie', face: null };

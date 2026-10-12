@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-    <meta name="theme-color" content="#4aa3ee">
+    <meta name="theme-color" content="#12261a">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -16,10 +16,29 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/styles.css">
+    <!-- The splash is styled here, so it is right from the very first paint -->
+    <style>
+      html, body { background: #12261a; }
+      #loading {
+        position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px;
+        background: radial-gradient(ellipse 90% 60% at 50% 42%, #24573a 0%, #173524 55%, #0c1d14 100%);
+        color: #fff8ec; font-family: 'Fredoka', 'Baloo 2', 'Trebuchet MS', system-ui, sans-serif;
+        transition: opacity 0.45s ease-out; user-select: none;
+      }
+      #loading.done { opacity: 0; pointer-events: none; }
+      #loading .mark { font-size: clamp(40px, 13vw, 72px); font-weight: 700; letter-spacing: 1px; line-height: 1; text-shadow: 0 5px 0 rgba(0, 0, 0, 0.3); }
+      #loading .mark span { color: #ffd23f; }
+      #loading .ball { position: relative; width: 120px; height: 44px; }
+      #loading .ball i { position: absolute; left: 50%; bottom: 8px; width: 16px; height: 16px; margin-left: -8px; border-radius: 50%; background: #fff; box-shadow: inset -3px -3px 0 rgba(0, 0, 0, 0.12); animation: twBounce 0.9s cubic-bezier(.3,0,.6,1) infinite alternate; }
+      #loading .ball b { position: absolute; left: 50%; bottom: 2px; width: 22px; height: 5px; margin-left: -11px; border-radius: 50%; background: rgba(0, 0, 0, 0.3); animation: twShadow 0.9s cubic-bezier(.3,0,.6,1) infinite alternate; }
+      #loading small { font-size: 11px; font-weight: 600; letter-spacing: 3px; opacity: 0.6; }
+      @keyframes twBounce { from { transform: translateY(-26px); } to { transform: translateY(0) scale(1.08, 0.92); } }
+      @keyframes twShadow { from { transform: scale(0.55); opacity: 0.5; } to { transform: scale(1); opacity: 1; } }
+    </style>
   </head>
   <body>
     <div id="container"></div>
-    <div id="loading" class="loading">GROWING A COURSE…</div>
+    <div id="loading"><div class="mark">THREE<span>WOOD</span></div><div class="ball"><b></b><i></i></div><small>GROWING A COURSE</small></div>
     <script type="module" src="/main.js"></script>
   </body>
 </html>
