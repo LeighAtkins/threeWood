@@ -1176,6 +1176,8 @@ export class Game {
     if (x !== undefined && ['aim', 'settle', 'result', 'summary', 'cook', 'nabe'].includes(this.state)) {
       if (this.forage.tapAt(x, y) || this.dog.tapAt(x, y)) return;
     }
+    // Watching friends from the result card: a tap moves on to the next one
+    if (this.state === 'result' && this.spectName) { this.net.spectNext(); this.audio.tap(); return; }
     if (this.state === 'intro' && this.stateTime > 0.5) this.endIntro();
     else if (this.state === 'swing' && !this.putting) this.advanceSwing();
     else if (this.state === 'swing' && this.putting && this.puttLatched) this.releasePutt();

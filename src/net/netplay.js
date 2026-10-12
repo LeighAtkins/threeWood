@@ -150,6 +150,16 @@ export class NetPlay {
     this.room.addBot(level);
   }
 
+  /** Every empty seat to a bot, a mix of easy, par and pro. */
+  fillBots() {
+    if (!this.room?.isHost) return;
+    const mix = ['par', 'easy', 'pro', 'par', 'easy', 'pro', 'par'];
+    for (let i = 0; i < MAX_PLAYERS - this.players.length; i++) this.room.addBot(mix[i % mix.length]);
+  }
+
+  /** Watching from the result card: on to the next player still out. */
+  spectNext() { this.spectT = 99; this.spectFlip = true; }
+
   /** Leave the room entirely. */
   leave() {
     this.room?.leave();
@@ -201,7 +211,7 @@ export class NetPlay {
       const old = (p) => p.build && p.build !== BUILD;
       const list = this.players.map((p) => `<div class="net-player ${p.bot ? 'bot' : ''}"><i></i>${esc(cleanLook(p.look).name)}${p.host ? ' <small>HOST</small>' : ''}${p.id === room.me.id ? ' <small>YOU</small>' : ''}${p.bot ? ` <small>BOT · ${BOT_LEVELS[p.level]?.label.toUpperCase() || 'PAR'}</small>` : ''}${old(p) ? ' <small class="stale">NEEDS A REFRESH</small>' : ''}${p.bot && room.isHost ? `<button class="x" data-a="unbot" data-id="${esc(p.id)}" aria-label="Remove">×</button>` : ''}</div>`).join('');
       const seats = MAX_PLAYERS - this.players.length;
-      const botRow = room.isHost && seats > 0 ? `<div class="bot-row"><span>ADD A BOT</span>${Object.entries(BOT_LEVELS).map(([id, l]) => `<button data-a="bot" data-level="${id}">${l.label.toUpperCase()}</button>`).join('')}</div>` : '';
+      const botRow = room.isHost && seats > 0 ? `<div class="bot-row"><span>ADD A BOT</span>${Object.entries(BOT_LEVELS).map(([id, l]) => `<button data-a="bot" data-level="${id}">${l.label.toUpperCase()}</button>`).join('')}${seats > 1 ? '<button data-a="fill" class="fill">FILL ALL</button>' : ''}</div>` : '';
       body = `
         <h2>ROOM CODE</h2>
         <h1 class="gold room-code">${esc(room.code)}</h1>
@@ -224,6 +234,7 @@ export class NetPlay {
       else if (a === 'back') { this.closeLobby(); this.g.showTitle(); }
       else if (a === 'leave') { this.leave(); this.error = ''; this.renderLobby(); }
       else if (a === 'go9' || a === 'go18') this.startRound(a === 'go9' ? 9 : 18);
+      else if (a === 'fill') this.fillBots();
       else if (a === 'mischief') { this.mischiefOn = !this.mischiefOn; this.renderLobby(); }
       else if (a === 'bot') this.addBot(e.target.closest('[data-a]').dataset.level);
       else if (a === 'unbot') { const id = e.target.closest('[data-a]').dataset.id; room.removeBot(id); }
@@ -867,7 +878,13 @@ export class NetPlay {
     this.spectT = (this.spectT || 0) + dt;
     const flying = playing.find((o) => o.flying);
     let o = this.others.map.get(this.spectId);
-    if (flying && (!o || !o.flying)) { o = flying; this.spectT = 0; }
+    if (this.spectFlip) {
+      // (a tap: the next one along, flying or not)
+      this.spectFlip = false;
+      const i = o ? playing.indexOf(o) : -1;
+      o = playing[(i + 1) % playing.length];
+      this.spectT = -3; // (and stay with them a little longer)
+    } else if (flying && (!o || !o.flying)) { o = flying; this.spectT = 0; }
     else if (!o || !playing.includes(o) || (!o.flying && this.spectT > 5)) {
       const i = o ? playing.indexOf(o) : -1;
       o = playing[(i + 1) % playing.length];
