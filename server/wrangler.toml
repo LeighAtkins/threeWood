@@ -1,6 +1,12 @@
 name = "threewood-rooms"
 main = "room.js"
 compatibility_date = "2026-01-01"
+workers_dev = true
+
+# rooms.threewood.app: Cloudflare makes the DNS record and certificate itself
+routes = [
+  { pattern = "rooms.threewood.app", custom_domain = true }
+]
 
 [[durable_objects.bindings]]
 name = "ROOMS"

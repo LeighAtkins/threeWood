@@ -3,15 +3,18 @@
 Written October 2026. Prices are from the providers' public pages at that date
 (sources at the end) and will drift. Figures are estimates, marked as such.
 
-## Where we are
+## Where we are (updated 2026-10-12)
 
-- The game is static files on Vercel. There is no backend: saves, outfits and
-  the camper live in the phone's localStorage.
-- Rooms are peer-to-peer (PeerJS over WebRTC). The host's phone is the hub:
-  it relays every message, decides GO and NEXT, and now runs the bots. The
-  public PeerJS broker only introduces phones to each other.
-- **Done in this step:** rooms of eight, with bots (Easy / Par / Pro) that
-  the host seats from the lobby. One person can play a full group tonight.
+- The game is static files on **Cloudflare Pages** at threewood.app, built
+  and published by a GitHub Action on every push to the private repo. There
+  is no account system yet: saves, outfits and the camper live in the
+  phone's localStorage.
+- **Rooms run on Cloudflare** (`server/room.js`, one Durable Object per code,
+  at `rooms.threewood.app`). PeerJS is gone. The host's phone still decides
+  GO and NEXT and runs the bots; the server keeps the roster, relays, gives
+  a reconnecting phone its seat back, and hands the room to the next person
+  if the host is really gone.
+- Rooms hold eight, with bots (Easy / Par / Pro) the host seats from the lobby.
 
 What breaks first as players arrive, in order:
 
@@ -173,12 +176,11 @@ pricing fixes it.
 
 ## Order of work
 
-1. ✅ Rooms of eight with bots (shipped).
-2. Room server: deploy `server/room.js`, add a WebSocket `Room` client,
-   keep PeerJS as a fallback for a release, then remove it. ~1 week.
-3. Accounts: Supabase Auth, sync the camper and stats, leaderboards for the
+1. ✅ Rooms of eight with bots.
+2. ✅ Room server on Cloudflare, PeerJS removed.
+3. ✅ Static hosting on Cloudflare Pages, domain threewood.app.
+4. Accounts: Supabase Auth, sync the camper and stats, leaderboards for the
    daily course. ~1–2 weeks.
-4. Move static hosting to Cloudflare Pages. ~1 day.
 5. Camp Pass: Stripe Checkout + webhook that flags the account; the client
    reads the flag. ~1 week.
 6. Bots into the room object, so rounds survive the host leaving. ~1 week.

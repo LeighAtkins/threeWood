@@ -1,188 +1,146 @@
 /**
  * A room: a handful of friends on the same course, found by a four-letter code.
  *
- * Peer-to-peer over WebRTC (PeerJS; its public broker only introduces the
- * peers, the game data goes directly between phones). The player who makes
- * the room is the hub: guests talk to the host and the host passes everything
- * on, so every message reaches everyone exactly once.
+ * Every phone holds one WebSocket to the room server (server/room.js, a
+ * Cloudflare Durable Object: one object per code). The server keeps the
+ * roster, stamps every message with who sent it and passes it on, so every
+ * message reaches everyone exactly once, and the room outlives any one phone:
+ * if the host drops, the next person in becomes host.
  *
  * This file knows nothing about golf. It keeps the roster and delivers
- * messages; net/netplay.js decides what they mean.
+ * messages; net/netplay.js decides what they mean. The API is the one the
+ * old peer-to-peer room had, so netplay did not have to change.
  */
 
-import { Peer } from 'peerjs';
-
-const PREFIX = 'threewood-room-';
+const SERVER = (import.meta.env?.VITE_ROOM_SERVER || 'wss://rooms.threewood.app').replace(/\/$/, '');
 const LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ'; // no I or O: they read as digits
 export const MAX_PLAYERS = 8;
-const PING_EVERY = 3000;  // a closed tab does not always say goodbye:
-const GONE_AFTER = 40000; // silence this long means they have left (a phone
-                          // that was put away for a moment gets to come back)
+const PING_EVERY = 5000;     // keep the socket (and the server's quiet-sweep) fed
+const RECONNECT_FOR = 25000; // a phone put away comes back and picks up its seat
 
-export const makeCode = () => Array.from({ length: 4 }, () => LETTERS[Math.floor(Math.random() * LETTERS.length)]).join('');
-export const cleanCode = (text) => String(text || '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4);
+export const cleanCode = (text) => String(text || '').toUpperCase().replace(/[^A-Z]/g, '').replace(/[IO]/g, '').slice(0, 4);
 
 export class Room {
   /**
-   * @param {object} me     what the others see of this player ({ look })
-   * @param {object} on     { open(code), roster(players), message(from, msg), closed(reason) }
+   * @param {object} me     what the others see of this player ({ look, build })
+   * @param {object} on     { open(code), roster(players), message(from, msg), closed(reason), botDropped(id) }
    */
   constructor(me, on) {
     this.me = { id: null, host: false, ...me };
     this.on = on;
     this.players = [];
-    this.conns = new Map(); // host: id -> connection
-    this.hostConn = null;   // guest: the connection to the host
     this.code = null;
-    this.isHost = false;
+    this.hostId = null;
     this.closed = false;
-    this.heard = new Map(); // id -> when we last heard from them
+    this.ws = null;
+    this.outbox = [];
     this.pulse = setInterval(() => this.beat(), PING_EVERY);
   }
 
-  /** Say we are still here, and notice anyone who has gone quiet. */
-  beat() {
-    if (this.closed) return;
-    const now = Date.now();
-    if (this.isHost) {
-      for (const [id, conn] of this.conns) {
-        if (conn.open) conn.send({ t: 'ping' });
-        if (now - (this.heard.get(id) ?? now) > GONE_AFTER) { conn.close(); this.drop(id); }
-      }
-    } else if (this.hostConn?.open) {
-      this.hostConn.send({ t: 'ping' });
-      if (now - (this.heard.get('host') ?? now) > GONE_AFTER) this.fail('The host left the room.');
-    }
-  }
+  get isHost() { return !!this.me.id && this.me.id === this.hostId; }
 
-  /** Back from the pocket: say hello straight away rather than at the next beat. */
+  beat() { if (!this.closed && this.ws?.readyState === 1) this.ws.send('{"t":"ping"}'); }
+
+  /** Back from the pocket: make sure the socket is alive, reconnect if not. */
   wake() {
-    if (this.closed) return;
-    const now = Date.now();
-    if (this.isHost) { for (const id of this.conns.keys()) this.heard.set(id, Math.max(this.heard.get(id) || 0, now - 5000)); }
-    else this.heard.set('host', Math.max(this.heard.get('host') || 0, now - 5000));
-    this.beat();
-  }
-
-  /** Host: a guest is gone. */
-  drop(id) {
-    if (!this.conns.delete(id)) return;
-    this.heard.delete(id);
-    this.players = this.players.filter((p) => p.id !== id);
-    this.shareRoster();
+    if (this.closed || !this.code) return;
+    if (this.ws?.readyState === 1) this.beat(); else this.connect();
   }
 
   /** Make a room and wait for friends. */
-  host(tries = 0) {
-    this.isHost = true;
-    this.code = makeCode();
-    const peer = this.peer = new Peer(PREFIX + this.code);
-    peer.on('open', () => {
-      this.me.id = 'host';
-      this.me.host = true;
-      this.players = [this.me];
-      this.on.open?.(this.code);
-      this.on.roster?.(this.players);
-    });
-    peer.on('connection', (conn) => this.accept(conn));
-    peer.on('error', (err) => {
-      if (err.type === 'unavailable-id' && tries < 5) { peer.destroy(); this.host(tries + 1); return; }
-      this.fail(err.type === 'unavailable-id' ? 'Could not make a room. Try again.' : 'Connection problem.');
-    });
-    peer.on('disconnected', () => { if (!this.closed) peer.reconnect(); });
+  async host() {
+    try {
+      const res = await fetch(`${SERVER.replace(/^ws/, 'http')}/new`);
+      const { code } = await res.json();
+      this.code = cleanCode(code) || this.localCode();
+    } catch {
+      this.code = this.localCode();
+    }
+    this.connect(true);
   }
 
-  /** Host: a guest has knocked. */
-  accept(conn) {
-    conn.on('open', () => {
-      // (a bot gives up its seat for a person)
-      if (this.players.length >= MAX_PLAYERS) {
-        const bot = this.players.find((p) => p.bot);
-        if (bot) { this.players = this.players.filter((p) => p !== bot); this.on.botDropped?.(bot.id); }
-        else { conn.send({ t: 'full' }); setTimeout(() => conn.close(), 300); return; }
-      }
-      this.conns.set(conn.peer, conn);
-      this.heard.set(conn.peer, Date.now());
-    });
-    conn.on('data', (msg) => {
-      if (!msg || typeof msg !== 'object') return;
-      this.heard.set(conn.peer, Date.now());
-      if (msg.t === 'ping') return;
-      if (msg.t === 'hello') {
-        if (!this.conns.has(conn.peer) || this.players.some((p) => p.id === conn.peer)) return;
-        this.players = [...this.players, { id: conn.peer, host: false, look: msg.look, build: String(msg.build || '') }];
-        this.shareRoster();
-        return;
-      }
-      // Pass it on to everyone else, then hear it ourselves
-      for (const [id, other] of this.conns) if (id !== conn.peer && other.open) other.send({ ...msg, from: conn.peer });
-      this.on.message?.(conn.peer, msg);
-    });
-    const gone = () => this.drop(conn.peer);
-    conn.on('close', gone);
-    conn.on('error', gone);
-  }
-
-  /** Host: seat a bot (or take one away) and tell everyone. */
-  addBot(id, look, level) {
-    if (!this.isHost || this.players.length >= MAX_PLAYERS) return false;
-    this.players = [...this.players, { id, host: false, bot: true, level, look }];
-    this.shareRoster();
-    return true;
-  }
-
-  removeBot(id) {
-    if (!this.isHost) return;
-    this.players = this.players.filter((p) => p.id !== id);
-    this.shareRoster();
-  }
-
-  /** Host: send a message on behalf of a bot, so guests see it as that player's. */
-  sendAs(id, msg) {
-    if (this.closed || !this.isHost) return;
-    for (const conn of this.conns.values()) if (conn.open) conn.send({ ...msg, from: id });
-  }
-
-  shareRoster() {
-    const msg = { t: 'roster', players: this.players };
-    for (const conn of this.conns.values()) if (conn.open) conn.send(msg);
-    this.on.roster?.(this.players);
-  }
+  localCode() { return Array.from({ length: 4 }, () => LETTERS[Math.floor(Math.random() * LETTERS.length)]).join(''); }
 
   /** Join the room with this code. */
   join(code) {
     this.code = cleanCode(code);
-    const peer = this.peer = new Peer();
-    peer.on('open', (id) => {
-      this.me.id = id;
-      const conn = this.hostConn = peer.connect(PREFIX + this.code, { reliable: true });
-      conn.on('open', () => {
-        conn.send({ t: 'hello', look: this.me.look, build: this.me.build });
-        this.heard.set('host', Date.now());
-        this.on.open?.(this.code);
-      });
-      conn.on('data', (msg) => {
-        if (!msg || typeof msg !== 'object') return;
-        this.heard.set('host', Date.now());
-        if (msg.t === 'ping') return;
-        if (msg.t === 'roster') { this.players = msg.players; this.on.roster?.(this.players); return; }
-        if (msg.t === 'full') { this.fail('That room is full.'); return; }
-        this.on.message?.(msg.from || 'host', msg);
-      });
-      conn.on('close', () => this.fail('The host left the room.'));
-    });
-    peer.on('error', (err) => this.fail(err.type === 'peer-unavailable' ? 'No room with that code.' : 'Connection problem.'));
+    this.connect();
+  }
+
+  connect(create = false) {
+    if (this.closed) return;
+    let ws;
+    try { ws = new WebSocket(`${SERVER}/room/${this.code}${create ? '?create=1' : ''}`); } catch { this.fail('Connection problem.'); return; }
+    this.ws = ws;
+    this.lostAt = this.lostAt ?? null;
+    ws.onopen = () => {
+      this.lostAt = null;
+      // Say who we are (again, after a reconnect: the server gives the seat back by id)
+      ws.send(JSON.stringify({ t: 'hello', look: this.me.look, build: this.me.build, id: this.me.id || undefined }));
+    };
+    ws.onmessage = (ev) => {
+      let msg;
+      try { msg = JSON.parse(ev.data); } catch { return; }
+      if (!msg || typeof msg !== 'object') return;
+      switch (msg.t) {
+        case 'welcome': {
+          const first = !this.me.id;
+          this.me.id = msg.id;
+          this.hostId = msg.hostId ?? this.hostId;
+          this.me.host = this.me.id === this.hostId;
+          if (first) this.on.open?.(this.code);
+          for (const m of this.outbox.splice(0)) this.send(m);
+          return;
+        }
+        case 'roster':
+          this.players = Array.isArray(msg.players) ? msg.players : [];
+          if (msg.hostId) this.hostId = msg.hostId;
+          this.me.host = this.isHost;
+          this.on.roster?.(this.players);
+          return;
+        case 'host':
+          this.hostId = msg.id;
+          this.me.host = this.isHost;
+          this.on.roster?.(this.players);
+          return;
+        case 'full': this.fail('That room is full.'); return;
+        case 'nope': this.fail('No room with that code.'); return;
+        case 'bot:dropped': this.on.botDropped?.(msg.id); return;
+        case 'ping': return;
+        default:
+          this.on.message?.(msg.from || this.hostId, msg);
+      }
+    };
+    ws.onclose = (ev) => {
+      if (this.closed || this.ws !== ws) return;
+      if (ev.code === 4000) { this.fail('No room with that code.'); return; }
+      if (ev.code === 4001) { this.fail('That room is full.'); return; }
+      // Try to get back in for a while before giving up
+      this.lostAt ??= Date.now();
+      if (Date.now() - this.lostAt > RECONNECT_FOR) { this.fail('Lost the room.'); return; }
+      setTimeout(() => this.connect(), 1500);
+    };
+    ws.onerror = () => { /* onclose follows */ };
   }
 
   /** Send to everyone else in the room. */
   send(msg) {
     if (this.closed) return;
-    if (this.isHost) {
-      for (const conn of this.conns.values()) if (conn.open) conn.send({ ...msg, from: 'host' });
-    } else if (this.hostConn?.open) {
-      this.hostConn.send(msg);
-    }
+    if (this.ws?.readyState === 1 && this.me.id) this.ws.send(JSON.stringify(msg));
+    else this.outbox.push(msg);
   }
+
+  /** Host: send a message on behalf of a bot, so the others see it as that player's. */
+  sendAs(id, msg) { if (this.isHost) this.send({ t: 'as', id, msg }); }
+
+  /** Host: seat a bot (or take one away); the server shares the new roster. */
+  addBot(id, look, level) {
+    if (!this.isHost || this.players.length >= MAX_PLAYERS) return false;
+    this.send({ t: 'bot:add', id, look, level });
+    return true;
+  }
+
+  removeBot(id) { if (this.isHost) this.send({ t: 'bot:remove', id }); }
 
   fail(reason) {
     if (this.closed) return;
@@ -193,6 +151,6 @@ export class Room {
   leave() {
     this.closed = true;
     clearInterval(this.pulse);
-    try { this.peer?.destroy(); } catch { /* already gone */ }
+    try { this.ws?.close(1000, 'bye'); } catch { /* already gone */ }
   }
 }

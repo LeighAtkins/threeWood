@@ -259,7 +259,7 @@ export class NetPlay {
     switch (msg.t) {
       case 'start':
         // (a seed from another phone is only ever letters, digits and dashes)
-        if (from === 'host' && !this.room.isHost && cleanSeed(msg.seed)) this.begin(cleanSeed(msg.seed), msg.length === 9 ? 9 : 18);
+        if (from === this.room.hostId && !this.room.isHost && cleanSeed(msg.seed)) this.begin(cleanSeed(msg.seed), msg.length === 9 ? 9 : 18);
         break;
       case 'at':
         this.status.set(from, 'aim');
@@ -279,7 +279,7 @@ export class NetPlay {
         break;
       }
       case 'go':
-        if (from === 'host') this.go(Array.isArray(msg.ids) ? msg.ids : []);
+        if (from === this.room.hostId) this.go(Array.isArray(msg.ids) ? msg.ids : []);
         break;
       case 'shot':
         if (this.inRound && msg.hole === g.round?.index) {
@@ -315,7 +315,7 @@ export class NetPlay {
         g.audio.applause(0.6);
         break;
       case 'next':
-        if (from === 'host' && this.inRound && msg.hole === g.round?.index) g.nextHole?.();
+        if (from === this.room.hostId && this.inRound && msg.hole === g.round?.index) g.nextHole?.();
         break;
       default:
         return;
