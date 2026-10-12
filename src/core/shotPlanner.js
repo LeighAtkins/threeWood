@@ -66,8 +66,18 @@ export function previewPutt(world, ball, dirX, dirZ, speed) {
 export function puttSpeedFor(world, ball, dirX, dirZ, distance, past = 0.45) {
   const noCup = { ...world, cup: null };
   const want = distance + past;
-  let lo = 0.2, hi = 30;
-  for (let i = 0; i < 16; i++) {
+  // Start from a ceiling near the answer, not 30 m/s: a putt struck at 30
+  // rolls for the full 20 simulated seconds, and half the old search was
+  // spent rolling balls off the green. Raise it until it is enough.
+  const reach = (speed) => {
+    const b = copyBall(ball);
+    puttBall(b, { speed, dirX, dirZ });
+    simulate(b, noCup, null, { maxTime: 20 });
+    return { rolled: (b.x - ball.x) * dirX + (b.z - ball.z) * dirZ, rest: b.mode === 'rest' };
+  };
+  let lo = 0.2, hi = Math.min(30, 1.5 + want * 0.9);
+  for (let k = 0; k < 5; k++) { const r = reach(hi); if (r.rolled >= want || !r.rest) break; lo = hi; hi = Math.min(30, hi * 1.8); }
+  for (let i = 0; i < 12; i++) {
     const mid = (lo + hi) / 2;
     const b = copyBall(ball);
     puttBall(b, { speed: mid, dirX, dirZ });

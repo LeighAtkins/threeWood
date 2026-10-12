@@ -309,3 +309,18 @@ export function aimTarget(world, x, z) {
   }
   return { x: world.cup.x, z: world.cup.z, isPin: true };
 }
+
+// Where each seat tees off in a room: two staggered rows across the tee box,
+// the host in the middle. The second row is a step FORWARD (negative back), so
+// from anyone's camera, behind their own ball, the others stand beside and
+// ahead of the line, never between the lens and the ball.
+const TEE_SLOTS = [[0, 0], [1.9, 0], [-1.9, 0], [0.95, -1.9], [-0.95, -1.9], [3.7, 0], [-3.7, 0], [2.85, -1.9]];
+export function teeSlot(world, i) {
+  const { tee, spec } = world;
+  const p = spec.path;
+  const fdx = p[1].x - p[0].x, fdz = p[1].z - p[0].z, d = Math.hypot(fdx, fdz) || 1;
+  const fx = fdx / d, fz = fdz / d;
+  const [lat, back] = TEE_SLOTS[((i % TEE_SLOTS.length) + TEE_SLOTS.length) % TEE_SLOTS.length];
+  const k = spec.green.channel ? 0.45 : 1; // (a crazy-golf lane is narrow)
+  return { x: tee.x - fz * lat * k - fx * back * k, z: tee.z + fx * lat * k - fz * back * k };
+}

@@ -10,10 +10,11 @@
 
 import * as THREE from 'three';
 import { Camper, GRIP } from './camper.js';
-import { ClubRig } from './club.js';
+import { ClubRig, CAMPER_CLUB_SIZE, CAMPER_SCALE } from './club.js';
+import { teeSlot } from '../course/courseWorld.js';
 import { createBall, placeBall, launchBall, puttBall, stepBall, SIM_DT } from '../core/ballSim.js';
 
-const SCALE = 1.9;
+const SCALE = CAMPER_SCALE;
 
 export class Others {
   constructor(scene, root, before) {
@@ -24,6 +25,10 @@ export class Others {
     this.map = new Map();
     this._v = new THREE.Vector3();
     this.ballGeo = new THREE.SphereGeometry(0.05, 12, 8);
+    // Friends get a soft blob shadow instead of casting real ones: seven
+    // campers in the shadow pass doubled the cost of a frame on a phone
+    this.blobGeo = new THREE.CircleGeometry(1, 20).rotateX(-Math.PI / 2);
+    this.blobMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.22, depthWrite: false });
   }
 
   /** Match the cast to the roster (everyone but me). */
@@ -37,9 +42,13 @@ export class Others {
           id: p.id, camper: new Camper(p.look), sim: createBall(), acc: 0, flying: false, flyT: 0,
           ball: new THREE.Mesh(this.ballGeo, new THREE.MeshLambertMaterial({ color: 0xffffff })),
           tag: document.createElement('div'), target: null, status: 'aim', placed: false,
-          club: new ClubRig(this.scene), aim: null, kind: 'wood', swing: null, addr: null, bubble: null,
+          club: new ClubRig(this.scene, { lite: true }), aim: null, kind: 'wood', swing: null, addr: null, bubble: null,
         };
         o.club.hide();
+        o.camper.group.traverse((m) => { if (m.isMesh) m.castShadow = false; });
+        o.blob = new THREE.Mesh(this.blobGeo, this.blobMat);
+        o.blob.renderOrder = 1;
+        this.scene.add(o.blob);
         o.tag.className = 'net-tag';
         this.tags.appendChild(o.tag);
         o.camper.group.visible = o.ball.visible = false;
@@ -51,7 +60,7 @@ export class Others {
   }
 
   remove(id, o) {
-    this.scene.remove(o.camper.group, o.ball, o.club.group);
+    this.scene.remove(o.camper.group, o.ball, o.club.group, o.blob);
     o.club.group.traverse((m) => { if (m.isMesh) m.geometry.dispose(); });
     o.camper.dispose();
     o.ball.material.dispose();
@@ -64,22 +73,21 @@ export class Others {
   hideAll() { for (const o of this.map.values()) { o.camper.group.visible = o.ball.visible = false; o.tag.style.display = 'none'; o.placed = false; } }
 
   /** A new hole: everyone on the tee, side by side. */
-  toTee(world) {
+  toTee(world, slotOf = null) {
     let i = 0;
-    const { tee, cup } = world;
-    const d = Math.hypot(cup.x - tee.x, cup.z - tee.z) || 1;
-    const sx = -(cup.z - tee.z) / d, sz = (cup.x - tee.x) / d;
     for (const o of this.map.values()) {
       i += 1;
-      const off = (i % 2 ? 1 : -1) * Math.ceil(i / 2) * 2.2;
       o.status = 'aim';
       o.flying = false;
       o.camp = null;
       o.wantPose = null;
-      this.put(o, world, tee.x + sx * off - (cup.x - tee.x) / d * 1.5, tee.z + sz * off - (cup.z - tee.z) / d * 1.5, true);
-      o.ball.visible = false; // not hit yet: only the camper waits by the tee
+      // Their own spot on the tee (the same one their phone tees up on)
+      const at = teeSlot(world, slotOf ? slotOf(o.id) : i);
+      this.put(o, world, at.x, at.z, true);
+      o.ball.visible = true;
     }
   }
+
 
   /** Where the camper stands for a ball at x, z. */
   put(o, world, x, z, instant) {
@@ -229,6 +237,14 @@ export class Others {
 
       this.tagAt(o, SCALE, camera);
     }
+    // Blob shadows under whoever is showing
+    for (const o of this.map.values()) {
+      const g = o.camper.group;
+      o.blob.visible = g.visible;
+      if (!g.visible) continue;
+      o.blob.position.set(g.position.x, world.heightAt(g.position.x, g.position.z) + 0.03, g.position.z);
+      o.blob.scale.setScalar(g.scale.x * 0.2);
+    }
   }
 
   /**
@@ -239,7 +255,7 @@ export class Others {
     const ball = o.addr && o.swing ? o.addr : o.sim;
     const dirX = Math.cos(o.aim), dirZ = Math.sin(o.aim);
     const nx = dirZ, nz = -dirX;
-    const size = 0.63;
+    const size = CAMPER_CLUB_SIZE;
     const p = ClubRig.pivot(ball, dirX, dirZ, o.kind, size, this._v);
     let scale = SCALE, x = p.x, z = p.z, y = 0;
     for (let i = 0; i < 2; i++) {

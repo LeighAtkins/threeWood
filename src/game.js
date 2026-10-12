@@ -11,14 +11,14 @@ import {
   buildLaunch, previewShot, previewPutt, puttSpeedFor, puttMeterMax, puttSpeedAt, slopeAlong,
 } from './core/shotPlanner.js';
 import { designHole, roundHoles, ARCHETYPES, ROUND_PLAN, GIMMICKS } from './course/holeDesigner.js';
-import { buildWorld, aimTarget } from './course/courseWorld.js';
+import { buildWorld, aimTarget, teeSlot } from './course/courseWorld.js';
 import { BIOMES } from './course/biomes.js';
 import { buildTerrainMesh } from './render/terrainMesh.js';
 import { buildScenery, updateScenery, updateFlag, disposeGroup, setSceneryViewport } from './render/scenery.js';
 import { Effects } from './render/effects.js';
 import { Sky } from './render/sky.js';
 import { CameraRig } from './render/cameraRig.js';
-import { ClubRig } from './render/club.js';
+import { ClubRig, CAMPER_CLUB_SIZE, CAMPER_SCALE } from './render/club.js';
 import {
   playerLevel, assistsFor, nextHeat, difficultyPips, caddieTip, challengeFor, newHoleLog,
 } from './core/progression.js';
@@ -337,6 +337,22 @@ export class Game {
     });
   }
 
+  /**
+   * Compile every shader the hole will need now, while the hole card is up,
+   * rather than the first time something appears mid-shot (a friend's club,
+   * Kuri, a mushroom): each first appearance used to cost a visible hitch.
+   */
+  precompile() {
+    const hidden = [];
+    const show = (o) => { if (o && !o.visible) { o.visible = true; hidden.push(o); } };
+    for (const o of this.net.others.map.values()) { show(o.camper.group); show(o.club.group); for (const c of o.club.group.children) c.traverse(show); show(o.ball); }
+    show(this.dog.group); show(this.clubRig.group); show(this.camper.group);
+    // A real draw, not just a compile: that also uploads every mesh's buffers.
+    // (It is drawn over at once; the hole card hides it anyway.)
+    try { this.renderer.compile(this.scene, this.camera); this.renderer.render(this.scene, this.camera); } catch { /* best effort */ }
+    for (const o of hidden) o.visible = false;
+  }
+
   /** Title screen: the free strip of screen between the logo and the menu (px). */
   titleBand() {
     const logo = this.hud.layer.querySelector('.title .logo')?.getBoundingClientRect();
@@ -518,7 +534,10 @@ export class Game {
     this.putts = 0;
     this.bonuses = [];
     this.holePoints = 0;
-    placeBall(this.ball, this.world, this.world.tee.x, this.world.tee.z);
+    // With friends, everyone tees off from their own seat's spot on the tee
+    const seat = this.net.active ? this.net.seatOf(this.net.myId) : 0;
+    const teeAt = seat ? teeSlot(this.world, seat) : this.world.tee;
+    placeBall(this.ball, this.world, teeAt.x, teeAt.z);
     this.ballMesh.visible = this.blob.visible = true;
     this.sink = 0;
 
@@ -537,6 +556,7 @@ export class Game {
     this.hud.setChallenge(this.challenge.text, null);
     this.hud.showIntro(this.introCard());
     this.net.atHole();
+    this.precompile();
     this.forage.atHole();
     this.dog.atHole();
     this.landing = null;
@@ -640,7 +660,9 @@ export class Game {
     const camDist = Math.hypot(this.camera.position.x - ball.x, this.camera.position.y - ball.y, this.camera.position.z - ball.z);
     // (smaller than it once was: there is a camper holding it now, and they
     // have to fit on a phone screen beside the ball)
-    const size = Math.max(1.15, Math.min(2.3, camDist / 4.6)) * 0.55;
+    // One size for every golfer on the course (see CAMPER_CLUB_SIZE)
+    const size = CAMPER_CLUB_SIZE;
+    void camDist;
     if (this.follow) {
       // Through the ball and up, then fade away
       const f = this.follow;
@@ -747,12 +769,12 @@ export class Game {
         g.rotation.y = Math.atan2(sh.dx, sh.dz);
         pose = this.skip.throwT > 0 ? 'wave' : 'idle';
       }
-      g.scale.setScalar(1.9);
+      g.scale.setScalar(CAMPER_SCALE);
     } else if (s === 'title' && this.titleSpot) {
       // On the title screen: on the green, waving now and then at the camera
       const t = this.titleSpot;
       g.position.set(t.x, t.y, t.z);
-      g.scale.setScalar(1.9);
+      g.scale.setScalar(CAMPER_SCALE);
       g.rotation.y = Math.atan2(this.camera.position.x - t.x, this.camera.position.z - t.z);
       pose = (this.time % 7) < 2.2 ? 'wave' : 'idle';
     } else if (!this.round || s === 'title' || s === 'intro' || s === 'fishing') {
@@ -792,7 +814,7 @@ export class Game {
         const x = world.cup.x + Math.cos(a) * 2.2, z = world.cup.z + Math.sin(a) * 2.2;
         this.cheerSpot = { x, z };
         g.position.set(x, world.heightAt(x, z), z);
-        g.scale.setScalar(1.9);
+        g.scale.setScalar(CAMPER_SCALE);
       }
       g.rotation.y = Math.atan2(this.camera.position.x - g.position.x, this.camera.position.z - g.position.z);
       pose = this.strokes <= world.spec.par ? 'cheer' : 'wave';

@@ -13,7 +13,7 @@
 
 import * as THREE from 'three';
 import { SKINS, HAIR_COLORS, EYE_COLORS, outfitById, cleanLook } from '../core/camp.js';
-import { bakeStatic } from './bake.js';
+import { bakeStatic, unifyMaterials } from './bake.js';
 
 /** Where the hands meet in the address pose, in model units. */
 export const GRIP = { y: 0.43, z: 0.21 };
@@ -82,11 +82,12 @@ export class Camper {
     if (this.glow === night && !this.glowDirty) return;
     this.glow = night;
     this.glowDirty = false;
+    // (shared materials: their colour is white and the glow takes each piece's vertex colour)
     this.group.traverse((o) => { if (o.isMesh && o.material.isMeshToonMaterial) o.material.emissive.copy(o.material.color).multiplyScalar(night * 0.38); });
   }
 
   dispose() {
-    this.group.traverse((o) => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } });
+    this.group.traverse((o) => { if (o.isMesh) { o.geometry.dispose(); if (!o.material.userData.shared) o.material.dispose(); } });
     this.group.clear();
   }
 
@@ -537,6 +538,7 @@ export class Camper {
     // dozen draw calls instead of a hundred-odd. Everything that moves on its
     // own (brows, the mouths, the closed-eye lines) is kept as it is.
     const keep = new Set([...Object.values(this.mouths), ...this.eyes.flatMap((e) => [e.brow, e.arch, e.rest])]);
+    unifyMaterials(this.group);
     bakeStatic(this.group, keep);
     // Tiny details cast no shadow worth the second draw
     this.group.traverse((o) => {

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { bakeStatic, unifyMaterials } from './bake.js';
 
 /**
  * The club: a low-poly driver/iron/putter that swings in time with the meter.
@@ -9,7 +10,12 @@ import * as THREE from 'three';
  * the head meets the ball at the exact moment the marker meets the line.
  */
 
-const HANDS_UP = 1.25;    // pivot height above the ball
+export const HANDS_UP = 1.25;    // pivot height above the ball
+
+// One size of club, and so one size of golfer, for everyone on the course:
+// you, your friends and the bots stand at the same scale
+export const CAMPER_CLUB_SIZE = 0.75;
+export const CAMPER_SCALE = (HANDS_UP * CAMPER_CLUB_SIZE - 0.05) / 0.43;
 const HANDS_IN = 0.55;    // pivot offset toward the (right-handed) golfer
 
 const LIE = Math.atan2(HANDS_IN, HANDS_UP); // shaft lean away from vertical
@@ -128,14 +134,22 @@ function buildPutter(mat) {
 }
 
 export class ClubRig {
-  constructor(scene) {
+  /**
+   * lite: a friend's club. The same shapes on cheap shared materials, merged
+   * to two draws and casting no shadow; it never fades, so it needs nothing
+   * of its own. (Seven friends' clubs at full price were most of a frame.)
+   */
+  constructor(scene, { lite = false } = {}) {
+    this.lite = lite;
     this.group = new THREE.Group();
     this.group.visible = false;
     scene.add(this.group);
 
     const length = Math.hypot(HANDS_UP, HANDS_IN);
     this.length = length;
-    const std = (o) => new THREE.MeshStandardMaterial({ flatShading: true, transparent: true, ...o });
+    const std = lite
+      ? (o) => new THREE.MeshLambertMaterial({ flatShading: true, color: o.color, emissive: o.emissive ?? 0 })
+      : (o) => new THREE.MeshStandardMaterial({ flatShading: true, transparent: true, ...o });
     const mat = {
       steel: std({ color: 0xe9eef2, roughness: 0.35, metalness: 0.35, emissive: 0x4a5058 }),
       grip: std({ color: 0x1c1f24, roughness: 0.95 }),
@@ -165,7 +179,14 @@ export class ClubRig {
       this.group.add(holder);
     }
     this.group.add(shaft, handle, cap);
-    this.group.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+    this.group.traverse((o) => { if (o.isMesh) o.castShadow = !lite; });
+    if (lite) {
+      // (emissive is per material: fold it into the colour before unifying)
+      this.group.traverse((o) => { if (o.isMesh && o.material.emissive) { o.material.color.add(o.material.emissive.clone().multiplyScalar(0.6)); o.material.emissive.setHex(0); } });
+      unifyMaterials(this.group);
+      bakeStatic(this.group);
+      this.materials = [];
+    }
 
     this._f = new THREE.Vector3();
     this._d0 = new THREE.Vector3();

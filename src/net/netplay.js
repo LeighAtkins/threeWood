@@ -72,6 +72,8 @@ export class NetPlay {
   get friends() { return this.players.filter((p) => p.id !== this.room?.me.id); }
   /** People, not bots: what the outfits count. */
   get humans() { return this.friends.filter((p) => !p.bot); }
+  /** Seat number in the room (host 0): which spot on the tee is theirs. */
+  seatOf(id) { return Math.max(0, this.players.findIndex((p) => p.id === id)); }
   isBot(id) { return !!this.players.find((p) => p.id === id)?.bot; }
   get myId() { return this.room?.me.id; }
 
@@ -349,7 +351,7 @@ export class NetPlay {
     this.waitT = this.nextT = null;
     this.watching = null;
     this.others.sync(this.friends);
-    this.others.toTee(this.g.world);
+    this.others.toTee(this.g.world, (id) => this.seatOf(id));
     if (this.room.isHost) this.bots.atHole();
     // The crown passes to whoever won the last hole's contest
     this.crown = this.nextCrown;
@@ -568,8 +570,18 @@ export class NetPlay {
     this.paint(); // the pill stays: a 👏 for the photo
   }
 
-  /** The pill under the score: who is in the room and what they are doing. */
+  /**
+   * Repaint the pill, at most once a frame: a room of bots sends a burst of
+   * messages per shot, and rebuilding the pill for each was wasted layout.
+   */
   paint() {
+    if (this.paintQueued) return;
+    this.paintQueued = true;
+    requestAnimationFrame(() => { this.paintQueued = false; this.paintNow(); });
+  }
+
+  /** The pill under the score: who is in the room and what they are doing. */
+  paintNow() {
     this.pill.classList.toggle('hidden', !this.active || this.g.state === 'title');
     if (!this.active) return;
     this.pill.innerHTML = '';
@@ -586,7 +598,7 @@ export class NetPlay {
     const talk = document.createElement('button');
     talk.className = 'talk';
     talk.textContent = '💬';
-    talk.addEventListener('pointerdown', (ev) => { ev.preventDefault(); ev.stopPropagation(); this.emotesOpen = this.emotesOpen > 0 ? 0 : 4; this.paint(); });
+    talk.addEventListener('pointerdown', (ev) => { ev.preventDefault(); ev.stopPropagation(); this.emotesOpen = this.emotesOpen > 0 ? 0 : 4; this.paintNow(); });
     this.pill.appendChild(talk);
     if (this.emotesOpen > 0) {
       const row = document.createElement('div');
@@ -594,7 +606,7 @@ export class NetPlay {
       for (const e of EMOTES) {
         const b = document.createElement('button');
         b.textContent = e;
-        b.addEventListener('pointerdown', (ev) => { ev.preventDefault(); ev.stopPropagation(); this.emote(e); this.emotesOpen = 0; this.paint(); });
+        b.addEventListener('pointerdown', (ev) => { ev.preventDefault(); ev.stopPropagation(); this.emote(e); this.emotesOpen = 0; this.paintNow(); });
         row.appendChild(b);
       }
       this.pill.appendChild(row);

@@ -15,9 +15,10 @@
 
 import { createBall, placeBall, launchBall, puttBall, simulate } from '../core/ballSim.js';
 import { autoSelectClub, lieFor, powerFor } from '../core/clubs.js';
-import { buildLaunch, readPutt, slopeAlong } from '../core/shotPlanner.js';
+import { buildLaunch, slopeAlong } from '../core/shotPlanner.js';
 import { strikeFromTiming } from '../core/swing.js';
-import { aimTarget } from '../course/courseWorld.js';
+import { aimTarget, teeSlot } from '../course/courseWorld.js';
+import { pathLength, pathInfo, pointAlongPath } from '../course/shapes.js';
 import { mulberry32, hashSeed } from '../core/rng.js';
 import { HAIR_STYLES, EYE_SHAPES, OUTFITS } from '../core/camp.js';
 
@@ -63,16 +64,12 @@ export class Bots {
   /** A new hole: everyone back to the tee, lining up. */
   atHole() {
     const { world, round } = this.game;
-    // Each bot tees up on its own spot across the tee box (the people take the
-    // middle), so eight campers are not stacked on one ball
-    const { tee, cup } = world;
-    const d = Math.hypot(cup.x - tee.x, cup.z - tee.z) || 1;
-    const sx = -(cup.z - tee.z) / d, sz = (cup.x - tee.x) / d, bx = -(cup.x - tee.x) / d, bz = -(cup.z - tee.z) / d;
-    this.list.forEach((b, k) => {
+    // Each bot tees up on its own seat's spot, like everyone else
+    this.list.forEach((b) => {
       b.strokes = 0; b.putts = 0; b.drive = 0; b.pin = null; b.holed = false;
       b.rng = mulberry32(hashSeed(`${round.seed}:${b.id}:${round.index}`));
-      const side = (k % 2 ? 1 : -1) * Math.ceil((k + 1) / 2) * 1.1, back = 0.6 + (k % 3) * 0.5;
-      placeBall(b.ball, world, tee.x + sx * side + bx * back, tee.z + sz * side + bz * back);
+      const at = teeSlot(world, this.net.seatOf(b.id));
+      placeBall(b.ball, world, at.x, at.z);
       this.arrive(b, 0.8 + Math.random() * 1.2);
     });
   }
@@ -103,7 +100,8 @@ export class Bots {
     const fromX = ball.x, fromZ = ball.z;
     let msg;
     if (lie.id === 'green' || (lie.id === 'fringe' && toPin < 12) || world.spec.green.channel) {
-      const read = readPutt(world, ball);
+      // (read while thinking, a little each frame; a fallback if it was not done)
+      const read = b.read || this.quickRead(b, 99);
       const paceError = 1 + (rng() - 0.5) * 0.3 * skill;
       const aimError = (rng() - 0.5) * 0.06 * skill;
       const c = Math.cos(aimError), s = Math.sin(aimError);
@@ -156,20 +154,131 @@ export class Bots {
     void round;
   }
 
+  /**
+   * Crazy golf: the furthest point down the lane the ball can reach in a
+   * straight line without touching a wall (the cup itself if it is in sight).
+   */
+  laneTarget(ball) {
+    const { world } = this.game;
+    const ch = world.spec.green.channel, pts = ch.pts;
+    const total = pathLength(pts), here = pathInfo(pts, ball.x, ball.z).along;
+    for (let ahead = total - here; ahead > 2; ahead -= 1.5) {
+      const p = ahead >= total - here - 0.01 ? world.cup : pointAlongPath(pts, here + ahead);
+      let clear = true;
+      for (let k = 1; k < 12 && clear; k++) {
+        const x = ball.x + (p.x - ball.x) * (k / 12), z = ball.z + (p.z - ball.z) * (k / 12);
+        if (pathInfo(pts, x, z).dist > ch.half - 0.5) clear = false;
+      }
+      if (clear) return { x: p.x, z: p.z };
+    }
+    return aimTarget(world, ball.x, ball.z);
+  }
+
+  /**
+   * A bot's putt read, done a couple of simulations at a time while it
+   * thinks (the full readPutt the bot used to call was hundreds of rolls in
+   * one frame: a freeze on a phone every time a bot putted). Pace for the
+   * straight line, then aim corrections from where the ball actually goes.
+   * budget: simulations to spend now. Returns the read when it is done.
+   */
+  quickRead(b, budget = 2) {
+    const { world } = this.game;
+    const ball = b.ball;
+    let r = b.reading;
+    if (!r) {
+      // The cup, or on crazy golf the next bend of the lane (never through a wall)
+      const to = world.spec.green.channel ? this.laneTarget(ball) : world.cup;
+      const dx = to.x - ball.x, dz = to.z - ball.z, dist = Math.hypot(dx, dz) || 1;
+      r = b.reading = { dist, aim: Math.atan2(dz, dx), speed: null, tries: 0, best: null, to };
+    }
+    while (budget-- > 0) {
+      const dirX = Math.cos(r.aim), dirZ = Math.sin(r.aim);
+      if (r.speed === null) {
+        // Pace by bisection, one roll per step (no cup, so it rolls on past)
+        if (!r.pace) r.pace = { lo: 0.2, hi: Math.min(30, 1.5 + (r.dist + 0.45) * 0.9), n: 0, grow: 0 };
+        const pc = r.pace, want = r.dist + 0.45;
+        const mid = pc.grow < 5 && pc.n === 0 ? pc.hi : (pc.lo + pc.hi) / 2;
+        const t = createBall();
+        placeBall(t, world, ball.x, ball.z);
+        puttBall(t, { speed: mid, dirX, dirZ });
+        simulate(t, { ...world, cup: null }, null, { maxTime: 12 });
+        const rolled = (t.x - ball.x) * dirX + (t.z - ball.z) * dirZ;
+        const short = rolled < want && t.mode === 'rest';
+        if (pc.grow < 5 && pc.n === 0) {
+          // First make sure the ceiling is enough
+          if (short) { pc.lo = pc.hi; pc.hi = Math.min(30, pc.hi * 1.8); pc.grow += 1; } else pc.grow = 5;
+          if (pc.grow >= 5) pc.n = 1;
+          continue;
+        }
+        if (short) pc.lo = mid; else pc.hi = mid;
+        if (++pc.n > 12) r.speed = (pc.lo + pc.hi) / 2;
+        continue;
+      }
+      // Crazy golf: try a few lines down the lane (pace scaled from the one
+      // calibrated roll) and keep whichever finishes nearest the cup
+      if (world.spec.green.channel) {
+        const ch = world.spec.green.channel, pts = ch.pts, total = pathLength(pts);
+        if (!r.cands) {
+          const here = pathInfo(pts, ball.x, ball.z).along;
+          const pts2 = [world.cup, r.to];
+          for (const L of [6, 10, 15, 21]) if (here + L < total - 1) pts2.push(pointAlongPath(pts, here + L));
+          r.cands = [];
+          for (const p of pts2) for (const mult of [1, 1.18]) r.cands.push({ x: p.x, z: p.z, mult });
+        }
+        const c = r.cands.shift();
+        if (c) {
+          const d = Math.hypot(c.x - ball.x, c.z - ball.z) || 1, ang = Math.atan2(c.z - ball.z, c.x - ball.x);
+          const speed = r.speed * Math.sqrt(d / r.dist) * c.mult;
+          const t = createBall();
+          placeBall(t, world, ball.x, ball.z);
+          puttBall(t, { speed, dirX: Math.cos(ang), dirZ: Math.sin(ang) });
+          simulate(t, world, null, { maxTime: 12 });
+          const left = t.mode === 'holed' ? -1 : total - pathInfo(pts, t.x, t.z).along + Math.hypot(t.x - world.cup.x, t.z - world.cup.z) * 0.3;
+          if (!r.best || left < r.best.left) r.best = { dirX: Math.cos(ang), dirZ: Math.sin(ang), speed, left, miss: left };
+        }
+        if (!r.cands.length || r.best?.left === -1) { b.read = r.best; b.reading = null; return b.read; }
+        continue;
+      }
+      const test = createBall();
+      placeBall(test, world, ball.x, ball.z);
+      puttBall(test, { speed: r.speed, dirX, dirZ });
+      simulate(test, world, null, { maxTime: 12 });
+      const miss = test.mode === 'holed' ? 0 : Math.hypot(test.x - r.to.x, test.z - r.to.z);
+      if (!r.best || miss < r.best.miss) r.best = { dirX, dirZ, speed: r.speed, miss };
+      r.tries += 1;
+      if (test.mode === 'holed' || r.tries >= 4) { b.read = r.best; b.reading = null; return b.read; }
+      // Turn the aim by the angle the ball finished off the line
+      const ex = test.x - ball.x, ez = test.z - ball.z;
+      const off = Math.atan2(r.to.z - ball.z, r.to.x - ball.x) - Math.atan2(ez, ex);
+      r.aim += Math.atan2(Math.sin(off), Math.cos(off)) * 0.9;
+    }
+    return null;
+  }
+
   update(dt) {
     const { round, world } = this.game;
     if (!round || !world) return;
+    let budget = 3; // short rolls a frame, shared by all the bots
     for (const b of this.list) {
       b.t -= dt;
       const lvl = BOT_LEVELS[b.level] || BOT_LEVELS.par;
       if (b.state === 'arriving' && b.t <= 0) {
         // Line up for a while, then READY
         b.state = 'thinking'; b.t = lvl.think[0] + Math.random() * (lvl.think[1] - lvl.think[0]);
-        const target = world.spec.green.channel || lieFor(b.ball.surface).id === 'green' ? world.cup : aimTarget(world, b.ball.x, b.ball.z);
+        b.read = null; b.reading = null;
+        const target = world.spec.green.channel || lieFor(b.ball.surface).id === 'green' || lieFor(b.ball.surface).id === 'fringe' ? world.cup : aimTarget(world, b.ball.x, b.ball.z);
         b.aim = Math.atan2(target.z - b.ball.z, target.x - b.ball.x);
         const lie = lieFor(b.ball.surface);
-        const club = lie.id === 'green' || world.spec.green.channel ? null : autoSelectClub(Math.hypot(target.x - b.ball.x, target.z - b.ball.z), lie, b.strokes === 0);
+        // (the same test as shot() uses to putt, so a putt is always read in advance)
+        const toPin = Math.hypot(world.cup.x - b.ball.x, world.cup.z - b.ball.z);
+        const putting = lie.id === 'green' || (lie.id === 'fringe' && toPin < 12) || world.spec.green.channel;
+        const club = putting ? null : autoSelectClub(Math.hypot(target.x - b.ball.x, target.z - b.ball.z), lie, b.strokes === 0);
         b.kind = !club ? 'putter' : club.id === 'driver' || club.id === 'wood3' ? 'wood' : 'iron';
+      } else if (b.state === 'thinking' && b.kind === 'putter' && !b.read) {
+        // (ready only once the read is done; the bots take turns, one
+        // simulation a frame between them, so a green full of bots reading
+        // their putts never stalls a frame)
+        while (budget > 0 && !b.read) { budget -= 1; this.quickRead(b, 1); }
       } else if (b.state === 'thinking' && b.t <= 0) {
         b.state = 'ready';
         this.net.deliverBot(b.id, { t: 'status', s: 'ready', aim: b.aim, kind: b.kind });

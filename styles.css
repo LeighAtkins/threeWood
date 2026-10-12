@@ -934,3 +934,9 @@ button { font: inherit; color: inherit; border: 0; background: none; padding: 0;
 .bot-row span { flex: 1; text-align: left; font-size: 11px; letter-spacing: 1.5px; opacity: 0.75; }
 .bot-row button { pointer-events: auto; padding: 8px 10px; border: 0; border-radius: 10px; background: rgba(255, 255, 255, 0.12); color: var(--cream); font: inherit; font-size: 12px; font-weight: 700; letter-spacing: 0.5px; cursor: pointer; }
 .bot-row button:active { transform: scale(0.94); background: var(--gold); color: #4a3200; }
+/* The lobby with a full room: names in two columns, and a card that scrolls
+   rather than running off the bottom of the screen (START was out of reach) */
+.overlay > .card { max-height: calc(100dvh - var(--sat) - var(--sab) - 24px); overscroll-behavior: contain; }
+.net-list { grid-template-columns: 1fr 1fr; }
+.net-player { padding: 8px 34px 8px 10px; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.net-player small { display: block; margin: 1px 0 0 18px; }
