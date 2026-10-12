@@ -29,7 +29,7 @@ export const BOT_LEVELS = {
   par:  { label: 'Par',  skill: 0.75, think: [1.6, 3.0] },
   pro:  { label: 'Pro',  skill: 0.32, think: [1.2, 2.2] },
 };
-const NAMES = ['Rin', 'Nade', 'Chiaki', 'Aoi', 'Ena', 'Minami', 'Saito', 'Toba', 'Ayano', 'Akari', 'Haru', 'Momo'];
+export const NAMES = ['Rin', 'Nade', 'Chiaki', 'Aoi', 'Ena', 'Minami', 'Saito', 'Toba', 'Ayano', 'Akari', 'Haru', 'Momo'];
 
 /** A fresh bot's look and name, different each time. */
 export function botLook(i, taken = []) {

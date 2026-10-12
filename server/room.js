@@ -20,7 +20,7 @@
  * more rooms than 10,000 players need.
  */
 
-import { Bots, BOT_LEVELS, botLook } from '../src/net/bots.js';
+import { Bots, BOT_LEVELS, botLook, NAMES } from '../src/net/bots.js';
 import { designHole, roundHoles } from '../src/course/holeDesigner.js';
 import { buildWorld } from '../src/course/courseWorld.js';
 
@@ -193,6 +193,14 @@ export class RoomObject {
       }
       att.id = id;
       ws.serializeAttachment(att);
+      // A person who shares a bot's name keeps it; the bot takes another
+      const mine = String(this.players.get(id)?.look?.name || '').toLowerCase();
+      for (const p of this.players.values()) {
+        if (!p.bot || String(p.look?.name || '').toLowerCase() !== mine) continue;
+        const taken = new Set([...this.players.values()].map((q) => String(q.look?.name || '').toLowerCase()));
+        const free = NAMES.find((n) => !taken.has(n.toLowerCase()));
+        if (free) p.look = { ...p.look, name: free };
+      }
       this.send(ws, { t: 'welcome', id, hostId: this.hostId });
       await this.shareRoster();
       return;

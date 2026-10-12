@@ -12,6 +12,7 @@ import * as THREE from 'three';
 import { Camper, GRIP } from './camper.js';
 import { ClubRig, CAMPER_CLUB_SIZE, CAMPER_SCALE } from './club.js';
 import { teeSlot } from '../course/courseWorld.js';
+import { cleanLook } from '../core/camp.js';
 import { createBall, placeBall, launchBall, puttBall, stepBall, SIM_DT } from '../core/ballSim.js';
 
 const SCALE = CAMPER_SCALE;
@@ -56,7 +57,11 @@ export class Others {
         this.scene.add(o.camper.group, o.ball);
         this.map.set(p.id, o);
       }
+      // (a bot can be renamed when a person with its name joins)
+      const name = cleanLook(p.look).name;
+      if (name !== o.camper.look.name) o.camper.look = { ...o.camper.look, name };
       o.tag.textContent = o.camper.look.name;
+      o.tagText = null;
     }
   }
 
