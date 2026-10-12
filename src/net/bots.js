@@ -29,6 +29,16 @@ export const BOT_LEVELS = {
   par:  { label: 'Par',  skill: 0.75, think: [1.6, 3.0] },
   pro:  { label: 'Pro',  skill: 0.32, think: [1.2, 2.2] },
 };
+// How each bot carries itself: how chatty it is about the funny and the good,
+// how fond of mischief, and whether it answers with words or a face
+const PERSONAS = {
+  cheeky: { lol: 0.8, wow: 0.35, mean: 0.9, face: '😂' },
+  cheery: { lol: 0.3, wow: 0.85, mean: 0.3, face: '👏' },
+  grumpy: { lol: 0.45, wow: 0.2, mean: 0.75, face: '😱' },
+  quiet:  { lol: 0.15, wow: 0.25, mean: 0.5, face: '👏' },
+};
+const personaOf = (b) => PERSONAS[Object.keys(PERSONAS)[hashSeed(String(b.id)) % 4]];
+
 export const NAMES = ['Rin', 'Nade', 'Chiaki', 'Aoi', 'Ena', 'Minami', 'Saito', 'Toba', 'Ayano', 'Akari', 'Haru', 'Momo'];
 
 /** A fresh bot's look and name, different each time. */
@@ -326,17 +336,22 @@ export class Bots {
     if (msg.t === 'hap' && QUIPS[msg.k]) kind = msg.k;
     else if (msg.t === 'bonk' && typeof msg.who === 'string') { kind = 'bonked'; to = typeof msg.by === 'string' ? msg.by : from; only = msg.who; }
     if (!kind) return;
-    const tone = HAPPENINGS[kind]?.tone;
-    // A bot that was hit always says so; otherwise one or two of the others chip in
-    const pool = this.list.filter((b) => (only ? b.id === only : b.id !== from));
-    const n = only ? pool.length : msg.t === 'say' ? Math.min(pool.length, 1) : Math.min(pool.length, tone === 'wow' || Math.random() < 0.55 ? 1 + (Math.random() < 0.3 ? 1 : 0) : 0);
+    const tone = HAPPENINGS[kind]?.tone || 'lol';
     this.pending ||= [];
     // (a volley of eight shots is a lot of news: two lines waiting is plenty)
     if (!only && this.pending.length >= 2) return;
-    for (let i = 0; i < n; i++) {
-      const b = pool.splice(Math.floor(Math.random() * pool.length), 1)[0];
-      this.pending.push({ id: b.id, t: 0.7 + Math.random() * 1.6 + i * 0.8, msg: { t: 'quip', k: kind, i: Math.floor(Math.random() * QUIPS[kind].length), to } });
-    }
+    // A bot that was hit always says so; otherwise whoever's nature it is to chip in, one or two
+    const pool = this.list.filter((b) => (only ? b.id === only : b.id !== from));
+    const keen = only ? pool : pool.filter((b) => Math.random() < (msg.t === 'say' ? 0.5 : personaOf(b)[tone === 'wow' ? 'wow' : 'lol'] ?? 0.4));
+    keen.sort(() => Math.random() - 0.5);
+    keen.slice(0, only ? keen.length : 2).forEach((b, i) => {
+      const p = personaOf(b);
+      // Words, or just a face at them (which lands on them, like a person's)
+      const msg2 = !only && msg.t === 'hap' && Math.random() < 0.4
+        ? { t: 'emote', e: tone === 'wow' ? '👏' : p.face === '👏' ? '😱' : p.face, to }
+        : { t: 'quip', k: kind, i: Math.floor(Math.random() * QUIPS[kind].length), to };
+      this.pending.push({ id: b.id, t: 0.7 + Math.random() * 1.6 + i * 0.8, msg: msg2 });
+    });
   }
 
   /** Balls at rest on this hole, other than b's: bots lining up, and people's last lies. */
@@ -372,7 +387,7 @@ export class Bots {
     const hand = deal(Math.random, rank, Math.max(ids.length, 2), this.mischief !== false);
     const mean = hand.filter((id) => CARDS[id].kind === 'mischief');
     const to = targetFor(ids, b.id);
-    const id = mean.length && to && Math.random() < 0.7 ? mean[0] : hand.find((x) => CARDS[x].kind === 'self');
+    const id = mean.length && to && Math.random() < personaOf(b).mean ? mean[Math.floor(Math.random() * mean.length)] : hand.find((x) => CARDS[x].kind === 'self');
     if (!id) return;
     if (CARDS[id].kind === 'self') b.nextMod = (b.nextMod || 1) * 0.85;
     this.pending ||= [];
