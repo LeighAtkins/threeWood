@@ -342,13 +342,13 @@ export class Bots {
     if (!only && this.pending.length >= 2) return;
     // A bot that was hit always says so; otherwise whoever's nature it is to chip in, one or two
     const pool = this.list.filter((b) => (only ? b.id === only : b.id !== from));
-    const keen = only ? pool : pool.filter((b) => Math.random() < (msg.t === 'say' ? 0.5 : personaOf(b)[tone === 'wow' ? 'wow' : 'lol'] ?? 0.4));
+    const keen = only ? pool : pool.filter((b) => Math.random() < (msg.t === 'say' ? 0.5 : personaOf(b)[tone === 'lol' ? 'lol' : 'wow'] ?? 0.4));
     keen.sort(() => Math.random() - 0.5);
     keen.slice(0, only ? keen.length : 2).forEach((b, i) => {
       const p = personaOf(b);
       // Words, or just a face at them (which lands on them, like a person's)
       const msg2 = !only && msg.t === 'hap' && Math.random() < 0.4
-        ? { t: 'emote', e: tone === 'wow' ? '👏' : p.face === '👏' ? '😱' : p.face, to }
+        ? { t: 'emote', e: tone !== 'lol' ? '👏' : p.face === '👏' ? '😱' : p.face, to }
         : { t: 'quip', k: kind, i: Math.floor(Math.random() * QUIPS[kind].length), to };
       this.pending.push({ id: b.id, t: 0.7 + Math.random() * 1.6 + i * 0.8, msg: msg2 });
     });
