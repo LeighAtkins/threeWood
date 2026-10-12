@@ -15,16 +15,28 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    # (skipped, not failed, until the token secret has been added)
+    env:
+      HAS_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: No Cloudflare token yet
+        if: env.HAS_TOKEN != 'true'
+        run: echo "::notice::Add the CLOUDFLARE_API_TOKEN secret to publish to Cloudflare Pages"
+      - if: env.HAS_TOKEN == 'true'
+        uses: actions/checkout@v4
+      - if: env.HAS_TOKEN == 'true'
+        uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
-      - run: npm test
-      - run: npm run build
+      - if: env.HAS_TOKEN == 'true'
+        run: npm ci
+      - if: env.HAS_TOKEN == 'true'
+        run: npm test
+      - if: env.HAS_TOKEN == 'true'
+        run: npm run build
       - name: Publish
+        if: env.HAS_TOKEN == 'true'
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}

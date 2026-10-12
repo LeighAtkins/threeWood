@@ -15,6 +15,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&display=swap" rel="stylesheet">
+    <!-- One address for the game: www goes to the bare domain (before anything loads) -->
+    <script>if (location.hostname === 'www.threewood.app') location.replace('https://threewood.app' + location.pathname + location.search + location.hash);</script>
     <link rel="stylesheet" href="/styles.css">
     <!-- The splash is styled here, so it is right from the very first paint -->
     <style>
