@@ -4,6 +4,7 @@ import {
   createBall, copyBall, placeBall, launchBall, puttBall, stepBall, SIM_DT, BALL_R, CUP_R,
 } from './core/ballSim.js';
 import { classify } from './core/happenings.js';
+import { eventFor, withEvent } from './core/events.js';
 import { CLUBS, PUTTER, autoSelectClub, clubAllowed, distanceAt, lieFor, powerFor } from './core/clubs.js';
 import {
   createSwing, startSwing, swingClick, swingStep, strikeFromTiming, describeStrike, markerToPercent, SWING,
@@ -547,6 +548,9 @@ export class Game {
     this.net.passCrown();
     const mods = this.net.holeMods();
     let spec = designHole(round.seed, number);
+    // A room event shapes the hole for everyone (the same one on every phone)
+    this.roomEvent = this.net.active && this.net.players.length > 1 ? eventFor(round.seed, round.index, spec) : null;
+    spec = withEvent(spec, this.roomEvent);
     if (mods.cup !== 1) spec = { ...spec, cupR: (spec.cupR || CUP_R) * mods.cup };
     this.loadWorld(spec);
     this.mods = mods;
@@ -622,6 +626,7 @@ export class Game {
       toy: spec.gimmick ? GIMMICKS[spec.gimmick.kind] : null,
       pond: spec.fishing ? this.pondSide(spec.fishing) : null,
       crown: this.net.crownCard(),
+      event: this.roomEvent,
     };
   }
 

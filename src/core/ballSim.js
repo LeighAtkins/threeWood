@@ -154,7 +154,7 @@ function stepAir(ball, world, env, dt, events) {
   const vh = Math.hypot(ball.vx, ball.vz);
 
   let ax = -DRAG * speed * ball.vx;
-  let ay = -G - DRAG * speed * ball.vy;
+  let ay = -(world.gravity || G) - DRAG * speed * ball.vy; // (a room's moon-gravity hole floats)
   let az = -DRAG * speed * ball.vz;
 
   if (vh > 0.5) {

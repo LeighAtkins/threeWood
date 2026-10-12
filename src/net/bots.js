@@ -132,7 +132,8 @@ export class Bots {
       msg = { t: 'shot', kind: 'putt', x: fromX, z: fromZ, ...putt };
     } else {
       const target = aimTarget(world, ball.x, ball.z);
-      const dist = Math.hypot(target.x - ball.x, target.z - ball.z);
+      // (on the moon a shot carries further: a bot clubs down for it)
+      const dist = Math.hypot(target.x - ball.x, target.z - ball.z) * (world.gravity ? Math.pow(world.gravity / 9.81, 0.8) : 1);
       const club = autoSelectClub(dist, lie, onTee);
       const power = Math.min(100, powerFor(club, dist, lie.speedFactor) * (1 + (rng() - 0.5) * 0.16 * skill));
       const strike = strikeFromTiming((rng() - 0.5) * 1.1 * skill, club.loft, rng);

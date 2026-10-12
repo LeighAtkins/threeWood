@@ -425,13 +425,14 @@ export class Hud {
     this.layer.appendChild(node);
   }
 
-  showIntro({ index, total, name, par, yards, blurb, biome, pips = 1, wind = 0, tip, challenge, toy = null, pond = null, crown = null }) {
+  showIntro({ index, total, name, par, yards, blurb, biome, pips = 1, wind = 0, tip, challenge, toy = null, pond = null, crown = null, event = null }) {
     const cards = crown?.cards || [];
     this.clearLayer();
     const dots = '●'.repeat(pips) + '○'.repeat(5 - pips);
     const node = el('div', 'overlay pass', `
       <div class="intro">
         ${crown?.final ? `<div class="final-word">${esc(crown.final)}</div>` : ''}
+        ${event ? `<div class="room-event">${event.e} ${esc(event.label.toUpperCase())}<small>${esc(event.blurb)}</small></div>` : ''}
         <div class="num">HOLE ${index} OF ${total} · ${biome.toUpperCase()}</div>
         <div class="name">${name}</div>
         <div class="meta">PAR ${par} · ${yards} YARDS</div>

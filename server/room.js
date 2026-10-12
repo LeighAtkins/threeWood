@@ -24,6 +24,7 @@ import { Bots, BOT_LEVELS, botLook, NAMES } from '../src/net/bots.js';
 import { designHole, roundHoles } from '../src/course/holeDesigner.js';
 import { buildWorld } from '../src/course/courseWorld.js';
 import { placeBall } from '../src/core/ballSim.js';
+import { eventFor, withEvent } from '../src/core/events.js';
 
 const MAX_PLAYERS = 8;
 const BOT_TICK = 200;        // ms between bot steps while a round with bots is on
@@ -95,7 +96,8 @@ export class RoomObject {
     const r = this.round;
     const bots = this.botHost();
     if (!r || r.index >= r.holes.length || !bots.list.length) { this.botNet.g.world = null; return; }
-    const spec = designHole(r.seed, r.holes[r.index]);
+    const plain = designHole(r.seed, r.holes[r.index]);
+    const spec = withEvent(plain, eventFor(r.seed, r.index, plain)); // (the room's event: bots play it too)
     this.botNet.g.world = buildWorld(spec);
     this.botNet.g.round = { seed: r.seed, index: r.index };
     // (bots that already finished this hole, before a restart, stay finished)

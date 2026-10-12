@@ -99,3 +99,27 @@ test('camp cards: the leader gets no mischief, last place gets two; effects comb
   assert.equal(targetFor(['a', 'b', 'c'], 'c'), 'b');
   assert.equal(targetFor(['a', 'b', 'c'], 'a'), null);
 });
+
+import { eventFor, withEvent, EVENTS } from '../src/core/events.js';
+import { createBall as mkBall, launchBall, simulate as sim, flatWorld as flat } from '../src/core/ballSim.js';
+import { designHole as dh, roundHoles as rh } from '../src/course/holeDesigner.js';
+
+test('room events: seeded, never on the first hole or crazy golf, and moon gravity floats', () => {
+  const holes = rh(18);
+  let seen = 0;
+  for (let i = 0; i < holes.length; i++) {
+    const spec = dh('EVENT-SEED', holes[i]);
+    const ev = eventFor('EVENT-SEED', i, spec);
+    assert.deepEqual(ev, eventFor('EVENT-SEED', i, spec));
+    if (i === 0 || spec.green.channel) assert.equal(ev, null);
+    if (ev) { seen += 1; assert.ok(EVENTS[ev.id]); assert.notEqual(withEvent(spec, ev), spec); }
+  }
+  assert.ok(seen >= 1 && seen <= 12, `some holes have events (${seen})`);
+  const carry = (gravity) => {
+    const b = mkBall(0, 0.02, 0);
+    launchBall(b, { speed: 60, dirX: 1, dirZ: 0, loftDeg: 12, back: 3, side: 0 });
+    sim(b, { ...flat('fairway'), gravity }, null, { stopOnLand: true });
+    return b.x;
+  };
+  assert.ok(carry(9.81 * 0.55) > carry(0) * 1.3, 'a moon drive carries much further');
+});

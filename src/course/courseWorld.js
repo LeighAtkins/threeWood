@@ -307,6 +307,7 @@ export function buildWorld(spec) {
     spec, biome,
     xs, zs, nx, nz, heights, types,
     heightAt, gradAt, surfaceAt, waterLevelAt,
+    gravity: spec.gravity || 0, // (0: the usual; a room event can lower it)
     cup, tee, trees, ponds, bunkers,
     half: PLAY_HALF,
     tileHalf: TILE_HALF,
