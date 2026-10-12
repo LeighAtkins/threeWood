@@ -92,6 +92,37 @@ export class CameraRig {
   }
 
 
+  /**
+   * The tee with friends: everyone in the picture. From high behind my ball,
+   * looking down the line, pulled back until every spot fits (the back row,
+   * behind me, needs the lens further back still).
+   */
+  gallery(ball, dirX, dirZ, spots) {
+    this.mode = 'gallery';
+    this.stiffness = 3.5;
+    let cx = ball.x, cz = ball.z;
+    for (const s of spots) { cx += s.x; cz += s.z; }
+    cx /= spots.length + 1; cz /= spots.length + 1;
+    // (portrait: the bottom of the frame is the club pill and the swing
+    // button, so everyone's feet must sit well above it)
+    const minY = this.portrait ? -0.45 : -0.8;
+    let back = 9;
+    for (let i = 0; i < 9; i++) {
+      this.wantPos.set(ball.x - dirX * back, ball.y + back * 0.62 + 1.5, ball.z - dirZ * back);
+      this.wantLook.set(cx + dirX * 10, ball.y + 0.4, cz + dirZ * 10);
+      let ok = true;
+      for (const s of [ball, ...spots]) {
+        for (const lift of [0, 1.6]) {
+          const v = this.ndc(s.x, s.y + lift, s.z);
+          if (v.z >= 1 || Math.abs(v.x) > 0.86 || v.y < minY || v.y > 0.85) { ok = false; break; }
+        }
+        if (!ok) break;
+      }
+      if (ok) break;
+      back *= 1.22;
+    }
+  }
+
   /** `placed`: big set pieces from the scenery, which can block a camera just as a tree can. */
   setWorld(world, placed = []) {
     this.world = world;

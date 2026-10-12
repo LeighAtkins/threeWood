@@ -22,6 +22,7 @@ import { Others } from '../render/others.js';
 import { cleanLook } from '../core/camp.js';
 import { generateSeed, cleanSeed } from '../core/rng.js';
 import { BUILD, isStale, reloadFresh } from './fresh.js';
+import { contestFor, judgeContest, perkFor } from '../core/contests.js';
 
 const WAIT_LIMIT = 30;  // seconds the ready players wait for the rest
 const NEXT_DELAY = 8;   // seconds on the result card once everyone has finished
@@ -58,6 +59,9 @@ export class NetPlay {
     this.crownNews = null;
     this.crowns = new Map();
     this.judged = new Set();
+    this.contestNow = null; // this hole's contest
+    this.perk = null;       // what the crown is worth this hole (whoever wears it)
+    this.lastRanks = new Map(); // id -> place on the board when the hole began
     // Watch mode: follow a friend's ball while it flies
     this.watching = null;
     this.watchIdle = 0;
@@ -150,6 +154,8 @@ export class NetPlay {
     this.crown = this.nextCrown = this.crownNews = null;
     this.crowns.clear();
     this.judged.clear();
+    this.contestNow = this.perk = null;
+    this.lastRanks.clear();
     this.g.camper?.setCrown(false);
   }
 
@@ -288,8 +294,9 @@ export class NetPlay {
       case 'done':
         this.status.set(from, 'done');
         this.others.setStatus(from, 'done');
-        this.scores.set(from, { total: num(msg.total, -99, 199), strokes: num(msg.strokes, 0, 20), drive: num(msg.drive, 0, 400), pin: msg.pin == null ? null : num(msg.pin, 0, 400) });
+        this.scores.set(from, { total: num(msg.total, -99, 199), strokes: num(msg.strokes, 0, 20), putts: num(msg.putts, 0, 20), drive: num(msg.drive, 0, 400), pin: msg.pin == null ? null : num(msg.pin, 0, 400), near: msg.near == null ? null : num(msg.near, 0, 400) });
         this.contest();
+        g.hud.updateBoard(this.board());
         break;
       case 'pot':
         // The shared hot pot
@@ -332,28 +339,65 @@ export class NetPlay {
     this.g.startNetRound(seed, length);
   }
 
+  /**
+   * A hole is about to load: the crown passes to whoever won the last hole's
+   * contest, and with it this hole's perk. Returns the perk if it is mine
+   * (the world is built around it), else null.
+   */
+  passCrown() {
+    if (!this.active) return null;
+    const { round } = this.g;
+    this.lastRanks = round.index > 0 ? new Map(this.board().map((r) => [r.id, r.rank])) : new Map();
+    this.crown = this.nextCrown;
+    this.nextCrown = null;
+    this.perk = this.crown ? perkFor(round.seed, round.index) : null;
+    this.contestNow = null; // (needs the hole's par: set in atHole)
+    return this.crown === this.myId ? this.perk : null;
+  }
+
+  /** The perk I play this hole with, if I wear the crown. */
+  get myPerk() { return this.active && this.crown && this.crown === this.myId ? this.perk : null; }
+
   /** A hole has loaded. */
   atHole() {
     if (!this.active) return;
+    const { round, world } = this.g;
     for (const p of this.players) this.status.set(p.id, 'aim');
     this.cleared = false;
     this.waitT = this.nextT = null;
     this.watching = null;
     this.others.sync(this.friends);
-    this.others.toTee(this.g.world, (id) => this.seatOf(id));
-    // The crown passes to whoever won the last hole's contest
-    this.crown = this.nextCrown;
-    this.nextCrown = null;
+    this.others.toTee(world, (id) => this.seatOf(id));
+    this.contestNow = this.players.length > 1 ? contestFor(round.seed, round.index, world.spec.par, world.spec.archetype) : null;
     this.g.camper.setCrown(this.crown === this.myId);
     for (const o of this.others.map.values()) o.camper.setCrown(o.id === this.crown);
     if (this.crownNews) { const news = this.crownNews; this.crownNews = null; setTimeout(() => this.g.hud.callout(news, 'gold small'), 900); }
     this.paint();
   }
 
+  /** Where the friends stand on the tee (for the gallery camera): [{ x, y, z }]. */
+  teeSpots() {
+    const out = [];
+    for (const o of this.others.map.values()) if (o.placed && o.camper.group.visible) out.push(o.camper.group.position);
+    return out;
+  }
+
+  /** The crown line for the hole card: who wears it and what it is worth. */
+  crownCard() {
+    if (!this.active || this.players.length < 2) return null;
+    const contest = this.contestNow;
+    let crown = null;
+    if (this.crown && this.perk) {
+      const mine = this.crown === this.myId;
+      crown = { mine, who: mine ? 'YOU' : this.nameOf(this.crown).toUpperCase(), perk: this.perk };
+    }
+    return { contest, crown };
+  }
+
   /**
-   * The hole's contest, judged by every phone from the same numbers once
-   * everyone is done: longest drive on a par 4 or 5, closest to the pin
-   * from the tee on a par 3.
+   * The hole's contest (src/core/contests.js), judged by every phone from
+   * the same numbers once everyone is done. The winner wears the crown on
+   * the next hole; a dead heat crowns nobody.
    */
   contest() {
     const g = this.g;
@@ -361,19 +405,14 @@ export class NetPlay {
     if (!this.inRound || hole == null || this.judged.has(hole) || this.players.length < 2) return;
     if (!this.players.every((p) => this.status.get(p.id) === 'done' && this.scores.has(p.id))) return;
     this.judged.add(hole);
-    const par3 = g.world.spec.par === 3;
-    let best = null;
-    for (const p of this.players) {
-      const s = this.scores.get(p.id);
-      const v = par3 ? s.pin : s.drive;
-      if (v == null || (!par3 && v < 30)) continue;
-      if (!best || (par3 ? v < best.v : v > best.v)) best = { id: p.id, v };
-    }
-    if (!best) return;
+    const contest = this.contestNow || contestFor(g.round.seed, hole, g.world.spec.par, g.world.spec.archetype);
+    const best = judgeContest(contest, this.players.map((p) => ({ id: p.id, stats: this.scores.get(p.id) })));
+    if (!best) { this.crownNews = `👑 ${contest.label} · A TIE, NO CROWN`; return; }
     this.nextCrown = best.id;
     this.crowns.set(best.id, (this.crowns.get(best.id) || 0) + 1);
     const who = best.id === this.myId ? 'YOU' : this.nameOf(best.id).toUpperCase();
-    this.crownNews = par3 ? `👑 CLOSEST TO THE PIN · ${who} · ${Math.round(best.v * 3)} FT` : `👑 LONGEST DRIVE · ${who} · ${Math.round(best.v)}Y`;
+    this.crownNews = `👑 ${contest.label} · ${who} · ${contest.fmt(best.v)}`;
+    g.hud.updateBoard(this.board());
   }
 
   /** A gold callout of mine, shared with the room. */
@@ -510,12 +549,13 @@ export class NetPlay {
 
   holedOut() { if (this.active) this.room.send({ t: 'holed' }); }
 
-  /** My hole is finished and scored. stat: { drive, pin } for the hole's contest. */
+  /** My hole is finished and scored. stat: { putts, drive, pin, near } for the hole's contest. */
   holeDone(strokes, total, stat = {}) {
     if (!this.active) return;
     this.status.set(this.myId, 'done');
-    this.scores.set(this.myId, { total, strokes, drive: stat.drive || 0, pin: stat.pin ?? null });
-    this.room.send({ t: 'done', strokes, total, drive: stat.drive || 0, pin: stat.pin ?? null });
+    const s = { total, strokes, putts: stat.putts || 0, drive: stat.drive || 0, pin: stat.pin ?? null, near: stat.near ?? null };
+    this.scores.set(this.myId, s);
+    this.room.send({ t: 'done', ...s });
     this.paint();
     this.judge();
     this.contest();
@@ -535,12 +575,29 @@ export class NetPlay {
     this.g.nextHole?.();
   }
 
-  /** Names and totals for the summary card, best first. */
-  standings(myTotal) {
-    return this.players
-      .map((p) => ({ name: cleanLook(p.look).name, total: p.id === this.myId ? myTotal : this.scores.get(p.id)?.total ?? 0, me: p.id === this.myId, crowns: this.crowns.get(p.id) || 0 }))
-      .sort((a, b) => a.total - b.total);
+  /**
+   * The leaderboard, best first: everyone's total so far (those still
+   * playing the hole show last hole's), this hole's strokes once they are
+   * done, crowns won, and how many places they moved since the hole began.
+   */
+  board() {
+    if (!this.room) return [];
+    const rows = this.players.map((p) => {
+      const s = this.scores.get(p.id);
+      const done = this.status.get(p.id) === 'done' && !!s;
+      return {
+        id: p.id, name: cleanLook(p.look).name, me: p.id === this.myId, bot: !!p.bot,
+        total: s?.total ?? 0, strokes: done ? s.strokes : null, done,
+        crowns: this.crowns.get(p.id) || 0, crown: this.nextCrown === p.id || (!this.judged.has(this.g.round?.index) && this.crown === p.id),
+      };
+    });
+    rows.sort((a, b) => a.total - b.total || a.name.localeCompare(b.name));
+    rows.forEach((r, i) => { r.rank = i + 1; const was = this.lastRanks.get(r.id); r.move = was == null ? 0 : was - r.rank; });
+    return rows;
   }
+
+  /** The summary card's board (the round is over: everyone is done). */
+  standings() { return this.board(); }
 
   /** The round is over: friends gather round the fire with you. site: the campsite group */
   campfire(site) {
@@ -572,13 +629,19 @@ export class NetPlay {
     this.pill.classList.toggle('hidden', !this.active || this.g.state === 'title');
     if (!this.active) return;
     this.pill.innerHTML = '';
-    for (const p of this.players) {
+    // This hole's contest on top, then the leaderboard as it stands
+    if (this.contestNow && this.players.length > 1) {
+      const head = document.createElement('div');
+      head.className = 'contest';
+      head.textContent = `👑 ${this.contestNow.label}`;
+      this.pill.appendChild(head);
+    }
+    for (const r of this.board()) {
       const row = document.createElement('div');
-      row.className = `who ${this.status.get(p.id) || 'aim'}`;
-      const score = this.scores.get(p.id);
+      row.className = `who ${this.status.get(r.id) || 'aim'}`;
       row.innerHTML = '<i></i><b></b><span></span>';
-      row.querySelector('b').textContent = p.id === this.myId ? 'YOU' : cleanLook(p.look).name;
-      row.querySelector('span').textContent = score ? vsPar(score.total) : '';
+      row.querySelector('b').textContent = `${r.me ? 'YOU' : r.name}${this.crown === r.id ? ' 👑' : ''}`;
+      row.querySelector('span').textContent = this.scores.has(r.id) ? vsPar(r.total) : '';
       this.pill.appendChild(row);
     }
     // Things to say, folded away behind one small button so the pill stays small

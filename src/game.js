@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { createGameRng, getSeedFromUrl, generateSeed, cleanSeed } from './core/rng.js';
 import {
-  createBall, copyBall, placeBall, launchBall, puttBall, stepBall, SIM_DT, BALL_R,
+  createBall, copyBall, placeBall, launchBall, puttBall, stepBall, SIM_DT, BALL_R, CUP_R,
 } from './core/ballSim.js';
 import { CLUBS, PUTTER, autoSelectClub, clubAllowed, distanceAt, lieFor, powerFor } from './core/clubs.js';
 import {
@@ -541,8 +541,17 @@ export class Game {
   startHole() {
     const round = this.round;
     const number = round.holes[round.index];
-    const spec = designHole(round.seed, number);
+    // The crown passes first: its perk can shape the hole (a wider cup)
+    const perk = this.net.passCrown();
+    let spec = designHole(round.seed, number);
+    if (perk?.cup) spec = { ...spec, cupR: (spec.cupR || CUP_R) * perk.cup };
     this.loadWorld(spec);
+    this.perk = perk;
+    if (perk?.wind) {
+      // A breeze at your back: along the hole, tee to pin, on top of the day's wind
+      const dx = spec.pin.x - spec.tee.x, dz = spec.pin.z - spec.tee.z, d = Math.hypot(dx, dz) || 1;
+      this.env = { windX: this.env.windX + (dx / d) * perk.wind, windZ: this.env.windZ + (dz / d) * perk.wind };
+    }
 
     this.strokes = 0;
     this.putts = 0;
@@ -568,8 +577,8 @@ export class Game {
     this.challenge = challengeFor(spec.par, seenOfPar, spec.archetype, seenOfKind);
     this.holeLog = newHoleLog(spec.par);
     this.hud.setChallenge(this.challenge.text, null);
+    this.net.atHole(); // (before the card: it names the hole's contest)
     this.hud.showIntro(this.introCard());
-    this.net.atHole();
     this.precompile();
     this.forage.atHole();
     this.dog.atHole();
@@ -609,6 +618,7 @@ export class Game {
       challenge: this.challenge,
       toy: spec.gimmick ? GIMMICKS[spec.gimmick.kind] : null,
       pond: spec.fishing ? this.pondSide(spec.fishing) : null,
+      crown: this.net.crownCard(),
     };
   }
 
@@ -951,7 +961,7 @@ export class Game {
     this.timeScale = 1;
     this.fastForward = false;
     this.onTee = this.strokes === 0;
-    this.lie = lieFor(ball.surface);
+    this.lie = this.perkLie(lieFor(ball.surface));
 
     const toPin = Math.hypot(world.cup.x - ball.x, world.cup.z - ball.z);
     // (crazy golf is all green, but the line is round the next bend, not through the walls)
@@ -1398,6 +1408,13 @@ export class Game {
     const off = (power - this.idealPct) / this.idealPct;
     if (Math.abs(off) < 0.06) this.hud.callout('PERFECT PACE', 'gold small');
     if (this.hints.putt < 3) { this.hints.putt += 1; store.set(HINT_KEY, this.hints); }
+  }
+
+  /** The crown's perk, applied to a lie: sure footing halves what rough and sand cost. */
+  perkLie(lie) {
+    const p = this.perk;
+    if (!p?.lieHalf || lie.speedFactor >= 1) return lie;
+    return { ...lie, speedFactor: 1 - (1 - lie.speedFactor) * 0.5 };
   }
 
   /** Add points; `now` pops it on screen immediately. */
@@ -1911,7 +1928,7 @@ export class Game {
     const d = this.strokes - par;
     this.hud.setPlayVisible(false);
     this.updateScoreHud();
-    this.net.holeDone(this.strokes, this.roundTotal(), { drive: log.longestDrive || 0, pin: log.teeToPin ?? null });
+    this.net.holeDone(this.strokes, this.roundTotal(), { putts: this.putts, drive: log.longestDrive || 0, pin: log.teeToPin ?? null, near: log.firstProximity ?? null });
     this.setState('result');
     this.nextHole = () => {
       this.nextHole = null;
@@ -1927,6 +1944,7 @@ export class Game {
       holePoints: this.holePoints,
       challenge: { text: this.challenge.text, won },
       card, last,
+      board: this.net.active && this.net.players.length > 1 ? this.net.board() : null,
       onNext: () => this.pressNext(),
     });
   }
@@ -2324,6 +2342,11 @@ export class Game {
       this.rig.frame(ball, dirX, dirZ, this.previewPts);
       return;
     }
+    // Ready on the tee, waiting for the others: the whole tee in the picture, to watch everyone hit
+    if (this.state === 'aim' && this.onTee && this.net.active && this.net.status.get(this.net.myId) === 'ready') {
+      const spots = this.net.teeSpots();
+      if (spots.length) { this.rig.gallery(ball, dirX, dirZ, spots); return; }
+    }
     if (this.putting) {
       this.rig.putt(ball, dirX, dirZ, this.targetDist);
     } else {
@@ -2461,10 +2484,10 @@ export class Game {
     if (this.state === 'aim' || this.state === 'swing' || this.state === 'flight') {
       // Wind arrow in screen space: up = away from the camera
       const dirX = Math.cos(this.aimAngle), dirZ = Math.sin(this.aimAngle);
-      const w = world.spec.wind;
-      const forward = w.x * dirX + w.z * dirZ;
-      const right = w.x * -dirZ + w.z * dirX;
-      this.hud.setWind(w.speed, Math.atan2(right, forward));
+      const w = this.env;
+      const forward = w.windX * dirX + w.windZ * dirZ;
+      const right = w.windX * -dirZ + w.windZ * dirX;
+      this.hud.setWind(Math.round(Math.hypot(w.windX, w.windZ)), Math.atan2(right, forward));
       this.mapTimer = (this.mapTimer || 0) - dt;
       if (this.mapTimer <= 0) {
         this.mapTimer = 0.08;

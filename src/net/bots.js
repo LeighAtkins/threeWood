@@ -66,7 +66,7 @@ export class Bots {
     const { world, round } = this.game;
     // Each bot tees up on its own seat's spot, like everyone else
     this.list.forEach((b) => {
-      b.strokes = 0; b.putts = 0; b.drive = 0; b.pin = null; b.holed = false;
+      b.strokes = 0; b.putts = 0; b.drive = 0; b.pin = null; b.near = null; b.holed = false;
       b.rng = mulberry32(hashSeed(`${round.seed}:${b.id}:${round.index}`));
       const at = teeSlot(world, this.net.seatOf(b.id));
       placeBall(b.ball, world, at.x, at.z);
@@ -127,6 +127,8 @@ export class Bots {
     b.flightTime = Math.min(28, run.time ?? 8);
     if (onTee && world.spec.par > 3) b.drive = Math.hypot(ball.x - fromX, ball.z - fromZ);
     if (onTee && world.spec.par === 3 && (ball.mode === 'rest' || ball.mode === 'holed') && ball.surface === 'green') b.pin = Math.hypot(world.cup.x - ball.x, world.cup.z - ball.z);
+    // The contests' numbers: first time on the green, how close (holed from off it: dead)
+    if (b.near == null && msg.kind === 'full' && (ball.mode === 'holed' || (ball.mode === 'rest' && ball.surface === 'green'))) b.near = ball.mode === 'holed' ? 0 : Math.hypot(world.cup.x - ball.x, world.cup.z - ball.z);
     msg.hole = round.index;
     return msg;
   }
@@ -294,7 +296,7 @@ export class Bots {
       } else if (b.state === 'done' && b.t <= 0) {
         b.state = 'finished';
         b.total += b.strokes - world.spec.par;
-        this.net.deliverBot(b.id, { t: 'done', strokes: b.strokes, total: b.total, drive: b.drive || 0, pin: b.pin ?? null });
+        this.net.deliverBot(b.id, { t: 'done', strokes: b.strokes, total: b.total, putts: b.putts, drive: b.drive || 0, pin: b.pin ?? null, near: b.near ?? null });
       }
     }
   }

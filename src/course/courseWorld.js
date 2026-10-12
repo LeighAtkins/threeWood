@@ -21,7 +21,11 @@ const ID = Object.fromEntries(SURFACE_IDS.map((s, i) => [s, i]));
 
 const COARSE = 2.5;   // grid spacing across the tile
 const FINE = 0.5;     // grid spacing over the green
-const TEE_RADIUS = 4;
+const TEE_RADIUS = 4.6;   // room for a front row of four
+// The back tier of the tee: starts `back` m behind the tee point, drops `drop`
+// m over `ramp` m, runs `depth` m back and `half` m to either side
+const TEE_STEP = { back: 1.6, ramp: 1.2, drop: 0.7, depth: 9.6, half: 4.6 };
+const TEE_FINE = 1.25;   // grid spacing around the tee (the step needs a crisp edge)
 
 export function buildWorld(spec) {
   const biome = BIOMES[spec.biome];
@@ -73,6 +77,20 @@ export function buildWorld(spec) {
   const infoAt = (p) => pathInfo(path, p.x, p.z);
 
   const teeY = low(spec.tee.x, spec.tee.z) + lift(infoAt(spec.tee), spec.tee.x, spec.tee.z) + 0.4;
+  // The tee's second tier: a step DOWN behind the front row (see TEE_SLOTS),
+  // so a room of eight tees off from two levels. Down rather than up: from
+  // the front row's cameras the back row then sits under the line of sight
+  // to the ball, not across it.
+  const teeFwd = (() => { const dx = path[1].x - path[0].x, dz = path[1].z - path[0].z, d = Math.hypot(dx, dz) || 1; return { x: dx / d, z: dz / d }; })();
+  const stepAt = (x, z) => {
+    const dx = x - spec.tee.x, dz = z - spec.tee.z;
+    const behind = -(dx * teeFwd.x + dz * teeFwd.z);
+    const lat = Math.abs(-dx * teeFwd.z + dz * teeFwd.x);
+    if (behind <= 0 || behind > TEE_STEP.depth + 2.4 || lat > TEE_STEP.half + 2) return null;
+    const drop = TEE_STEP.drop * smoothstep(TEE_STEP.back, TEE_STEP.back + TEE_STEP.ramp, behind);
+    const w = (1 - smoothstep(TEE_STEP.half, TEE_STEP.half + 1.8, lat)) * (1 - smoothstep(TEE_STEP.depth, TEE_STEP.depth + 2.4, behind));
+    return { w, h: teeY - drop, onStep: behind < TEE_STEP.depth && lat < TEE_STEP.half };
+  };
   const greenY = Math.max(0.6, low(green.x, green.z)) + lift(infoAt(green), green.x, green.z) + green.elev;
   const tiltX = Math.cos(green.tiltAngle) * green.tilt;
   const tiltZ = Math.sin(green.tiltAngle) * green.tilt;
@@ -132,6 +150,7 @@ export function buildWorld(spec) {
     // A cliff-top tee is a proper platform, not a pimple
     const teeOut = shape?.kind === 'drop' ? 5 : 2.2;
     if (!green.channel && teeD < TEE_RADIUS * teeOut) h = lerp(teeY, h, smoothstep(TEE_RADIUS, TEE_RADIUS * teeOut, teeD));
+    if (!green.channel) { const st = stepAt(x, z); if (st) h = lerp(h, st.h, st.w); }
 
     const gd = greenDistance(green, x, z);
     if (gd < FRINGE_EDGE + greenBlend) {
@@ -163,6 +182,7 @@ export function buildWorld(spec) {
     if (gd < 1) return ID.green;
     if (gd < FRINGE_EDGE) return ID.fringe;
     if (Math.hypot(x - spec.tee.x, z - spec.tee.z) < TEE_RADIUS) return ID.tee;
+    if (!green.channel && stepAt(x, z)?.onStep) return ID.tee;
     for (const p of ponds) if (h < p.level + 0.04 && blobCovers(p, x, z, 1)) return ID.water;
     for (const b of bunkers) if (blobCovers(b, x, z)) return ID.bunker;
     const info = pathInfo(path, x, z);
@@ -170,19 +190,26 @@ export function buildWorld(spec) {
     return ID.rough;
   };
 
-  // --- Grid axes: coarse everywhere, fine over the green ---------------------
-  const fineR = green.size * 1.75;
-  const axis = (center) => {
-    const lo = Math.floor((center - fineR) / COARSE) * COARSE;
-    const hi = Math.ceil((center + fineR) / COARSE) * COARSE;
+  // --- Grid axes: coarse everywhere, fine over the green, finer round the tee ---
+  // Band edges sit on the coarse grid and every band step divides COARSE, so
+  // walking the axis lands exactly on each edge.
+  const band = (center, r, step) => ({ lo: Math.floor((center - r) / COARSE) * COARSE, hi: Math.ceil((center + r) / COARSE) * COARSE, step });
+  const axis = (bands) => {
     const out = [];
-    for (let v = -TILE_HALF; v < lo - 1e-6; v += COARSE) out.push(v);
-    for (let v = lo; v < hi - 1e-6; v += FINE) out.push(v);
-    for (let v = hi; v <= TILE_HALF + 1e-6; v += COARSE) out.push(v);
+    let v = -TILE_HALF;
+    while (v <= TILE_HALF + 1e-6) {
+      out.push(v);
+      let step = COARSE;
+      for (const b of bands) if (v >= b.lo - 1e-6 && v < b.hi - 1e-6) step = Math.min(step, b.step);
+      let next = v + step;
+      for (const b of bands) if (v < b.lo - 1e-6 && next > b.lo + 1e-6) next = b.lo;
+      v = next;
+    }
     return Float32Array.from(out);
   };
-  const xs = axis(green.x);
-  const zs = axis(green.z);
+  const teeR = TEE_STEP.depth + 3;
+  const xs = axis([band(green.x, green.size * 1.75, FINE), band(spec.tee.x, teeR, TEE_FINE)]);
+  const zs = axis([band(green.z, green.size * 1.75, FINE), band(spec.tee.z, teeR, TEE_FINE)]);
   const nx = xs.length, nz = zs.length;
 
   // Bucket lookup: world coord -> cell index in O(1)
@@ -310,11 +337,14 @@ export function aimTarget(world, x, z) {
   return { x: world.cup.x, z: world.cup.z, isPin: true };
 }
 
-// Where each seat tees off in a room: two staggered rows across the tee box,
-// the host in the middle. The second row is a step FORWARD (negative back), so
-// from anyone's camera, behind their own ball, the others stand beside and
-// ahead of the line, never between the lens and the ball.
-const TEE_SLOTS = [[0, 0], [1.9, 0], [-1.9, 0], [0.95, -1.9], [-0.95, -1.9], [3.7, 0], [-3.7, 0], [2.85, -1.9]];
+// Where each seat tees off in a room: two tiers across the tee box, the host
+// front and centre. Seats 0-3 are the front row on the tee itself; 4-7 are
+// the back row, a step down and behind (TEE_STEP), their spots between the
+// front row's so from any camera, behind its own ball, nobody stands on the
+// line to the ball; and far enough back to sit under the front row's aim
+// cameras rather than across the bottom of their picture. (back > 0 is
+// behind the tee point.)
+const TEE_SLOTS = [[0, 0], [1.9, 0], [-1.9, 0], [3.4, 0], [0.95, 6.2], [-0.95, 6.2], [2.85, 6.2], [-2.85, 6.2]];
 export function teeSlot(world, i) {
   const { tee, spec } = world;
   const p = spec.path;

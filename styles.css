@@ -715,8 +715,23 @@ button { font: inherit; color: inherit; border: 0; background: none; padding: 0;
   font-size: 12px; font-weight: 700;
 }
 .card .board { margin: 8px 0; display: grid; gap: 4px; }
-.card .board div { display: flex; justify-content: space-between; padding: 6px 12px; border-radius: 10px; background: rgba(255, 255, 255, 0.08); font-weight: 700; }
+.card .board div { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 10px; background: rgba(255, 255, 255, 0.08); font-weight: 700; font-size: 14px; text-align: left; }
 .card .board .me { background: rgba(255, 210, 63, 0.18); color: var(--gold); }
+.card .board .playing { opacity: 0.6; }
+.card .board .rank { width: 22px; text-align: center; opacity: 0.8; }
+.card .board .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card .board .move { width: 30px; font-size: 11px; text-align: right; opacity: 0.9; }
+.card .board .move.up { color: #9be36a; }
+.card .board .move.down { color: #ff9a86; }
+.card .board .hole { width: 22px; text-align: right; opacity: 0.75; font-variant-numeric: tabular-nums; }
+.card .board .tot { width: 34px; text-align: right; color: var(--gold); font-variant-numeric: tabular-nums; }
+.card .board .me .tot { color: inherit; }
+.card .board.final div { font-size: 15px; }
+.card .board.final .rank { width: 26px; }
+.card.result .board { max-height: 44vh; overflow-y: auto; }
+.intro .quest.contest { margin-left: 6px; }
+.intro .toy.crown { background: rgba(255, 210, 63, 0.96); color: #3a2800; display: block; max-width: 330px; margin: 8px auto 0; }
+.net-pill .contest { color: var(--gold); letter-spacing: 1px; font-size: 9px; padding-bottom: 2px; border-bottom: 1px solid rgba(255, 255, 255, 0.15); margin-bottom: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .intro .toy { display: inline-block; margin: 8px 3px 0; padding: 6px 12px; border-radius: 12px; background: rgba(255, 210, 63, 0.96); color: #3a2800; font-size: 13px; font-weight: 600; text-shadow: none; }
 .intro .toy b { margin-right: 4px; letter-spacing: 1px; }

@@ -425,7 +425,7 @@ export class Hud {
     this.layer.appendChild(node);
   }
 
-  showIntro({ index, total, name, par, yards, blurb, biome, pips = 1, wind = 0, tip, challenge, toy = null, pond = null }) {
+  showIntro({ index, total, name, par, yards, blurb, biome, pips = 1, wind = 0, tip, challenge, toy = null, pond = null, crown = null }) {
     this.clearLayer();
     const dots = '●'.repeat(pips) + '○'.repeat(5 - pips);
     const node = el('div', 'overlay pass', `
@@ -438,13 +438,15 @@ export class Hud {
         ${toy ? `<div class="toy"><b>${toy.label.toUpperCase()}</b> ${toy.blurb}</div>` : ''}
         ${pond ? `<div class="toy pond"><b>FISHING POND</b> Off the fairway on the ${pond}.</div>` : ''}
         ${challenge ? `<div class="quest">☆ ${challenge.text} <b>+${challenge.points}</b></div>` : ''}
+        ${crown?.contest ? `<div class="quest contest">👑 CONTEST · <b>${crown.contest.label}</b></div>` : ''}
+        ${crown?.crown ? `<div class="toy crown"><b>${crown.crown.mine ? 'YOU WEAR THE CROWN' : `${esc(crown.crown.who)} WEARS THE CROWN`}</b> ${crown.crown.perk.label}: ${crown.crown.perk.blurb}</div>` : ''}
         ${tip ? `<div class="tip">${tipIcon(tip.icon)}<span>${tip.text}</span></div>` : ''}
         <div class="skip">${glyph('tap')}</div>
       </div>`);
     this.layer.appendChild(node);
   }
 
-  showResult({ title, kind, strokes, par, bonuses, holePoints, challenge, card, last, onNext }) {
+  showResult({ title, kind, strokes, par, bonuses, holePoints, challenge, card, last, board = null, onNext }) {
     this.clearLayer();
     const node = el('div', 'overlay', `
       <div class="card result">
@@ -456,11 +458,18 @@ export class Hud {
           ${mergeBonuses(bonuses).map((b, i) => `<div class="bonus" style="animation-delay:${0.25 + i * 0.12}s"><span>${b.label}</span><b>+${b.points}</b></div>`).join('')}
           <div class="total-line"><span>HOLE POINTS</span><span class="gold">★ ${holePoints.toLocaleString()}</span></div>
         </div>
+        ${board ? `<div class="board live">${boardHtml(board)}</div>` : ''}
         ${scorecardHtml(card, true)}
         <button class="btn" data-a="next">${last ? 'FINISH ROUND' : 'NEXT HOLE'}<span class="auto"></span></button>
       </div>`);
     node.querySelector('[data-a="next"]').addEventListener('click', onNext);
     this.layer.appendChild(node);
+  }
+
+  /** A friend finished the hole after the card came up: the board on it catches up. */
+  updateBoard(rows) {
+    const node = this.layer.querySelector('.board.live');
+    if (node && rows) node.innerHTML = boardHtml(rows);
   }
 
   showSummary({ total, par, strokes, points, stats, card, best, seed, outfits = [], board = null, onAgain, onShare, onCamp, onNabe = null }) {
@@ -470,7 +479,7 @@ export class Hud {
         <h2>ROUND COMPLETE</h2>
         <h1 class="gold">${vsPar(total)}</h1>
         <div class="result-score">${strokes} strokes · par ${par} · ★ ${points.toLocaleString()}${best ? ' · <b class="gold">NEW BEST!</b>' : ''}</div>
-        ${board ? `<div class="board">${board.map((b, i) => `<div class="${b.me ? 'me' : ''}"><span>${i + 1}. ${esc(b.name)}${b.crowns ? ` <small>👑×${b.crowns}</small>` : ''}</span><span>${vsPar(b.total)}</span></div>`).join('')}</div>` : ''}
+        ${board ? `<div class="board final">${boardHtml(board, true)}</div>` : ''}
         ${scorecardHtml(card)}
         <div class="stats">${stats.map((s) => `<div class="stat"><b>${s.value}</b><span>${s.label}</span></div>`).join('')}</div>
         ${outfits.map((name) => `<div class="new-fit">NEW OUTFIT · ${name.toUpperCase()}</div>`).join('')}
@@ -658,6 +667,22 @@ function mergeBonuses(bonuses) {
   const sorted = [...bonuses].sort((a, b) => b.points - a.points);
   const rest = sorted.slice(5);
   return [...sorted.slice(0, 5), { label: `${rest.length} more`, points: rest.reduce((s, b) => s + b.points, 0) }];
+}
+
+/**
+ * The room's leaderboard. rows: [{ name, me, total, strokes|null, done, crowns,
+ * crown, rank, move }] best first. final: the round is over (medals, no movement).
+ */
+function boardHtml(rows, final = false) {
+  const medal = ['🥇', '🥈', '🥉'];
+  return rows.map((r) => `
+    <div class="${r.me ? 'me' : ''}${r.done || final ? '' : ' playing'}">
+      <span class="rank">${final && medal[r.rank - 1] ? medal[r.rank - 1] : r.rank}</span>
+      <span class="name">${esc(r.name)}${r.crown && !final ? ' 👑' : ''}${r.crowns ? ` <small>👑×${r.crowns}</small>` : ''}</span>
+      ${final ? '' : `<span class="move ${r.move > 0 ? 'up' : r.move < 0 ? 'down' : ''}">${r.move > 0 ? `▲${r.move}` : r.move < 0 ? `▼${-r.move}` : ''}</span>`}
+      ${final ? '' : `<span class="hole">${r.strokes ?? '…'}</span>`}
+      <span class="tot">${vsPar(r.total)}</span>
+    </div>`).join('');
 }
 
 function scorecardHtml(card, compact = false) {
