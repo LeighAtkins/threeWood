@@ -14,7 +14,7 @@ import { Peer } from 'peerjs';
 
 const PREFIX = 'threewood-room-';
 const LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ'; // no I or O: they read as digits
-const MAX_PLAYERS = 4;
+export const MAX_PLAYERS = 8;
 const PING_EVERY = 3000;  // a closed tab does not always say goodbye:
 const GONE_AFTER = 40000; // silence this long means they have left (a phone
                           // that was put away for a moment gets to come back)
@@ -95,7 +95,12 @@ export class Room {
   /** Host: a guest has knocked. */
   accept(conn) {
     conn.on('open', () => {
-      if (this.players.length >= MAX_PLAYERS) { conn.send({ t: 'full' }); setTimeout(() => conn.close(), 300); return; }
+      // (a bot gives up its seat for a person)
+      if (this.players.length >= MAX_PLAYERS) {
+        const bot = this.players.find((p) => p.bot);
+        if (bot) { this.players = this.players.filter((p) => p !== bot); this.on.botDropped?.(bot.id); }
+        else { conn.send({ t: 'full' }); setTimeout(() => conn.close(), 300); return; }
+      }
       this.conns.set(conn.peer, conn);
       this.heard.set(conn.peer, Date.now());
     });
@@ -116,6 +121,26 @@ export class Room {
     const gone = () => this.drop(conn.peer);
     conn.on('close', gone);
     conn.on('error', gone);
+  }
+
+  /** Host: seat a bot (or take one away) and tell everyone. */
+  addBot(id, look, level) {
+    if (!this.isHost || this.players.length >= MAX_PLAYERS) return false;
+    this.players = [...this.players, { id, host: false, bot: true, level, look }];
+    this.shareRoster();
+    return true;
+  }
+
+  removeBot(id) {
+    if (!this.isHost) return;
+    this.players = this.players.filter((p) => p.id !== id);
+    this.shareRoster();
+  }
+
+  /** Host: send a message on behalf of a bot, so guests see it as that player's. */
+  sendAs(id, msg) {
+    if (this.closed || !this.isHost) return;
+    for (const conn of this.conns.values()) if (conn.open) conn.send({ ...msg, from: id });
   }
 
   shareRoster() {

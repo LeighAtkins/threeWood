@@ -1802,7 +1802,7 @@ export class Game {
     const log = this.holeLog;
     log.strokes = this.strokes; log.putts = this.putts;
     this.earn('holes');
-    if (this.net.active && this.net.friends.length) this.earn('friends');
+    if (this.net.active && this.net.humans.length) this.earn('friends');
     if (log.holed && this.strokes < par) this.earn('birdies');
     const won = !!this.challenge.test(log);
     if (won) {

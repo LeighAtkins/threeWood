@@ -924,3 +924,13 @@ button { font: inherit; color: inherit; border: 0; background: none; padding: 0;
   .title-actions .btn-row .btn { margin-top: 9px; }
   .title-foot { margin-top: 8px; font-size: 11px; line-height: 1.35; }
 }
+
+/* ---- Lobby: seats and bots ------------------------------------------------- */
+.net-player { position: relative; }
+.net-player.bot i { background: #8fa0aa; }
+.net-player .x { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 28px; height: 28px; border: 0; border-radius: 8px; background: rgba(255, 255, 255, 0.12); color: var(--cream); font: inherit; font-size: 18px; line-height: 1; cursor: pointer; pointer-events: auto; }
+.card .seats { margin: 4px 0 2px; font-size: 11px; letter-spacing: 1.5px; opacity: 0.65; }
+.bot-row { display: flex; align-items: center; gap: 6px; margin: 6px 0 2px; }
+.bot-row span { flex: 1; text-align: left; font-size: 11px; letter-spacing: 1.5px; opacity: 0.75; }
+.bot-row button { pointer-events: auto; padding: 8px 10px; border: 0; border-radius: 10px; background: rgba(255, 255, 255, 0.12); color: var(--cream); font: inherit; font-size: 12px; font-weight: 700; letter-spacing: 0.5px; cursor: pointer; }
+.bot-row button:active { transform: scale(0.94); background: var(--gold); color: #4a3200; }

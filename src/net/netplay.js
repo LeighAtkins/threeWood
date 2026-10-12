@@ -16,7 +16,8 @@
  * for the few things that change (starting a round, moving to the next hole).
  */
 
-import { Room, cleanCode } from './room.js';
+import { Room, cleanCode, MAX_PLAYERS } from './room.js';
+import { Bots, BOT_LEVELS, botLook } from './bots.js';
 import { Others } from '../render/others.js';
 import { cleanLook } from '../core/camp.js';
 import { generateSeed, cleanSeed } from '../core/rng.js';
@@ -61,6 +62,7 @@ export class NetPlay {
     this.watching = null;
     this.watchIdle = 0;
     this.emotesOpen = 0; // seconds the emote row stays open after the 💬 tap
+    this.bots = new Bots(this); // the host's: empty seats filled from the lobby
     this.myPose = null;  // by the fire: my pose, said again now and then
     this.poseT = 0;
   }
@@ -68,6 +70,9 @@ export class NetPlay {
   /** In a round with at least the room open. */
   get active() { return !!this.room && this.inRound; }
   get friends() { return this.players.filter((p) => p.id !== this.room?.me.id); }
+  /** People, not bots: what the outfits count. */
+  get humans() { return this.friends.filter((p) => !p.bot); }
+  isBot(id) { return !!this.players.find((p) => p.id === id)?.bot; }
   get myId() { return this.room?.me.id; }
 
   // ===========================================================================
@@ -92,6 +97,7 @@ export class NetPlay {
       open: () => this.renderLobby(),
       roster: (players) => this.onRoster(players),
       message: (from, msg) => this.onMessage(from, msg),
+      botDropped: (id) => this.bots.remove(id),
       closed: (reason) => {
         const wasPlaying = this.inRound;
         this.reset();
@@ -112,6 +118,24 @@ export class NetPlay {
     this.renderLobby();
   }
 
+  /** Host: seat a bot of this level. */
+  addBot(level = 'par') {
+    if (!this.room?.isHost || !BOT_LEVELS[level]) return;
+    const bot = this.bots.add(level);
+    const taken = this.players.map((p) => cleanLook(p.look).name);
+    if (!this.room.addBot(bot.id, botLook(this.bots.list.length, taken), level)) this.bots.remove(bot.id);
+  }
+
+  /**
+   * A bot said something (host only): the guests get it under the bot's id,
+   * and we hear it ourselves the way we would hear a guest.
+   */
+  deliverBot(id, msg) {
+    if (!this.room?.isHost) return;
+    this.room.sendAs(id, msg);
+    this.onMessage(id, msg);
+  }
+
   /** Leave the room entirely. */
   leave() {
     this.room?.leave();
@@ -120,6 +144,7 @@ export class NetPlay {
 
   reset() {
     this.room = null;
+    this.bots.clear();
     this.buildChecked = false;
     this.myPose = null;
     this.inRound = false;
@@ -153,12 +178,16 @@ export class NetPlay {
       body = `<h2>PLAY WITH FRIENDS</h2><p>Connecting…</p><button class="btn ghost" data-a="leave">CANCEL</button>`;
     } else {
       const old = (p) => p.build && p.build !== BUILD;
-      const list = this.players.map((p) => `<div class="net-player"><i></i>${esc(cleanLook(p.look).name)}${p.host ? ' <small>HOST</small>' : ''}${p.id === room.me.id ? ' <small>YOU</small>' : ''}${old(p) ? ' <small class="stale">NEEDS A REFRESH</small>' : ''}</div>`).join('');
+      const list = this.players.map((p) => `<div class="net-player ${p.bot ? 'bot' : ''}"><i></i>${esc(cleanLook(p.look).name)}${p.host ? ' <small>HOST</small>' : ''}${p.id === room.me.id ? ' <small>YOU</small>' : ''}${p.bot ? ` <small>BOT · ${BOT_LEVELS[p.level]?.label.toUpperCase() || 'PAR'}</small>` : ''}${old(p) ? ' <small class="stale">NEEDS A REFRESH</small>' : ''}${p.bot && room.isHost ? `<button class="x" data-a="unbot" data-id="${esc(p.id)}" aria-label="Remove">×</button>` : ''}</div>`).join('');
+      const seats = MAX_PLAYERS - this.players.length;
+      const botRow = room.isHost && seats > 0 ? `<div class="bot-row"><span>ADD A BOT</span>${Object.entries(BOT_LEVELS).map(([id, l]) => `<button data-a="bot" data-level="${id}">${l.label.toUpperCase()}</button>`).join('')}</div>` : '';
       body = `
         <h2>ROOM CODE</h2>
         <h1 class="gold room-code">${esc(room.code)}</h1>
         <button class="btn ghost" data-a="share">SHARE THE LINK</button>
         <div class="net-list">${list}</div>
+        <p class="seats">${this.players.length} OF ${MAX_PLAYERS} SEATS</p>
+        ${botRow}
         ${room.isHost
           ? `<div class="btn-row"><button class="btn" data-a="go9">START 9</button><button class="btn" data-a="go18">START 18</button></div>`
           : `<p>Waiting for the host to start…</p>`}
@@ -174,6 +203,8 @@ export class NetPlay {
       else if (a === 'back') { this.closeLobby(); this.g.showTitle(); }
       else if (a === 'leave') { this.leave(); this.error = ''; this.renderLobby(); }
       else if (a === 'go9' || a === 'go18') this.startRound(a === 'go9' ? 9 : 18);
+      else if (a === 'bot') this.addBot(e.target.closest('[data-a]').dataset.level);
+      else if (a === 'unbot') { const id = e.target.closest('[data-a]').dataset.id; this.bots.remove(id); room.removeBot(id); }
       else if (a === 'share') {
         const url = `${location.origin}${location.pathname}?room=${room.code}`;
         const text = `Play ThreeWood with me — room ${room.code}`;
@@ -319,6 +350,7 @@ export class NetPlay {
     this.watching = null;
     this.others.sync(this.friends);
     this.others.toTee(this.g.world);
+    if (this.room.isHost) this.bots.atHole();
     // The crown passes to whoever won the last hole's contest
     this.crown = this.nextCrown;
     this.nextCrown = null;
@@ -442,6 +474,7 @@ export class NetPlay {
 
   go(ids) {
     if (ids.includes(this.myId) && this.g.state === 'skip') this.g.skip.close(); // GO: back to your ball
+    if (this.room?.isHost) this.bots.go(ids);
     for (const id of ids) if (this.status.get(id) === 'ready') { this.status.set(id, 'busy'); this.others.setStatus(id, 'busy'); }
     if (ids.includes(this.myId) && this.g.state === 'aim') {
       this.cleared = true;
@@ -523,7 +556,8 @@ export class NetPlay {
   /** The round is over: friends gather round the fire with you. site: the campsite group */
   campfire(site) {
     if (!this.active) return;
-    const spots = [[1.3, 0.4, -0.8, 'sit'], [0.55, -1.2, -0.2, 'cheer'], [-2.1, 0.75, 0.85, 'peace']];
+    // Seven spots round the fire, nearest first
+    const spots = [[1.3, 0.4, -0.8, 'sit'], [0.55, -1.2, -0.2, 'cheer'], [-2.1, 0.75, 0.85, 'peace'], [2.2, -0.9, -1.2, 'sit'], [-1.6, -1.5, 0.3, 'hello'], [2.6, 1.1, -0.5, 'warm'], [-2.8, -0.4, 1.0, 'cheer']];
     site.updateMatrixWorld();
     const v = this.others._v;
     this.others.camp(this.friends.slice(0, spots.length).map((p, i) => {
@@ -569,6 +603,7 @@ export class NetPlay {
 
   update(dt) {
     const g = this.g;
+    if (this.active && this.room.isHost && ['aim', 'swing', 'flight', 'settle', 'holed', 'result', 'fishing', 'skip', 'cook'].includes(g.state)) this.bots.update(dt);
     const show = this.active && ['aim', 'swing', 'flight', 'settle', 'holed', 'result', 'fishing', 'summary', 'nabe', 'skip'].includes(g.state);
     if (g.world) this.others.update(dt, g.world, g.env, g.camera, show);
     if (this.active) {
