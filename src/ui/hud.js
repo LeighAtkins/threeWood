@@ -446,7 +446,7 @@ export class Hud {
     this.layer.appendChild(node);
   }
 
-  showResult({ title, kind, strokes, par, bonuses, holePoints, challenge, card, last, board = null, onNext }) {
+  showResult({ title, kind, strokes, par, bonuses, holePoints, challenge, card, last, board = null, onNext, onToggle = null }) {
     this.clearLayer();
     const node = el('div', 'overlay', `
       <div class="card result">
@@ -458,12 +458,24 @@ export class Hud {
           ${mergeBonuses(bonuses).map((b, i) => `<div class="bonus" style="animation-delay:${0.25 + i * 0.12}s"><span>${b.label}</span><b>+${b.points}</b></div>`).join('')}
           <div class="total-line"><span>HOLE POINTS</span><span class="gold">★ ${holePoints.toLocaleString()}</span></div>
         </div>
-        ${board ? `<div class="board live">${boardHtml(board)}</div>` : ''}
+        ${board ? `<div class="spect hidden"></div><div class="board live">${boardHtml(board)}</div>` : ''}
         ${scorecardHtml(card, true)}
         <button class="btn" data-a="next">${last ? 'FINISH ROUND' : 'NEXT HOLE'}<span class="auto"></span></button>
       </div>`);
     node.querySelector('[data-a="next"]').addEventListener('click', onNext);
+    // (tucked away while watching friends: a tap on it opens it again)
+    node.querySelector('.card').addEventListener('click', (e) => { if (!e.target.closest('[data-a]') && onToggle) onToggle(); });
     this.layer.appendChild(node);
+  }
+
+  /** The result card tucked down to a strip (true) while watching `name` play on. */
+  miniResult(mini, name = null) {
+    const card = this.layer.querySelector('.card.result');
+    if (!card) return;
+    card.parentElement.classList.toggle('watch', mini);
+    card.classList.toggle('mini', mini);
+    const sp = card.querySelector('.spect');
+    if (sp) { sp.classList.toggle('hidden', !name); sp.textContent = name ? `👀 WATCHING ${name.toUpperCase()}` : ''; }
   }
 
   /** A friend finished the hole after the card came up: the board on it catches up. */

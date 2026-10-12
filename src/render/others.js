@@ -82,6 +82,7 @@ export class Others {
       o.flying = false;
       o.camp = null;
       o.wantPose = null;
+      o.gallery = null;
       // Their own spot on the tee (the same one their phone tees up on)
       const at = teeSlot(world, slotOf ? slotOf(o.id) : i);
       this.put(o, world, at.x, at.z, true);
@@ -89,6 +90,18 @@ export class Others {
     }
   }
 
+
+  /** A spot on the ring behind the green, facing the players coming in. */
+  gallerySpot(world, o) {
+    const { cup, tee, spec } = world;
+    const base = Math.atan2(cup.z - tee.z, cup.x - tee.x);
+    const i = [...this.map.keys()].indexOf(o.id);
+    o.seat = i;
+    const a = base + (i - (this.map.size - 1) / 2) * 0.3;
+    const r = spec.green.channel ? 2.6 : spec.green.size + 3;
+    const x = cup.x + Math.cos(a) * r, z = cup.z + Math.sin(a) * r;
+    return { x, z };
+  }
 
   /** Where the camper stands for a ball at x, z. */
   put(o, world, x, z, instant) {
@@ -210,12 +223,16 @@ export class Others {
 
   update(dt, world, env, camera, show) {
     const events = [];
+    this.t = (this.t || 0) + dt;
     for (const o of this.map.values()) {
       const g = o.camper.group;
       if (!show || !o.placed) { g.visible = false; o.ball.visible = false; o.tag.style.display = 'none'; continue; }
       g.visible = true;
       // (a face down the fairway is a few pixels: draw it only up close)
-      o.camper.setFar(camera.position.distanceToSquared(g.position) > FACE_FAR * FACE_FAR);
+      const camD2 = camera.position.distanceToSquared(g.position);
+      o.camper.setFar(camD2 > FACE_FAR * FACE_FAR);
+      // (right in the lens: a wall of jacket, not a friend. Step out of the picture)
+      if (camD2 < 1.3 * 1.3 && !o.camp) { g.visible = false; o.tag.style.display = 'none'; }
       if (o.camp) { o.ball.visible = false; o.camper.update(dt, o.camp); this.tagAt(o, 1.75, camera); continue; }
       if (o.flying) {
         o.acc += dt; o.flyT += dt;
@@ -237,6 +254,11 @@ export class Others {
       if (atBall && this.address(o, dt, world)) { this.tagAt(o, g.scale.x, camera); continue; }
       o.club.hide();
 
+      // Finished: off the green to the gallery behind it, to watch the rest
+      if (o.status === 'done' && !o.flying) {
+        o.gallery ||= this.gallerySpot(world, o);
+        o.target = o.gallery;
+      }
       // Walk to the ball
       let pose = o.status === 'done' ? 'cheer' : 'idle';
       if (o.target && !o.flying) {
@@ -255,11 +277,15 @@ export class Others {
           g.rotation.y = Math.atan2(camera.position.x - g.position.x, camera.position.z - g.position.z);
         }
       }
+      // (watching from a step away: cheer now and then, idle in between)
+      if (o.status === 'done' && pose === 'cheer') pose = (this.t + (o.seat || 0) * 0.7) % 6 < 1.4 ? 'cheer' : 'idle';
+      if (o.status === 'done' && o.gallery && pose !== 'walk') g.rotation.y = Math.atan2(world.cup.x - g.position.x, world.cup.z - g.position.z);
       o.camper.update(dt, pose);
       if (o.hop > 0) { o.hop = Math.max(0, o.hop - dt); g.position.y = world.heightAt(g.position.x, g.position.z) + Math.sin((o.hop / 0.45) * Math.PI) * 0.18; }
 
       this.tagAt(o, SCALE, camera);
     }
+    this.placeTags();
     // Blob shadows under whoever is showing
     for (const o of this.map.values()) {
       const g = o.camper.group;
@@ -322,16 +348,43 @@ export class Others {
   }
 
   /** Name over the head (and anything they just said). */
+  /** Where their tag goes this frame (placed, with the others, by placeTags). */
   tagAt(o, scale, camera) {
     const g = o.camper.group;
     const v = this._v.set(g.position.x, g.position.y + scale * 1.08, g.position.z).project(camera);
-    const on = v.z < 1 && Math.abs(v.x) < 1.05 && Math.abs(v.y) < 1.05;
-    if (o.bubble) {
-      o.bubble.t -= 1 / 60;
-      if (o.bubble.t <= 0) { o.bubble = null; o.tag.textContent = o.camper.look.name; o.tag.classList.remove('bubble'); }
-      else if (!o.tag.classList.contains('bubble')) { o.tag.textContent = `${o.camper.look.name}  ${o.bubble.text}`; o.tag.classList.add('bubble'); }
+    o.tagOn = v.z < 1 && Math.abs(v.x) < 1.05 && Math.abs(v.y) < 1.05;
+    if (o.bubble) { o.bubble.t -= 1 / 60; if (o.bubble.t <= 0) o.bubble = null; }
+    const text = o.bubble ? `${o.camper.look.name}  ${o.bubble.text}` : o.camper.look.name;
+    if (text !== o.tagText) { o.tagText = text; o.tag.textContent = text; o.tag.classList.toggle('bubble', !!o.bubble); }
+    o.tagX = (v.x * 0.5 + 0.5) * window.innerWidth;
+    o.tagY = (-v.y * 0.5 + 0.5) * window.innerHeight;
+    o.tagFar = camera.position.distanceToSquared(g.position) > FACE_FAR * FACE_FAR && !o.bubble;
+  }
+
+  /**
+   * Lay the tags out: from the bottom of the screen up, each one that would
+   * sit on a tag already placed is nudged up above it, so a crowd behind the
+   * green reads as names, not a smudge. (Sizes are estimated, not measured:
+   * no layout reads in the frame loop.)
+   */
+  placeTags() {
+    const list = [...this.map.values()].filter((o) => o.tagOn && o.camper.group.visible);
+    for (const o of this.map.values()) if (!list.includes(o)) o.tag.style.display = 'none';
+    list.sort((a, b) => b.tagY - a.tagY);
+    const placed = [];
+    for (const o of list) {
+      const k = o.tagFar ? 0.8 : 1;
+      const w = (o.tagText.length * 7.2 + 18) * k, h = (o.bubble ? 27 : 21) * k;
+      let y = o.tagY;
+      for (let pass = 0; pass < 6; pass++) {
+        const hit = placed.find((r) => Math.abs(r.x - o.tagX) < (r.w + w) / 2 && y > r.y - r.h && y - h < r.y);
+        if (!hit) break;
+        y = hit.y - hit.h - 1;
+      }
+      placed.push({ x: o.tagX, y, w, h });
+      if (o.tagFar !== o.tagFarShown) { o.tagFarShown = o.tagFar; o.tag.classList.toggle('far', o.tagFar); }
+      o.tag.style.display = 'block';
+      o.tag.style.transform = `translate(${o.tagX}px, ${y}px) translate(-50%, -100%)`;
     }
-    o.tag.style.display = on ? 'block' : 'none';
-    if (on) o.tag.style.transform = `translate(${(v.x * 0.5 + 0.5) * window.innerWidth}px, ${(-v.y * 0.5 + 0.5) * window.innerHeight}px) translate(-50%, -100%)`;
   }
 }

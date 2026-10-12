@@ -1952,6 +1952,8 @@ export class Game {
     this.updateScoreHud();
     this.net.holeDone(this.strokes, this.roundTotal(), { putts: this.putts, drive: log.longestDrive || 0, pin: log.teeToPin ?? null, near: log.firstProximity ?? null });
     this.setState('result');
+    this.spectName = undefined;
+    this.cardOpen = false;
     this.nextHole = () => {
       this.nextHole = null;
       this.audio.tap();
@@ -1968,6 +1970,7 @@ export class Game {
       card, last,
       board: this.net.active && this.net.players.length > 1 ? this.net.board() : null,
       onNext: () => this.pressNext(),
+      onToggle: () => { this.cardOpen = !this.cardOpen; this.hud.miniResult(!!this.spectName && !this.cardOpen, this.spectName); },
     });
   }
 
@@ -2346,12 +2349,19 @@ export class Game {
         }
         if (this.stateTime > 2.6) this.finishHole();
         break;
-      case 'result':
-        this.celebrateAngle += dt * 0.08;
-        this.rig.orbit(world.cup.x, world.cup.y, world.cup.z, 9, 4, this.celebrateAngle);
+      case 'result': {
+        // With friends still out there, the wait is a show: the card tucks
+        // itself away and the camera goes to whoever is still playing
+        const watching = this.net.active && this.stateTime > 2.5 ? this.net.spectate(dt) : null;
+        if (watching !== this.spectName) { this.spectName = watching; this.hud.miniResult(!!watching && !this.cardOpen, watching); }
+        if (!watching) {
+          this.celebrateAngle += dt * 0.08;
+          this.rig.orbit(world.cup.x, world.cup.y, world.cup.z, 9, 4, this.celebrateAngle);
+        }
         this.hud.setAutoProgress(this.stateTime / 9);
         if (this.stateTime > 9 && !this.net.active) this.nextHole?.();
         break;
+      }
       default:
         break;
     }

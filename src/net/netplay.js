@@ -586,19 +586,21 @@ export class NetPlay {
     if (s && from !== this.myId) this.others.resync(by, s);
   }
 
-  /** After a hole: a new leader (or a tie at the top) is news. */
+  /** After a hole: a new leader, or a new group sharing the lead, is news. */
   leadNews() {
     const rows = this.board();
-    if (!rows.length) return;
+    if (rows.length < 2) return;
     const top = rows.filter((r) => r.total === rows[0].total);
-    const was = this.leader;
-    this.leader = top.length === 1 ? top[0].id : null;
-    if (this.g.round.index === 0 && top.length > 3) return;
-    if (this.leader && this.leader !== was) {
+    const key = top.map((r) => r.id).sort().join(',');
+    if (key === this.leader) return;
+    this.leader = key;
+    if (top.length > 3) return; // (half the room on the same score is not news)
+    const at = vsPar(top[0].total);
+    if (top.length === 1) {
       const r = top[0];
-      this.addFeed(`🏆 ${r.me ? 'You take' : `${r.name} takes`} the lead at ${vsPar(r.total)}`, 'wow', r.me ? null : r.id);
-    } else if (!this.leader && was && top.length <= 3) {
-      this.addFeed(`⚔️ ${top.map((r) => (r.me ? 'You' : r.name)).join(', ')} tied for the lead`, 'lol');
+      this.addFeed(`🏆 ${r.me ? 'You take' : `${r.name} takes`} the lead at ${at}`, 'wow', r.me ? null : r.id);
+    } else {
+      this.addFeed(`⚔️ ${top.map((r) => (r.me ? 'You' : r.name)).join(', ')} share the lead at ${at}`, 'lol');
     }
   }
 
@@ -650,6 +652,44 @@ export class NetPlay {
     this.g.rig.orbit(b.x, b.y, b.z, speed > 2 ? 11 : 6, speed > 2 ? 4.5 : 2.4, this.watchAngle);
     this.g.rig.stiffness = 9; // keep up with a ball doing 50 m/s
     return true;
+  }
+
+  /**
+   * Done with the hole, waiting for the room: the camera goes to whoever is
+   * still playing. A ball in the air first; otherwise someone lining up,
+   * seen from behind their ball, a few seconds each. Returns the name being
+   * watched (or null: nobody left, the caller frames the green).
+   */
+  spectate(dt) {
+    if (!this.active) return null;
+    const g = this.g;
+    const playing = [...this.others.map.values()].filter((o) => o.placed && this.status.get(o.id) !== 'done');
+    if (!playing.length) { this.spectId = null; return null; }
+    this.spectT = (this.spectT || 0) + dt;
+    const flying = playing.find((o) => o.flying);
+    let o = this.others.map.get(this.spectId);
+    if (flying && (!o || !o.flying)) { o = flying; this.spectT = 0; }
+    else if (!o || !playing.includes(o) || (!o.flying && this.spectT > 5)) {
+      const i = o ? playing.indexOf(o) : -1;
+      o = playing[(i + 1) % playing.length];
+      this.spectT = 0;
+    }
+    this.spectId = o.id;
+    const b = o.flying ? o.sim : o.ball.position;
+    const cup = g.world.cup;
+    if (o.flying && Math.hypot(o.sim.vx, o.sim.vz) > 2) {
+      this.spectAngle = Math.atan2(-o.sim.vz, -o.sim.vx);
+      g.rig.orbit(b.x, b.y, b.z, 9, 3.5, this.spectAngle);
+      g.rig.stiffness = 6;
+    } else {
+      // From behind the ball, the cup beyond it
+      const want = Math.atan2(b.z - cup.z, b.x - cup.x);
+      this.spectAngle = this.spectAngle == null ? want : this.spectAngle + Math.atan2(Math.sin(want - this.spectAngle), Math.cos(want - this.spectAngle)) * Math.min(1, dt * 2);
+      const d = Math.hypot(b.x - cup.x, b.z - cup.z);
+      g.rig.orbit(b.x, b.y, b.z, Math.min(9, 4 + d * 0.15), Math.min(4, 1.6 + d * 0.06), this.spectAngle);
+      g.rig.stiffness = 3;
+    }
+    return o.camper.look.name;
   }
 
   /** I am at my ball, lining up. */
