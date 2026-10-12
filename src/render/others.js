@@ -17,7 +17,7 @@ import { createBall, placeBall, launchBall, puttBall, stepBall, SIM_DT } from '.
 
 const SCALE = CAMPER_SCALE;
 const TAG_TOP = 64;  // px: the hole and score panels along the top of the screen
-const FACE_FAR = 14; // metres from the camera beyond which a friend's face is not drawn
+const FACE_FAR = 9; // metres from the lens beyond which a friend's face is not drawn (an eye there is ~3 px on a phone)
 
 export class Others {
   constructor(scene, root, before) {
