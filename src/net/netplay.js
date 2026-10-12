@@ -280,7 +280,7 @@ export class NetPlay {
         break;
       case 'at':
         this.status.set(from, 'aim');
-        if (this.inRound && msg.hole === g.round?.index) this.others.at(from, g.world, num(msg.x, -400, 400), num(msg.z, -400, 400));
+        if (this.inRound && msg.hole === this.holeIdx) this.others.at(from, g.world, num(msg.x, -400, 400), num(msg.z, -400, 400));
         this.others.setStatus(from, 'aim');
         break;
       case 'status':
@@ -326,7 +326,7 @@ export class NetPlay {
         break;
       case 'knock': {
         const who = typeof msg.who === 'string' ? msg.who : null;
-        if (!who || !this.inRound || msg.hole !== g.round?.index) break;
+        if (!who || !this.inRound || msg.hole !== this.holeIdx) break;
         const s = { x: num(msg.x, -400, 400), z: num(msg.z, -400, 400), vx: num(msg.vx, -20, 20), vz: num(msg.vz, -20, 20) };
         if (who === this.myId) g.knocked(s.vx, s.vz, this.nameOf(from));
         else this.others.knock(who, s);
@@ -341,7 +341,9 @@ export class NetPlay {
         if (from === this.room.hostId) this.go(Array.isArray(msg.ids) ? msg.ids : []);
         break;
       case 'shot':
-        if (this.inRound && msg.hole === g.round?.index) {
+        // (the hole being played: after I finish, round.index has moved on, and
+        // friends still out there must still fly on my screen)
+        if (this.inRound && msg.hole === this.holeIdx) {
           const l = msg.launch || {};
           this.others.shot(from, g.world, {
             kind: msg.kind === 'putt' ? 'putt' : 'full', x: num(msg.x, -400, 400, NaN), z: num(msg.z, -400, 400, NaN),
@@ -645,7 +647,7 @@ export class NetPlay {
       const s = { x: p.x, z: p.z, vx, vz };
       // (and my own ball's new course, so the room's replay of it turns too)
       const mine = { x: ball.x, y: ball.y, z: ball.z, vx: ball.vx, vy: ball.vy, vz: ball.vz, mode: ball.mode };
-      this.room.send({ t: 'knock', who: o.id, hole: this.g.round.index, ...s, s: mine });
+      this.room.send({ t: 'knock', who: o.id, hole: this.holeIdx, ...s, s: mine });
       this.others.knock(o.id, s);
       this.knockNews(this.myId, o.id);
       return true;
@@ -871,7 +873,7 @@ export class NetPlay {
     this.cleared = false;
     this.status.set(this.myId, 'aim');
     const { ball, round } = this.g;
-    this.room.send({ t: 'at', x: ball.x, z: ball.z, hole: round.index });
+    this.room.send({ t: 'at', x: ball.x, z: ball.z, hole: this.holeIdx ?? round.index });
     this.paint();
     this.judge();
   }
@@ -951,7 +953,7 @@ export class NetPlay {
   shot(data) {
     if (!this.active) return;
     this.status.set(this.myId, 'busy');
-    this.room.send({ t: 'shot', hole: this.g.round.index, ...data });
+    this.room.send({ t: 'shot', hole: this.holeIdx ?? this.g.round.index, ...data });
     this.paint();
   }
 
