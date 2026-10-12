@@ -114,7 +114,7 @@ export class Others {
     const i = [...this.map.keys()].indexOf(o.id);
     o.seat = i;
     const a = base + (i - (this.map.size - 1) / 2) * 0.3;
-    const r = spec.green.channel ? 2.6 : spec.green.size + 3;
+    const r = spec.green.channel ? 5 : spec.green.size + 3; // (crazy golf: back past the end of the lane, not round the cup)
     const x = cup.x + Math.cos(a) * r, z = cup.z + Math.sin(a) * r;
     return { x, z };
   }

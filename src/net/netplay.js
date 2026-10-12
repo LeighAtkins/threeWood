@@ -1099,7 +1099,7 @@ export class NetPlay {
     const show = this.active && ['aim', 'swing', 'flight', 'settle', 'holed', 'result', 'fishing', 'summary', 'nabe', 'skip'].includes(g.state);
     // What the camera is about (nobody may stand in front of it): my ball as I
     // line up, or the friend's ball I am watching from the result card
-    const lining = ['aim', 'swing'].includes(g.state) && g.rig?.mode !== 'gallery';
+    const lining = ['aim', 'swing', 'flight', 'settle', 'holed'].includes(g.state) && g.rig?.mode !== 'gallery' && !this.watching;
     const watched = g.state === 'result' && this.spectId ? this.others.map.get(this.spectId) : null;
     const focus = lining ? g.ball : watched ? (watched.flying ? watched.sim : watched.ball.position) : null;
     if (g.world) this.others.update(dt, g.world, g.env, g.camera, show, focus, watched?.id);
