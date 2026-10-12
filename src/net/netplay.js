@@ -1118,7 +1118,11 @@ export class NetPlay {
       head.textContent = `👑 ${this.contestNow.label}`;
       this.pill.appendChild(head);
     }
-    for (const r of this.board()) {
+    // (a short landscape screen has room for the top three and me, not all eight)
+    const all = this.board();
+    const short = window.innerHeight < 500 && all.length > 5;
+    const rows = short ? all.filter((r, i) => i < 3 || r.me) : all;
+    for (const r of rows) {
       const row = document.createElement('div');
       row.className = `who ${this.status.get(r.id) || 'aim'}`;
       row.innerHTML = '<i></i><b></b><span></span>';
@@ -1126,6 +1130,12 @@ export class NetPlay {
       row.querySelector('span').textContent = this.scores.has(r.id) ? `${vsPar(r.total)}${r.move > 0 ? ' ▲' : r.move < 0 ? ' ▼' : ''}` : '';
       if (r.move) row.classList.add(r.move > 0 ? 'up' : 'down');
       this.pill.appendChild(row);
+    }
+    if (short) {
+      const more = document.createElement('div');
+      more.className = 'more';
+      more.textContent = `+${all.length - rows.length} more`;
+      this.pill.appendChild(more);
     }
     // Things to say, folded away behind one small button so the pill stays small
     const talk = document.createElement('button');

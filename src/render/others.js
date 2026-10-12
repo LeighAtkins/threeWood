@@ -124,7 +124,11 @@ export class Others {
     placeBall(o.sim, world, x, z);
     o.ball.position.set(o.sim.x, o.sim.y, o.sim.z);
     o.ball.visible = true;
-    o.target = { x: x + 0.7, z: z + 0.3 };
+    // On the golfer's side of their ball (as they will address it), not a
+    // fixed step off it that can put them on a neighbour's toes
+    const fx = world.cup.x - x, fz = world.cup.z - z, fd = Math.hypot(fx, fz) || 1;
+    const dx = fx / fd, dz = fz / fd;
+    o.target = { x: x + dz * 0.6 - dx * 0.15, z: z - dx * 0.6 - dz * 0.15 };
     const g = o.camper.group;
     if (instant || !o.placed) {
       g.position.set(o.target.x, world.heightAt(o.target.x, o.target.z), o.target.z);

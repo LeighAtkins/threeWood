@@ -1073,3 +1073,7 @@ button { font: inherit; color: inherit; border: 0; background: none; padding: 0;
 .net-feed.quiet { opacity: 0; }
 
 .net-player small.trophy { opacity: 1; color: var(--gold); font-size: 12px; }
+.net-pill .more { opacity: 0.6; font-size: 9px; text-align: right; }
+@media (orientation: landscape) and (max-height: 500px) {
+  .net-pill { top: calc(var(--sat) + 150px); }
+}
