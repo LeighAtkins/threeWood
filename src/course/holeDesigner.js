@@ -43,7 +43,6 @@ export const ARCHETYPES = {
   gorge:         { label: 'The Gorge',     blurb: 'A ravine cuts the fairway. Carry it or lay up.' },
   punchbowl:     { label: 'The Punchbowl', blurb: 'Hit the bowl and it feeds to the flag.' },
   // Holes that play like something else entirely
-  bucket:        { label: 'The Bucket',    blurb: 'A cup as big as a paddling pool. Go on, ace it.' },
   minigolf:      { label: 'Crazy Golf',    blurb: 'Putter only. Bank it off the walls, roll it over the hump.' },
 };
 
@@ -67,7 +66,7 @@ export const PAR_BANDS = { 3: [100, 165], 4: [255, 320], 5: [350, 400] };
 // a giant cup to ace, crazy golf, a ski jump through rings, a half-pipe of
 // mushrooms, a cliff-top par 3, then the lake.
 export const ROUND_PLAN = [
-  { par: 3, archetypes: ['bucket'] },
+  { par: 3, archetypes: ['punchbowl'] },
   { par: 3, archetypes: ['minigolf'] },
   { par: 4, archetypes: ['skiJump'], gimmick: 'rings' },
   { par: 5, archetypes: ['halfpipe'], gimmick: 'boing' },
@@ -111,7 +110,6 @@ function layoutHole(rng, plan) {
   if (archetype === 'lookout') totalLen = rng.range(135, 160);
   if (archetype === 'punchbowl') totalLen = rng.range(125, 150);
   if (archetype === 'ascent') totalLen = rng.range(255, 285);
-  if (archetype === 'bucket') totalLen = rng.range(110, 132);
   const mini = archetype === 'minigolf';
 
   const tee = { x: 0, z: 0 };
@@ -154,7 +152,7 @@ function layoutHole(rng, plan) {
   const green = {
     x: greenPt.x,
     z: greenPt.z,
-    size: archetype === 'potBunkers' ? 11.5 : archetype === 'bucket' ? 15 : par === 3 ? rng.range(13, 15) : rng.range(14, 16.5),
+    size: archetype === 'potBunkers' ? 11.5 : par === 3 ? rng.range(13, 15) : rng.range(14, 16.5),
     angle: Math.atan2(greenPt.z - prev.z, greenPt.x - prev.x),
     elev: archetype === 'elevatedGreen' ? rng.range(1.8, 2.8) : 0,
     tiltAngle: rng.range(0, Math.PI * 2),
@@ -202,7 +200,6 @@ function layoutHole(rng, plan) {
     case 'terraces': shape = { kind: 'terraces', h: rng.range(9, 11), steps: 3 }; greenside(); break;
     case 'gorge': shape = { kind: 'gorge', h: rng.range(4, 5), at: rng.range(0.6, 0.66), w: rng.range(20, 24) }; greenside(); break; // gentle enough to roll out of
     case 'punchbowl': shape = { kind: 'punchbowl', h: rng.range(2.4, 3) }; break;
-    case 'bucket': shape = { kind: 'punchbowl', h: rng.range(2.6, 3.2) }; break;
     case 'minigolf': shape = { kind: 'channel', hump: rng.range(0.35, 0.5), at: rng.range(0.42, 0.58) }; break;
     default: break;
   }
@@ -329,10 +326,10 @@ function layoutHole(rng, plan) {
   }
 
   // --- Pin: somewhere honest on the putting surface ---
-  // (the bucket's giant cup is dead centre; crazy golf's at the end of the lane)
+  // (crazy golf's cup is at the end of the lane)
   let pin = { x: green.x, z: green.z };
   if (mini) pin = { ...pointAlongPath(path, totalLen - 2) };
-  for (let i = 0; i < (mini || archetype === 'bucket' ? 0 : 30); i++) {
+  for (let i = 0; i < (mini ? 0 : 30); i++) {
     const a = rng.range(0, Math.PI * 2);
     const d = rng.range(tune.pinNear, tune.pinFar) * green.size;
     const c = { x: green.x + Math.cos(a) * d, z: green.z + Math.sin(a) * d };
@@ -403,7 +400,6 @@ function layoutHole(rng, plan) {
     fairwayStart,
     shape,
     fishing,
-    cupR: archetype === 'bucket' ? 1.15 : null,
     gimmick: plan.gimmick ? buildGimmick(plan.gimmick, rng, { pathPts, totalLen, fairwayHalf, green, par, water, bunkers }) : null,
     bunkers,
     water,

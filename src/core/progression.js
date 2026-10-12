@@ -77,7 +77,7 @@ export function difficultyPips(courseD, level) {
 // Short, plain words and a picture each: they must work for someone reading
 // in their second language. icon names are drawn by ui/glyphs.js.
 const TIPS = [
-  // (in the order of the opening holes: the bucket, crazy golf, the ski jump...)
+  // (in the order of the opening holes: crazy golf second, the ski jump third...)
   { icon: 'tap3', text: 'One tap for each dot on the button. This first time, the bar waits for you.' },
   { icon: 'dots', text: 'The dots on the green roll downhill. Aim your putt with them.' },
   { icon: 'shape', text: 'Good hit? Swipe to curve the ball.' },
@@ -121,7 +121,7 @@ const C = {
 };
 
 // Holes that play like something else ask for something else
-const SPECIAL = { bucket: ['inTwoShots'], minigolf: ['par', 'inTwoShots'] };
+const SPECIAL = { minigolf: ['par', 'inTwoShots'] };
 
 // What is asked of each hole in turn, by par: early entries are the gentle
 // ones, and each list is walked as the round goes on.

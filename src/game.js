@@ -989,6 +989,8 @@ export class Game {
   }
 
   availableClubs() {
+    // Crazy golf is a putting challenge: the putter is the only club
+    if (this.world?.spec.green.channel) return [PUTTER];
     return CLUBS.filter((c) => clubAllowed(c, this.lie, this.onTee));
   }
 
