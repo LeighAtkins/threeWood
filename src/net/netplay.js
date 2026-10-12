@@ -691,7 +691,7 @@ export class NetPlay {
     const rows = this.board();
     const me = rows.find((r) => r.me);
     this.hand = deal(Math.random, me ? me.rank : 1, rows.length);
-    // (a tie for the lead still has someone 'above': only a clear leader gets no mischief)
+    // (tied players share a place: everyone tied for the lead is dealt no mischief)
     return this.hand.map((id) => {
       const c = CARDS[id];
       const to = c.kind === 'mischief' ? targetFor(rows.map((r) => r.id), this.myId) : null;
@@ -1001,7 +1001,8 @@ export class NetPlay {
       };
     });
     rows.sort((a, b) => a.total - b.total || a.name.localeCompare(b.name));
-    rows.forEach((r, i) => { r.rank = i + 1; const was = this.lastRanks.get(r.id); r.move = was == null ? 0 : was - r.rank; });
+    // (a tie shares its place: 1, 1, 3)
+    rows.forEach((r, i) => { r.rank = i > 0 && r.total === rows[i - 1].total ? rows[i - 1].rank : i + 1; const was = this.lastRanks.get(r.id); r.move = was == null ? 0 : was - r.rank; });
     return rows;
   }
 
