@@ -140,6 +140,7 @@ export class RoomObject {
       this.round = { seed: msg.seed.slice(0, 40), length, holes: roundHoles(length), index: 0 };
       this.save(); // (the round, and below each hole as it moves on, survives a restart)
       for (const b of this.botHost().list) { b.total = 0; b.mod = b.nextMod = 1; }
+      this.bots.mischief = msg.mischief !== false;
       for (const p of this.players.values()) if (p.bot) { p.total = 0; p.doneHole = -1; }
       this.bots.totals = new Map();
       this.botsToHole();

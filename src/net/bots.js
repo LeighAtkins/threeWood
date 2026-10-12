@@ -369,7 +369,7 @@ export class Bots {
   playCard(b) {
     const ids = [...(this.totals || new Map()).entries()].sort((x, y) => x[1] - y[1]).map(([id]) => id);
     const rank = Math.max(1, ids.indexOf(b.id) + 1);
-    const hand = deal(Math.random, rank, Math.max(ids.length, 2));
+    const hand = deal(Math.random, rank, Math.max(ids.length, 2), this.mischief !== false);
     const mean = hand.filter((id) => CARDS[id].kind === 'mischief');
     const to = targetFor(ids, b.id);
     const id = mean.length && to && Math.random() < 0.7 ? mean[0] : hand.find((x) => CARDS[x].kind === 'self');

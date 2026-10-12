@@ -83,6 +83,7 @@ export class NetPlay {
     this.watching = null;
     this.watchIdle = 0;
     this.emotesOpen = 0; // seconds the emote row stays open after the 💬 tap
+    this.mischiefOn = true; // host, in the lobby: mischief cards this round?
     this.myPose = null;  // by the fire: my pose, said again now and then
     this.poseT = 0;
   }
@@ -209,7 +210,7 @@ export class NetPlay {
         <p class="seats">${this.players.length} OF ${MAX_PLAYERS} SEATS</p>
         ${botRow}
         ${room.isHost
-          ? `<div class="btn-row"><button class="btn" data-a="go9">START 9</button><button class="btn" data-a="go18">START 18</button></div>`
+          ? `<button class="toggle-row" data-a="mischief"><span>MISCHIEF CARDS</span><b>${this.mischiefOn ? 'ON 😈' : 'OFF 😇'}</b></button><div class="btn-row"><button class="btn" data-a="go9">START 9</button><button class="btn" data-a="go18">START 18</button></div>`
           : `<p>Waiting for the host to start…</p>`}
         <button class="btn ghost" data-a="leave">LEAVE</button>`;
     }
@@ -223,6 +224,7 @@ export class NetPlay {
       else if (a === 'back') { this.closeLobby(); this.g.showTitle(); }
       else if (a === 'leave') { this.leave(); this.error = ''; this.renderLobby(); }
       else if (a === 'go9' || a === 'go18') this.startRound(a === 'go9' ? 9 : 18);
+      else if (a === 'mischief') { this.mischiefOn = !this.mischiefOn; this.renderLobby(); }
       else if (a === 'bot') this.addBot(e.target.closest('[data-a]').dataset.level);
       else if (a === 'unbot') { const id = e.target.closest('[data-a]').dataset.id; room.removeBot(id); }
       else if (a === 'share') {
@@ -277,7 +279,7 @@ export class NetPlay {
     switch (msg.t) {
       case 'start':
         // (a seed from another phone is only ever letters, digits and dashes)
-        if (from === this.room.hostId && !this.room.isHost && cleanSeed(msg.seed)) this.begin(cleanSeed(msg.seed), msg.length === 9 ? 9 : 18);
+        if (from === this.room.hostId && !this.room.isHost && cleanSeed(msg.seed)) this.begin(cleanSeed(msg.seed), msg.length === 9 ? 9 : 18, msg.mischief !== false);
         break;
       case 'at':
         this.status.set(from, 'aim');
@@ -398,11 +400,12 @@ export class NetPlay {
   startRound(length) {
     if (!this.room?.isHost) return;
     const seed = generateSeed();
-    this.room.send({ t: 'start', seed, length });
-    this.begin(seed, length);
+    this.room.send({ t: 'start', seed, length, mischief: this.mischiefOn });
+    this.begin(seed, length, this.mischiefOn);
   }
 
-  begin(seed, length) {
+  begin(seed, length, mischief = true) {
+    this.mischief = mischief !== false; // (the host's choice for the round: mischief cards, or only boosts)
     this.acorns = 0;
     this.hand = this.kept = null; this.incoming = []; this.cardsNow = { mine: null, hit: [] };
     this.inRound = true;
@@ -713,7 +716,7 @@ export class NetPlay {
     if (this.g.round.index >= this.g.round.holes.length) return null; // (no next hole)
     const rows = this.board();
     const me = rows.find((r) => r.me);
-    this.hand = deal(Math.random, me ? me.rank : 1, rows.length);
+    this.hand = deal(Math.random, me ? me.rank : 1, rows.length, this.mischief);
     // (tied players share a place: everyone tied for the lead is dealt no mischief)
     return this.hand.map((id) => {
       const c = CARDS[id];

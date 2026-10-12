@@ -32,10 +32,10 @@ const MISCHIEF = Object.keys(CARDS).filter((k) => CARDS[k].kind === 'mischief');
  * rng: () => [0, 1). The leader gets no mischief (nobody is above them);
  * last place gets two.
  */
-export function deal(rng, rank, of) {
+export function deal(rng, rank, of, mischief = true) {
   const pick = (pool, taken) => { const left = pool.filter((k) => !taken.includes(k)); return left[Math.floor(rng() * left.length)]; };
   const behind = of > 1 ? (rank - 1) / (of - 1) : 0; // 0 leading .. 1 last
-  const nasty = rank <= 1 ? 0 : behind > 0.6 ? 2 : 1;
+  const nasty = !mischief || rank <= 1 ? 0 : behind > 0.6 ? 2 : 1;
   const hand = [];
   for (let i = 0; i < nasty; i++) hand.push(pick(MISCHIEF, hand));
   while (hand.length < 3) hand.push(pick(SELF, hand));
