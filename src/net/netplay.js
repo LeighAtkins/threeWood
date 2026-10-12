@@ -114,6 +114,19 @@ export class NetPlay {
 
   closeLobby() { this.lobby.classList.add('hidden'); this.lobby.innerHTML = ''; }
 
+  /** The round is over: back to the room's lobby, everyone still in it, for another. */
+  backToRoom() {
+    if (!this.room) return false;
+    this.inRound = false;
+    this.others.hideAll();
+    this.feed.innerHTML = '';
+    this.feed.classList.add('hidden');
+    this.lobby.classList.remove('hidden');
+    this.renderLobby();
+    this.paint();
+    return true;
+  }
+
   connect() {
     this.error = '';
     this.room = new Room({ look: cleanLook(this.g.camp.look), build: BUILD }, {

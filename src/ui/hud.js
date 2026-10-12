@@ -515,7 +515,7 @@ export class Hud {
     if (node && rows) node.innerHTML = boardHtml(rows);
   }
 
-  showSummary({ total, par, strokes, points, stats, card, best, seed, outfits = [], board = null, awards = null, onAgain, onShare, onCamp, onNabe = null }) {
+  showSummary({ total, par, strokes, points, stats, card, best, seed, outfits = [], board = null, awards = null, onAgain, onShare, onCamp, onNabe = null, onRoom = null }) {
     this.clearLayer();
     const node = el('div', 'overlay dim', `
       <div class="card">
@@ -528,12 +528,14 @@ export class Hud {
         <div class="stats">${stats.map((s) => `<div class="stat"><b>${s.value}</b><span>${s.label}</span></div>`).join('')}</div>
         ${outfits.map((name) => `<div class="new-fit">NEW OUTFIT · ${name.toUpperCase()}</div>`).join('')}
         <div class="btn-row"><button class="btn" data-a="camp">SIT BY THE FIRE</button>${onNabe ? '<button class="btn hotpot" data-a="nabe">HOT POT</button>' : ''}</div>
-        <button class="btn ghost" data-a="again">NEW COURSE</button>
+        ${onRoom ? '<button class="btn" data-a="room">ANOTHER ROUND, SAME ROOM</button>' : ''}
+        <button class="btn ghost" data-a="again">${onRoom ? 'LEAVE THE ROOM' : 'NEW COURSE'}</button>
         <button class="btn ghost" data-a="share">CHALLENGE A FRIEND</button>
       </div>`);
     node.querySelector('[data-a="camp"]').addEventListener('click', onCamp);
     node.querySelector('[data-a="nabe"]')?.addEventListener('click', onNabe);
     node.querySelector('[data-a="again"]').addEventListener('click', onAgain);
+    node.querySelector('[data-a="room"]')?.addEventListener('click', onRoom);
     node.querySelector('[data-a="share"]').addEventListener('click', (e) => onShare(e.currentTarget));
     this.layer.appendChild(node);
   }

@@ -2126,6 +2126,13 @@ export class Game {
         { label: 'LONGEST DRIVE', value: `${st.longestDrive}y` },
         { label: 'CHALLENGES', value: `★ ${round.stars || 0}/${round.holes.length}` },
       ],
+      onRoom: this.net.room ? () => {
+        // Same room, same friends (and bots): the host starts the next round from the lobby
+        this.hud.clearLayer();
+        this.seed = generateSeed();
+        this.showTitle();
+        this.net.backToRoom();
+      } : null,
       onAgain: () => {
         this.net.leave();
         this.seedPinned = false;
