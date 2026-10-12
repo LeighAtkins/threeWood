@@ -38,7 +38,7 @@ test('the cup takes a dead-weight putt and lips out a rocket', () => {
   assert.ok(CUP_CAPTURE_SPEED > 0 && run(5.6, CUP_R * 0.95).b.mode !== 'holed');
 });
 
-test('the routing is a par 70 that tours six worlds', async () => {
+test('the routing is a par 72 that tours six worlds', async () => {
   const { courseBiomes, biomeForHole, BIOMES } = await import('../src/course/biomes.js');
   for (const seed of ['A', 'B', 'DAILY-2026-10-05']) {
     const worlds = courseBiomes(seed);
@@ -49,7 +49,7 @@ test('the routing is a par 70 that tours six worlds', async () => {
     assert.equal(designHole(seed, 7).biome, worlds[2]);
   }
   assert.equal(ROUND_PLAN.length, 18);
-  assert.equal(ROUND_PLAN.reduce((s, h) => s + h.par, 0), 70);
+  assert.equal(ROUND_PLAN.reduce((s, h) => s + h.par, 0), 72);
   assert.equal(roundHoles(9).length, 9);
 });
 

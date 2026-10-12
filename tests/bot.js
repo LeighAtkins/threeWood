@@ -11,8 +11,8 @@ import { mulberry32, hashSeed } from '../src/core/rng.js';
  * `skill` controlling how sloppy its swing timing and power are
  * (0 = perfect). Returns the stroke count and a shot log.
  */
-export function playHole(seed, number, { skill = 0, maxStrokes = 12 } = {}) {
-  const spec = designHole(seed, number);
+export function playHole(seed, number, { skill = 0, maxStrokes = 12, aggressive = false, ...request } = {}) {
+  const spec = designHole(seed, number, request);
   const world = buildWorld(spec);
   const rng = mulberry32(hashSeed(`${seed}:bot-${number}`));
   const env = { windX: spec.wind.x, windZ: spec.wind.z };
@@ -41,7 +41,11 @@ export function playHole(seed, number, { skill = 0, maxStrokes = 12 } = {}) {
       putts++;
       label = 'putt';
     } else {
-      const target = aimTarget(world, ball.x, ball.z);
+      // The safe line follows the fairway round its corners; the aggressive
+      // one goes straight for the flag whenever a club can reach it
+      let target = aimTarget(world, ball.x, ball.z);
+      const straight = Math.hypot(world.cup.x - ball.x, world.cup.z - ball.z);
+      if (aggressive && !target.isPin && straight <= 265) target = { x: world.cup.x, z: world.cup.z, isPin: true };
       const dist = Math.hypot(target.x - ball.x, target.z - ball.z);
       const club = autoSelectClub(dist, lie, onTee);
       const power = Math.min(100, powerFor(club, dist, lie.speedFactor) * (1 + (rng() - 0.5) * 0.16 * skill));

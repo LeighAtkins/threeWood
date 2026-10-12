@@ -21,9 +21,9 @@ const FEATURE_BOUND = 205;      // tee/green/hazards must sit inside this
 
 export const ARCHETYPES = {
   straight:      { label: 'Straightaway',  blurb: 'Bunkers pinch the landing zone. Find the short grass.' },
-  doglegL:       { label: 'Dogleg Left',   blurb: 'Cut the corner over the trees, or play it safe.' },
-  doglegR:       { label: 'Dogleg Right',  blurb: 'Cut the corner over the trees, or play it safe.' },
-  doubleDogleg:  { label: 'The Serpent',   blurb: 'Two turns. Three good shots, or two great ones.' },
+  doglegL:       { label: 'Dogleg Left',   blurb: 'Cut the corner over the water for a short approach, or play round.' },
+  doglegR:       { label: 'Dogleg Right',  blurb: 'Cut the corner over the water for a short approach, or play round.' },
+  doubleDogleg:  { label: 'The Serpent',   blurb: 'Two turns, with a lake inside the first. Three good shots, or two brave ones.' },
   overWater:     { label: 'The Carry',     blurb: 'Water between you and the flag. Commit.' },
   waterApproach: { label: 'The Moat',      blurb: 'A pond guards the front of the green.' },
   lakeside:      { label: 'Lakeside',      blurb: 'Water all down one side. Bail out the other.' },
@@ -40,7 +40,7 @@ export const ARCHETYPES = {
   halfpipe:      { label: 'The Half-Pipe', blurb: 'Banked sides feed the ball back to the middle.' },
   hogsback:      { label: "Hog's Back",    blurb: 'The fairway is a ridge. Miss it and the ball runs away.' },
   terraces:      { label: 'The Terraces',  blurb: 'Three shelves down the hill. Land on one.' },
-  gorge:         { label: 'The Gorge',     blurb: 'A ravine cuts the fairway. Carry it or lay up.' },
+  gorge:         { label: 'The Gorge',     blurb: 'A creek at the bottom of a ravine. Carry it, or lay up short.' },
   punchbowl:     { label: 'The Punchbowl', blurb: 'Hit the bowl and it feeds to the flag.' },
   // Holes that play like something else entirely
   minigolf:      { label: 'Crazy Golf',    blurb: 'Putter only. Bank it off the walls, roll it over the hump.' },
@@ -54,7 +54,9 @@ export const GIMMICKS = {
 };
 
 // Par -> [min, max] hole length
-export const PAR_BANDS = { 3: [100, 165], 4: [255, 320], 5: [350, 400] };
+// Par 5s are long enough that getting home in two takes two pure strikes
+// (a driver carries ~200): a decision, not a formality
+export const PAR_BANDS = { 3: [100, 165], 4: [250, 330], 5: [425, 475] };
 
 /**
  * The 18-hole routing (par 72). Pacing is authored: a gentle open, a
@@ -65,31 +67,36 @@ export const PAR_BANDS = { 3: [100, 165], 4: [255, 320], 5: [350, 400] };
 // of the first holes play alike, and none is a plain drive down a fairway:
 // a giant cup to ace, crazy golf, a ski jump through rings, a half-pipe of
 // mushrooms, a cliff-top par 3, then the lake.
+// (par 72) Laid out like a course: an easy, generous opening to learn the
+// swing on, the first real decision by the third tee, a par 3 and a par 5
+// in each half, water and the gorge in the middle, and the hardest asks
+// (the island, the serpent) late. Each hole's risk/reward was checked with
+// bots at three skills (docs/course-design.md).
 export const ROUND_PLAN = [
-  { par: 3, archetypes: ['punchbowl'] },
-  { par: 3, archetypes: ['minigolf'] },
-  { par: 4, archetypes: ['skiJump'], gimmick: 'rings' },
-  { par: 5, archetypes: ['halfpipe'], gimmick: 'boing' },
-  { par: 3, archetypes: ['lookout'] },
-  { par: 4, archetypes: ['lakeside'], gimmick: 'rings' },
-  { par: 4, archetypes: ['doglegL', 'doglegR'], gimmick: 'bullseye' },
-  { par: 5, archetypes: ['terraces'] },
-  { par: 4, archetypes: ['hogsback'], gimmick: 'boing' },
-  { par: 3, archetypes: ['minigolf'] },
-  { par: 4, archetypes: ['bottleneck'], gimmick: 'rings' },
-  { par: 5, archetypes: ['cape', 'lakeside'] },
-  { par: 4, archetypes: ['gorge'] },
-  { par: 3, archetypes: ['potBunkers', 'overWater', 'punchbowl'], gimmick: 'bullseye' },
-  { par: 5, archetypes: ['doubleDogleg'], gimmick: 'rings' },
-  { par: 4, archetypes: ['ascent', 'waterApproach'], gimmick: 'boing' },
-  { par: 3, archetypes: ['islandGreen'] },
-  { par: 4, archetypes: ['halfpipe', 'skiJump'], gimmick: 'rings' },
+  { par: 4, archetypes: ['skiJump'], gimmick: 'rings' },          // 1  downhill, confidence
+  { par: 3, archetypes: ['minigolf'] },                           // 2  putting, the walls
+  { par: 4, archetypes: ['doglegR', 'doglegL'] },                 // 3  cut the corner over water?
+  { par: 5, archetypes: ['halfpipe'], gimmick: 'boing' },         // 4  long, forgiving sides
+  { par: 3, archetypes: ['lookout'] },                            // 5  cliff-top, judge the drop
+  { par: 4, archetypes: ['lakeside'], gimmick: 'rings' },         // 6  water down one side
+  { par: 4, archetypes: ['bottleneck'] },                         // 7  thread the gate
+  { par: 5, archetypes: ['terraces'] },                           // 8  land on a shelf
+  { par: 4, archetypes: ['hogsback'], gimmick: 'bullseye' },      // 9  hold the ridge
+  { par: 4, archetypes: ['dunes'] },                              // 10 bunkers all the way home
+  { par: 4, archetypes: ['doglegL', 'doglegR'], gimmick: 'boing' }, // 11 the other dogleg
+  { par: 5, archetypes: ['cape'] },                               // 12 bite off the lake
+  { par: 4, archetypes: ['gorge'] },                              // 13 carry the creek, or lay up
+  { par: 3, archetypes: ['potBunkers', 'overWater'], gimmick: 'bullseye' }, // 14 a tiny target
+  { par: 5, archetypes: ['doubleDogleg'], gimmick: 'rings' },     // 15 two turns
+  { par: 4, archetypes: ['ascent', 'waterApproach'] },            // 16 uphill, or the moat
+  { par: 3, archetypes: ['islandGreen'] },                        // 17 all carry
+  { par: 4, archetypes: ['punchbowl', 'minigolf'] },              // 18 a feed to the flag, or putt-putt (par 4 bowl)
 ];
 
 /** Which course holes make up a round of the given length. */
 export function roundHoles(length) {
   if (length >= 18) return ROUND_PLAN.map((_, i) => i + 1);
-  if (length === 9) return [1, 2, 3, 5, 6, 9, 12, 17, 18];
+  if (length === 9) return [1, 2, 3, 4, 5, 6, 12, 13, 17];
   return [1, 2, 17].slice(0, length);
 }
 
@@ -131,12 +138,14 @@ function layoutHole(rng, plan) {
     path = [tee, corner, at(totalLen - l1, angle, corner)];
     dogleg = { corner, side, l1 };
   } else if (archetype === 'doubleDogleg') {
+    // An S: out, a real turn one way, back the other. The straight line from
+    // the tee to the green cuts well inside the first turn (over the lake)
     const side = rng.sign();
-    const a1 = rad(rng.range(20, 30)) * side;
-    const l1 = totalLen * 0.45, l2 = totalLen * 0.3;
+    const a1 = rad(rng.range(34, 42)) * side;
+    const l1 = totalLen * 0.42, l2 = totalLen * 0.3;
     const c1 = at(l1, 0);
     const c2 = at(l2, a1, c1);
-    path = [tee, c1, c2, at(totalLen - l1 - l2, 0, c2)];
+    path = [tee, c1, c2, at(totalLen - l1 - l2, a1 * -0.55, c2)];
     dogleg = { corner: c1, side, l1 };
   } else if (par > 3) {
     // "Straight" holes still drift a little so no two play the same line
@@ -198,7 +207,15 @@ function layoutHole(rng, plan) {
     case 'halfpipe': shape = { kind: 'halfpipe', h: rng.range(3, 3.8) }; greenside(); break;
     case 'hogsback': shape = { kind: 'hogsback', h: rng.range(2, 2.6) }; addBunker(totalLen * 0.66, fairwayHalf + 9, rng.range(6, 8)); addBunker(totalLen * 0.7, -(fairwayHalf + 9), rng.range(6, 8)); break;
     case 'terraces': shape = { kind: 'terraces', h: rng.range(9, 11), steps: 3 }; greenside(); break;
-    case 'gorge': shape = { kind: 'gorge', h: rng.range(4, 5), at: rng.range(0.6, 0.66), w: rng.range(20, 24) }; greenside(); break; // gentle enough to roll out of
+    case 'gorge': {
+      shape = { kind: 'gorge', h: rng.range(4, 5), at: rng.range(0.6, 0.66), w: rng.range(20, 24) };
+      // A creek along the bottom, across the whole fairway: short of a full
+      // carry is wet. The lay-up before it leaves a mid-iron over.
+      const at = shape.at * totalLen;
+      for (const across of [-fairwayHalf - 6, 0, fairwayHalf + 6]) addPond(offPath(at, across), 9.5, 0.55);
+      greenside();
+      break;
+    }
     case 'punchbowl': shape = { kind: 'punchbowl', h: rng.range(2.4, 3) }; break;
     case 'minigolf': shape = { kind: 'channel', hump: rng.range(0.35, 0.5), at: rng.range(0.42, 0.58) }; break;
     default: break;
@@ -215,11 +232,15 @@ function layoutHole(rng, plan) {
     case 'doglegR': {
       addBunker(dogleg.l1 + 10, -dogleg.side * (fairwayHalf + 5), rng.range(6, 8));
       addBunker(totalLen - 6, dogleg.side * (green.size + 5), rng.range(5, 6));
-      // A stand of trees on the inside of the corner guards the short cut
-      const n = rng.int(7, 10);
+      // The short cut over the inside of the corner crosses a pond: carry it
+      // and the approach is a wedge; come up short and it is a drop and a long
+      // one. Trees behind the pond close the door on going round the inside.
+      const r = rng.range(17, 22);
+      addPond(offPath(dogleg.l1 - 6, dogleg.side * (fairwayHalf + 6 + r)), r, 0.75);
+      const n = rng.int(5, 7);
       for (let i = 0; i < n; i++) {
-        const along = dogleg.l1 + rng.range(-34, 12);
-        const across = dogleg.side * (fairwayHalf + rng.range(7, 30));
+        const along = dogleg.l1 + rng.range(-10, 14);
+        const across = dogleg.side * (fairwayHalf + 2 * r + rng.range(8, 22));
         trees.push({ ...offPath(along, across), s: rng.range(1.0, 1.4) });
       }
       break;
@@ -227,6 +248,18 @@ function layoutHole(rng, plan) {
     case 'doubleDogleg': {
       addBunker(dogleg.l1 + 8, -dogleg.side * (fairwayHalf + 5), rng.range(6, 8));
       addBunker(totalLen * 0.72, dogleg.side * (fairwayHalf + 5), rng.range(6, 8));
+      // The straight line from tee to green cuts inside the first turn: the
+      // lake sits between that line and the corner, so going for it means
+      // carrying water, and the fairway round the outside stays dry
+      const c1 = dogleg.corner, gx = greenPt.x, gz = greenPt.z;
+      const L = Math.hypot(gx - tee.x, gz - tee.z) || 1, ux = (gx - tee.x) / L, uz = (gz - tee.z) / L;
+      const t = (c1.x - tee.x) * ux + (c1.z - tee.z) * uz;
+      const foot = { x: tee.x + ux * t, z: tee.z + uz * t };   // nearest point on the chord to the corner
+      const gap = Math.hypot(foot.x - c1.x, foot.z - c1.z);
+      const r = Math.max(18, Math.min(30, gap * 0.6));
+      // Centred on the chord where a driver comes down (195-235 yards out), so
+      // the straight line has to carry it or go round
+      addPond({ x: tee.x + ux * 232, z: tee.z + uz * 232 }, r, 0.7);
       greenside();
       break;
     }
