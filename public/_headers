@@ -1,0 +1,12 @@
+# Cloudflare Pages headers
+# Hashed build files never change: cache them for a year
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# The page and the service worker must always be checked, so a new deploy shows up
+/
+  Cache-Control: public, max-age=0, must-revalidate
+/index.html
+  Cache-Control: public, max-age=0, must-revalidate
+/sw.js
+  Cache-Control: no-cache

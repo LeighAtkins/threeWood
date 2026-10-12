@@ -3,7 +3,8 @@ import { execSync } from 'node:child_process';
 
 // Which build this is: friends in a room must be running the same one
 function buildId() {
-  if (process.env.VERCEL_GIT_COMMIT_SHA) return process.env.VERCEL_GIT_COMMIT_SHA.slice(0, 7);
+  const sha = process.env.CF_PAGES_COMMIT_SHA || process.env.GITHUB_SHA || process.env.VERCEL_GIT_COMMIT_SHA;
+  if (sha) return sha.slice(0, 7);
   try { return execSync('git rev-parse --short HEAD').toString().trim(); } catch { return 'dev'; }
 }
 
