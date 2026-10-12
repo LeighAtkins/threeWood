@@ -2380,7 +2380,10 @@ export class Game {
       return;
     }
     // Ready on the tee, waiting for the others: the whole tee in the picture, to watch everyone hit
-    if (this.state === 'aim' && this.onTee && this.net.active && this.net.status.get(this.net.myId) === 'ready') {
+    // (and it stays there through my swing: the meter is on screen, and the
+    // whole tee swinging at once is the moment worth seeing)
+    const tee = this.onTee && this.net.active && this.net.players.length > 1 && !this.putting;
+    if (tee && ((this.state === 'aim' && this.net.status.get(this.net.myId) === 'ready') || this.state === 'swing')) {
       const spots = this.net.teeSpots();
       if (spots.length) { this.rig.gallery(ball, dirX, dirZ, spots); return; }
     }

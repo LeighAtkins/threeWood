@@ -651,14 +651,14 @@ export class NetPlay {
   onCard(from, id, to) {
     const c = CARDS[id];
     if (!this.inRound || !c) return;
-    if (c.kind === 'self') { if (from !== this.myId) this.addFeed(`${c.e} ${this.nameOf(from)} keeps ${c.label}`, 'react'); return; }
+    if (c.kind === 'self') return; // (only mischief is news; my own keep is shown when I pick it)
     if (!to) return;
     const who = to === this.myId ? 'you' : this.nameOf(to);
     const by = from === this.myId ? 'You' : this.nameOf(from);
     this.addFeed(`${c.e} ${by} gave ${who} ${c.label}`, 'lol', to === this.myId || from === this.myId ? null : to);
     if (to === this.myId) {
       this.incoming.push({ id, from });
-      this.g.hud.callout(`${c.e} ${c.label.toUpperCase()} FROM ${this.nameOf(from).toUpperCase()}`, 'bad small');
+      this.g.hud.callout(`${c.e} ${c.label.toUpperCase()} FROM ${this.nameOf(from).toUpperCase()}${this.g.state === 'result' ? '' : ' · NEXT HOLE'}`, 'bad small');
       this.g.camper.feel('oops', 2);
     } else this.others.react(to, 'oops');
     this.g.audio.giggle(2);

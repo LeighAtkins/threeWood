@@ -16,6 +16,7 @@ import { cleanLook } from '../core/camp.js';
 import { createBall, placeBall, launchBall, puttBall, stepBall, SIM_DT } from '../core/ballSim.js';
 
 const SCALE = CAMPER_SCALE;
+const TAG_TOP = 64;  // px: the hole and score panels along the top of the screen
 const FACE_FAR = 14; // metres from the camera beyond which a friend's face is not drawn
 
 export class Others {
@@ -386,6 +387,8 @@ export class Others {
         if (!hit) break;
         y = hit.y - hit.h - 1;
       }
+      // (never up into the HUD along the top: a crowd that will not fit just overlaps)
+      if (y - h < TAG_TOP) y = Math.max(o.tagY, TAG_TOP + h);
       placed.push({ x: o.tagX, y, w, h });
       if (o.tagFar !== o.tagFarShown) { o.tagFarShown = o.tagFar; o.tag.classList.toggle('far', o.tagFar); }
       o.tag.style.display = 'block';
