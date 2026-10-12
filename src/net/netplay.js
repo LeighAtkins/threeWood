@@ -358,6 +358,7 @@ export class NetPlay {
         this.status.set(from, 'done');
         this.others.setStatus(from, 'done');
         this.scores.set(from, { total: num(msg.total, -99, 199), strokes: num(msg.strokes, 0, 20), putts: num(msg.putts, 0, 20), drive: num(msg.drive, 0, 400), pin: msg.pin == null ? null : num(msg.pin, 0, 400), near: msg.near == null ? null : num(msg.near, 0, 400) });
+        this.streak(from, num(msg.strokes, 0, 20));
         this.contest();
         g.hud.updateBoard(this.board());
         break;
@@ -402,6 +403,7 @@ export class NetPlay {
     this.haps.clear();
     this.crowns.clear();
     this.leader = null;
+    this.streaks = new Map();
     this.closeLobby();
     this.g.startNetRound(seed, length);
   }
@@ -468,11 +470,12 @@ export class NetPlay {
       const mine = this.crown === this.myId;
       crown = { mine, who: mine ? 'YOU' : this.nameOf(this.crown).toUpperCase(), perk: this.perk };
     }
+    const final = this.finalWord();
     const cards = [
       ...(this.cardsNow.mine ? [{ ...CARDS[this.cardsNow.mine], mine: true }] : []),
       ...this.cardsNow.hit.map((h) => ({ ...CARDS[h.id], from: this.nameOf(h.from) })),
     ];
-    return { contest, crown, cards };
+    return { contest, crown, cards, final };
   }
 
   /**
@@ -723,6 +726,29 @@ export class NetPlay {
     this.g.audio.giggle(2);
   }
 
+  /** Birdies in a row: two is a hot streak (🔥 by their name), and news. */
+  streak(id, strokes) {
+    this.streaks ||= new Map();
+    const par = this.g.world?.spec.par ?? 4;
+    const n = strokes > 0 && strokes < par ? (this.streaks.get(id) || 0) + 1 : 0;
+    this.streaks.set(id, n);
+    if (n >= 2) this.addFeed(`🔥 ${id === this.myId ? 'You are' : `${this.nameOf(id)} is`} on fire: ${n} under par in a row`, 'wow', id === this.myId ? null : id);
+  }
+
+  onFire(id) { return (this.streaks?.get(id) || 0) >= 2; }
+
+  /** The last hole's card: how tight it is at the top. */
+  finalWord() {
+    const { round } = this.g;
+    if (!this.active || this.players.length < 2 || round.index !== round.holes.length - 1) return null;
+    const rows = this.board();
+    const gap = rows.length > 2 ? rows[2].total - rows[0].total : rows[1].total - rows[0].total;
+    const lead = rows.filter((r) => r.total === rows[0].total);
+    if (lead.length > 1) return `FINAL HOLE · ${lead.length} TIED FOR THE LEAD`;
+    if (gap <= 2) return `FINAL HOLE · ${gap} ${gap === 1 ? 'STROKE COVERS' : 'STROKES COVER'} THE TOP THREE`;
+    return `FINAL HOLE · ${lead[0].me ? 'YOUR' : `${lead[0].name.toUpperCase()}'S`} TO LOSE`;
+  }
+
   /** After a hole: a new leader, or a new group sharing the lead, is news. */
   leadNews() {
     const rows = this.board();
@@ -930,6 +956,7 @@ export class NetPlay {
     const s = { total, strokes, putts: stat.putts || 0, drive: stat.drive || 0, pin: stat.pin ?? null, near: stat.near ?? null };
     this.scores.set(this.myId, s);
     this.room.send({ t: 'done', ...s });
+    this.streak(this.myId, strokes);
     this.paint();
     this.judge();
     this.contest();
@@ -1015,8 +1042,9 @@ export class NetPlay {
       const row = document.createElement('div');
       row.className = `who ${this.status.get(r.id) || 'aim'}`;
       row.innerHTML = '<i></i><b></b><span></span>';
-      row.querySelector('b').textContent = `${r.me ? 'YOU' : r.name}${this.crown === r.id ? ' 👑' : ''}`;
-      row.querySelector('span').textContent = this.scores.has(r.id) ? vsPar(r.total) : '';
+      row.querySelector('b').textContent = `${r.me ? 'YOU' : r.name}${this.crown === r.id ? ' 👑' : ''}${this.onFire(r.id) ? ' 🔥' : ''}`;
+      row.querySelector('span').textContent = this.scores.has(r.id) ? `${vsPar(r.total)}${r.move > 0 ? ' ▲' : r.move < 0 ? ' ▼' : ''}` : '';
+      if (r.move) row.classList.add(r.move > 0 ? 'up' : 'down');
       this.pill.appendChild(row);
     }
     // Things to say, folded away behind one small button so the pill stays small

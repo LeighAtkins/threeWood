@@ -431,6 +431,7 @@ export class Hud {
     const dots = '●'.repeat(pips) + '○'.repeat(5 - pips);
     const node = el('div', 'overlay pass', `
       <div class="intro">
+        ${crown?.final ? `<div class="final-word">${esc(crown.final)}</div>` : ''}
         <div class="num">HOLE ${index} OF ${total} · ${biome.toUpperCase()}</div>
         <div class="name">${name}</div>
         <div class="meta">PAR ${par} · ${yards} YARDS</div>

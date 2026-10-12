@@ -2134,6 +2134,15 @@ export class Game {
       },
     });
     showCard();
+    // Round the fire, each award over its winner's head in turn
+    if (this.net.active && this.net.players.length > 1) {
+      this.net.awards().forEach((a, i) => setTimeout(() => {
+        if (this.state !== 'summary') return;
+        if (a.me) { this.camper.feel('joy', 2.5); this.hud.callout(`${a.e} ${a.label.toUpperCase()}`, 'small'); } // (not gold: that is shared, and every phone pops its own)
+        else { this.net.others.say(a.id, `${a.e} ${a.label}`); this.net.others.react(a.id, 'joy'); }
+        this.audio.reward(i);
+      }, 1800 + i * 1600));
+    }
   }
 
   endIntro() {
