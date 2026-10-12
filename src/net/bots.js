@@ -64,10 +64,11 @@ export class Bots {
   get(id) { return this.list.find((b) => b.id === id); }
 
   /** A new hole: everyone back to the tee, lining up. */
-  atHole() {
+  atHole(finished = new Set()) {
     const { world, round } = this.game;
     // Each bot tees up on its own seat's spot, like everyone else
     this.list.forEach((b) => {
+      if (finished.has(b.id)) { b.state = 'finished'; return; }
       b.strokes = 0; b.putts = 0; b.drive = 0; b.pin = null; b.near = null; b.holed = false;
       // Cards from the last hole: a boost steadies the hands, mischief shakes them
       b.mod = b.nextMod || 1; b.nextMod = 1;
@@ -82,6 +83,12 @@ export class Bots {
   arrive(b, delay) {
     const { round } = this.game;
     b.state = 'arriving'; b.t = delay;
+    // On the walk over, now and then, a mushroom (the room hears about it)
+    if (Math.random() < 0.09) {
+      const r = Math.random();
+      this.pending ||= [];
+      this.pending.push({ id: b.id, t: delay * 0.5, msg: { t: 'hap', k: 'shroom', v: r < 0.05 ? 3 : r < 0.25 ? 2 : r < 0.6 ? 1 : 0 } });
+    }
     this.net.deliverBot(b.id, { t: 'at', x: b.ball.x, z: b.ball.z, hole: round.index });
   }
 
@@ -345,7 +352,7 @@ export class Bots {
       for (const p of this.pending.filter((q) => q.t <= 0)) {
         if (!this.list.some((b) => b.id === p.id)) continue;
         this.net.deliverBot(p.id, p.msg);
-        if (p.msg.t === 'card') this.heard(p.id, p.msg); // (bots pick on bots too)
+        if (p.msg.t === 'card' || p.msg.t === 'hap') this.heard(p.id, p.msg); // (bots pick on bots too)
       }
       this.pending = this.pending.filter((q) => q.t > 0);
     }
@@ -386,7 +393,7 @@ export class Bots {
       } else if (b.state === 'done' && b.t <= 0) {
         b.state = 'finished';
         b.total += b.strokes - world.spec.par;
-        this.net.deliverBot(b.id, { t: 'done', strokes: b.strokes, total: b.total, putts: b.putts, drive: b.drive || 0, pin: b.pin ?? null, near: b.near ?? null });
+        this.net.deliverBot(b.id, { t: 'done', hole: round.index, strokes: b.strokes, total: b.total, putts: b.putts, drive: b.drive || 0, pin: b.pin ?? null, near: b.near ?? null });
         this.heard(b.id, { t: 'done', total: b.total });
         this.playCard(b);
       }

@@ -355,6 +355,8 @@ export class NetPlay {
         this.others.holed(from);
         break;
       case 'done':
+        // (a finished hole is only news on that hole: a late or stale one is dropped)
+        if (Number.isInteger(msg.hole) && msg.hole !== this.holeIdx) break;
         this.status.set(from, 'done');
         this.others.setStatus(from, 'done');
         this.scores.set(from, { total: num(msg.total, -99, 199), strokes: num(msg.strokes, 0, 20), putts: num(msg.putts, 0, 20), drive: num(msg.drive, 0, 400), pin: msg.pin == null ? null : num(msg.pin, 0, 400), near: msg.near == null ? null : num(msg.near, 0, 400) });
@@ -441,6 +443,8 @@ export class NetPlay {
   atHole() {
     if (!this.active) return;
     const { round, world } = this.g;
+    // The hole being played (round.index moves on the moment I finish it)
+    this.holeIdx = round.index;
     for (const p of this.players) this.status.set(p.id, 'aim');
     this.cleared = false;
     this.waitT = this.nextT = null;
@@ -531,10 +535,11 @@ export class NetPlay {
     }
     if (!me) {
       this.others.say(id, h.e);
-      this.others.react(id, h.tone === 'wow' ? 'joy' : 'oops');
+      this.others.react(id, h.tone === 'lol' ? 'oops' : 'joy');
     }
     // The room's noise: a laugh for the funny, applause for the good
     if (h.tone === 'lol') this.g.audio.giggle(me ? 3 : 2);
+    else if (h.tone === 'nice') this.g.audio.pop();
     else this.g.audio.applause(me ? 1.2 : 0.7);
   }
 
@@ -549,7 +554,7 @@ export class NetPlay {
     span.textContent = text;
     line.appendChild(span);
     if (about && tone !== 'react') {
-      const e = tone === 'lol' ? '😂' : '👏';
+      const e = tone === 'lol' ? '😂' : '👏'; // (nice and wow: a clap)
       const b = document.createElement('button');
       b.textContent = e;
       b.addEventListener('pointerdown', (ev) => {
@@ -955,7 +960,7 @@ export class NetPlay {
     this.status.set(this.myId, 'done');
     const s = { total, strokes, putts: stat.putts || 0, drive: stat.drive || 0, pin: stat.pin ?? null, near: stat.near ?? null };
     this.scores.set(this.myId, s);
-    this.room.send({ t: 'done', ...s });
+    this.room.send({ t: 'done', hole: this.holeIdx, ...s });
     this.streak(this.myId, strokes);
     this.paint();
     this.judge();

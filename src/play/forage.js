@@ -209,6 +209,7 @@ export class Forage {
       ((r.picked ||= {})[r.index] ||= []).push(it.id);
       g.audio.pop?.();
       g.hud.callout(`+1 ${KINDS[it.kind].name.toUpperCase()}`, KINDS[it.kind].rare || KINDS[it.kind].glow ? 'gold small' : 'small');
+      g.net.happen({ k: 'shroom', v: ['shimeji', 'shiitake', 'glowcap', 'golden'].indexOf(it.kind) });
       g.earn('forage');
       this.paintChip(true);
     };

@@ -1718,6 +1718,7 @@ export class Game {
           this.earn('fish', caught);
           this.hud.callout(caught > 1 ? `${caught} FISH!` : 'A FISH!', 'small');
           this.award(caught > 1 ? `Caught ${caught} fish` : 'Caught a fish', 50 * caught, true);
+          this.net.happen({ k: 'fish', v: caught });
         }
         if (result === 'gold') {
           // The golden ball: no stroke this time, and the last two are refunded

@@ -223,6 +223,10 @@ export class Audio {
 
   /** A room's laugh, for a funny happening: a few quick "he"s, falling. */
   giggle(voices = 2) {
+    // (a room of eight is a lot of funny: one laugh at a time, never a pile)
+    const now = performance.now();
+    if (now - (this.giggledAt || 0) < 2500) return;
+    this.giggledAt = now;
     for (let v = 0; v < voices; v++) {
       const base = 520 + v * 170 + Math.random() * 60, at = v * 0.07;
       for (let i = 0; i < 4; i++) this.tone(base * (1 - i * 0.06), 0.07, { type: 'triangle', gain: 0.05, delay: at + i * 0.11, to: base * (0.9 - i * 0.06) });

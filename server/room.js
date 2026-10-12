@@ -23,6 +23,7 @@
 import { Bots, BOT_LEVELS, botLook, NAMES } from '../src/net/bots.js';
 import { designHole, roundHoles } from '../src/course/holeDesigner.js';
 import { buildWorld } from '../src/course/courseWorld.js';
+import { placeBall } from '../src/core/ballSim.js';
 
 const MAX_PLAYERS = 8;
 const BOT_TICK = 200;        // ms between bot steps while a round with bots is on
@@ -57,7 +58,20 @@ export class RoomObject {
     const room = this;
     const net = {
       g: { world: null, round: null },
-      deliverBot: (id, msg) => room.broadcast({ ...msg, from: id }),
+      deliverBot: (id, msg) => {
+        room.broadcast({ ...msg, from: id });
+        // A bot's finished hole is written down: if this object is restarted
+        // (a deploy, a move) the bot keeps its total and does not replay it
+        if (msg.t === 'done' && room.round) {
+          const p = room.players.get(id);
+          if (p) { p.total = msg.total; p.doneHole = room.round.index; room.save(); }
+        }
+        // ...and where its ball lies, each time it walks up to it
+        if (msg.t === 'at' && room.round) {
+          const p = room.players.get(id), b = room.bots?.get(id);
+          if (p && b) { p.lie = { hole: room.round.index, x: msg.x, z: msg.z, strokes: b.strokes, putts: b.putts }; room.save(); }
+        }
+      },
       seatOf: (id) => Math.max(0, [...room.players.keys()].indexOf(id)),
     };
     this.bots = new Bots(net);
@@ -72,6 +86,7 @@ export class RoomObject {
     const b = this.bots.add(level);
     this.bots.list.pop();
     b.id = id;
+    b.total = this.players.get(id)?.total || 0;
     return b;
   }
 
@@ -83,7 +98,17 @@ export class RoomObject {
     const spec = designHole(r.seed, r.holes[r.index]);
     this.botNet.g.world = buildWorld(spec);
     this.botNet.g.round = { seed: r.seed, index: r.index };
-    bots.atHole();
+    // (bots that already finished this hole, before a restart, stay finished)
+    const done = new Set([...this.players.values()].filter((p) => p.bot && p.doneHole === r.index).map((p) => p.id));
+    bots.atHole(done);
+    // (and bots partway down the hole pick up where their ball lies)
+    for (const b of bots.list) {
+      const lie = this.players.get(b.id)?.lie;
+      if (done.has(b.id) || !lie || lie.hole !== r.index || !(lie.strokes > 0)) continue;
+      placeBall(b.ball, this.botNet.g.world, lie.x, lie.z);
+      b.strokes = lie.strokes; b.putts = lie.putts || 0;
+      bots.arrive(b, 1 + Math.random());
+    }
     this.lastTick = Date.now();
     this.scheduleTick();
   }
@@ -113,11 +138,14 @@ export class RoomObject {
     if (msg.t === 'start' && typeof msg.seed === 'string') {
       const length = msg.length === 9 ? 9 : 18;
       this.round = { seed: msg.seed.slice(0, 40), length, holes: roundHoles(length), index: 0 };
+      this.save(); // (the round, and below each hole as it moves on, survives a restart)
       for (const b of this.botHost().list) { b.total = 0; b.mod = b.nextMod = 1; }
+      for (const p of this.players.values()) if (p.bot) { p.total = 0; p.doneHole = -1; }
       this.bots.totals = new Map();
       this.botsToHole();
     } else if (msg.t === 'next' && this.round && Number.isInteger(msg.hole)) {
       this.round.index = msg.hole;
+      this.save();
       this.botsToHole();
     } else if (msg.t === 'go' && Array.isArray(msg.ids)) {
       this.botHost().go(msg.ids);

@@ -71,6 +71,9 @@ export const HAPPENINGS = {
   yips:     { e: '🫣', tone: 'lol', say: (n, v) => `${n} missed from ${v} ft` },
   zoom:     { e: '💨', tone: 'lol', say: (n, v) => `${n} zoomed ${v} ft past` },
   offgreen: { e: '🛝', tone: 'lol', say: (n) => `${n} putted off the green` },
+  // The cozy news: not from a shot, from the walk between them
+  shroom:   { e: '🍄', tone: 'nice', say: (n, v) => `${n} found ${['some shimeji', 'a shiitake', 'a glowcap', 'a GOLDEN chanterelle'][v] || 'a mushroom'}` },
+  fish:     { e: '🐟', tone: 'nice', say: (n, v) => `${n} caught ${v > 1 ? `${v} fish` : 'a fish'}` },
 };
 
 /**
@@ -89,6 +92,8 @@ export const AWARDS = [
   { id: 'speed', e: '💨', label: 'Speed Demon', kinds: ['zoom', 'offgreen'] },
   { id: 'worm', e: '🐛', label: 'Worm Burner', kinds: ['topped'] },
   { id: 'heart', e: '💔', label: 'Heartbreaker', kinds: ['lipout', 'yips'] },
+  { id: 'forager', e: '🍄', label: 'Forager', kinds: ['shroom'] },
+  { id: 'angler', e: '🎣', label: 'Angler', kinds: ['fish'] },
 ];
 
 export function awards(counts, order = [...counts.keys()]) {
@@ -130,6 +135,8 @@ export const QUIPS = {
   ace: ['ACE!!!', 'Drinks on {n}!', 'I saw it!!'],
   eagle: ['Eagle eyes!', 'Fly {n}, fly'],
   birdie: ['Tweet tweet!', 'Birdie for {n}!', 'Nice one, {n}'],
+  shroom: ['Save me one, {n}', 'Hot pot tonight!', 'Ooh, mushrooms', 'Is that one safe?'],
+  fish: ['Dinner!', 'Nice catch, {n}!', 'Grill it!', 'Fish fry!'],
   bonked: ['OW!', 'My head, {n}!', 'Watch it, {n}!', 'Fore?! FORE?!', 'Seeing stars…'],
   // Answers to the quick-chat lines (SAYINGS in netplay, in order)
   niceshot: ['Thank you, {n}!', 'I try ✨', 'Pure luck', 'Did you see that?!'],

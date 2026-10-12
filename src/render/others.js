@@ -251,7 +251,7 @@ export class Others {
       const camD2 = camera.position.distanceToSquared(g.position);
       o.camper.setFar(camD2 > FACE_FAR * FACE_FAR);
       // (right in the lens: a wall of jacket, not a friend. Step out of the picture)
-      if (camD2 < 1.3 * 1.3 && !o.camp) { g.visible = false; o.tag.style.display = 'none'; }
+      if (camD2 < 2.2 * 2.2 && !o.camp) { g.visible = false; o.tag.style.display = 'none'; }
       if (o.camp) { o.ball.visible = false; o.camper.update(dt, o.camp); this.tagAt(o, 1.75, camera); continue; }
       if (o.flying) {
         o.acc += dt; o.flyT += dt;

@@ -1050,3 +1050,6 @@ button { font: inherit; color: inherit; border: 0; background: none; padding: 0;
 .net-pill .who.down span { color: #ff9a86; }
 .intro .final-word { display: inline-block; margin-bottom: 8px; padding: 5px 14px; border-radius: 12px; background: #ff5a3c; color: #fff; font-size: 13px; font-weight: 800; letter-spacing: 1.5px; text-shadow: none; animation: finalPulse 1.2s ease-in-out infinite; }
 @keyframes finalPulse { 50% { transform: scale(1.06); } }
+
+.net-feed .line.nice { background: rgba(120, 214, 140, 0.94); color: #0d2c16; }
+.net-feed .line.nice button { background: rgba(0, 0, 0, 0.1); }
