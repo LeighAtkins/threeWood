@@ -472,7 +472,7 @@ export class Hud {
     if (node && rows) node.innerHTML = boardHtml(rows);
   }
 
-  showSummary({ total, par, strokes, points, stats, card, best, seed, outfits = [], board = null, onAgain, onShare, onCamp, onNabe = null }) {
+  showSummary({ total, par, strokes, points, stats, card, best, seed, outfits = [], board = null, awards = null, onAgain, onShare, onCamp, onNabe = null }) {
     this.clearLayer();
     const node = el('div', 'overlay dim', `
       <div class="card">
@@ -480,6 +480,7 @@ export class Hud {
         <h1 class="gold">${vsPar(total)}</h1>
         <div class="result-score">${strokes} strokes · par ${par} · ★ ${points.toLocaleString()}${best ? ' · <b class="gold">NEW BEST!</b>' : ''}</div>
         ${board ? `<div class="board final">${boardHtml(board, true)}</div>` : ''}
+        ${awards?.length ? `<div class="awards">${awards.map((a, i) => `<div class="aw${a.me ? ' me' : ''}" style="animation-delay:${0.3 + i * 0.12}s"><i>${a.e}</i><div><b>${esc(a.label.toUpperCase())}</b><span>${esc(a.name)} <small>×${a.n}</small></span></div></div>`).join('')}</div>` : ''}
         ${scorecardHtml(card)}
         <div class="stats">${stats.map((s) => `<div class="stat"><b>${s.value}</b><span>${s.label}</span></div>`).join('')}</div>
         ${outfits.map((name) => `<div class="new-fit">NEW OUTFIT · ${name.toUpperCase()}</div>`).join('')}

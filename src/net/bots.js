@@ -21,6 +21,7 @@ import { aimTarget, teeSlot } from '../course/courseWorld.js';
 import { pathLength, pathInfo, pointAlongPath } from '../course/shapes.js';
 import { mulberry32, hashSeed } from '../core/rng.js';
 import { HAIR_STYLES, EYE_SHAPES, OUTFITS } from '../core/camp.js';
+import { classify, HAPPENINGS, QUIPS } from '../core/happenings.js';
 
 export const BOT_LEVELS = {
   easy: { label: 'Easy', skill: 1.3, think: [2.2, 3.8] },
@@ -125,6 +126,11 @@ export class Bots {
     // launch through the same physics, so they will agree
     const run = simulate(ball, world, env, { maxTime: 40 });
     b.flightTime = Math.min(28, run.time ?? 8);
+    // What the room will hear about it, once it has landed on their screens
+    b.hap = classify({
+      putt: msg.kind === 'putt', fromSurface: onTee ? 'tee' : lie.id, fromX, fromZ, cupX: world.cup.x, cupZ: world.cup.z,
+      mode: ball.mode, surface: ball.surface, x: ball.x, z: ball.z, events: (run.events || []).map((e) => e.type), strokes: b.strokes, par: world.spec.par, lane: !!world.spec.green.channel,
+    });
     if (onTee && world.spec.par > 3) b.drive = Math.hypot(ball.x - fromX, ball.z - fromZ);
     if (onTee && world.spec.par === 3 && (ball.mode === 'rest' || ball.mode === 'holed') && ball.surface === 'green') b.pin = Math.hypot(world.cup.x - ball.x, world.cup.z - ball.z);
     // The contests' numbers: first time on the green, how close (holed from off it: dead)
@@ -137,6 +143,7 @@ export class Bots {
   landed(b) {
     const { world, round } = this.game;
     const ball = b.ball;
+    if (b.hap) { const h = b.hap; b.hap = null; this.net.deliverBot(b.id, { t: 'hap', k: h.k, v: h.v }); this.heard(b.id, { t: 'hap', k: h.k }); }
     if (ball.mode === 'holed') {
       b.holed = true;
       this.net.deliverBot(b.id, { t: 'holed' });
@@ -257,8 +264,37 @@ export class Bots {
     return null;
   }
 
+  /**
+   * Something happened in the room (anyone's 'hap', or a 'bonk'): a bot or
+   * two may have something to say about it, a moment later. Bots only ever
+   * send a quip's number; the phones hold the words.
+   */
+  heard(from, msg) {
+    if (!this.list.length) return;
+    let kind = null, to = from, only = null;
+    if (msg.t === 'hap' && QUIPS[msg.k]) kind = msg.k;
+    else if (msg.t === 'bonk' && typeof msg.who === 'string') { kind = 'bonked'; to = typeof msg.by === 'string' ? msg.by : from; only = msg.who; }
+    if (!kind) return;
+    const tone = HAPPENINGS[kind]?.tone;
+    // A bot that was hit always says so; otherwise one or two of the others chip in
+    const pool = this.list.filter((b) => (only ? b.id === only : b.id !== from));
+    const n = only ? pool.length : Math.min(pool.length, tone === 'wow' || Math.random() < 0.55 ? 1 + (Math.random() < 0.3 ? 1 : 0) : 0);
+    this.pending ||= [];
+    // (a volley of eight shots is a lot of news: two lines waiting is plenty)
+    if (!only && this.pending.length >= 2) return;
+    for (let i = 0; i < n; i++) {
+      const b = pool.splice(Math.floor(Math.random() * pool.length), 1)[0];
+      this.pending.push({ id: b.id, t: 0.7 + Math.random() * 1.6 + i * 0.8, msg: { t: 'quip', k: kind, i: Math.floor(Math.random() * QUIPS[kind].length), to } });
+    }
+  }
+
   update(dt) {
     const { round, world } = this.game;
+    if (this.pending?.length) {
+      for (const p of this.pending) p.t -= dt;
+      for (const p of this.pending.filter((q) => q.t <= 0)) if (this.list.some((b) => b.id === p.id)) this.net.deliverBot(p.id, p.msg);
+      this.pending = this.pending.filter((q) => q.t > 0);
+    }
     if (!round || !world) return;
     let budget = 3; // short rolls a frame, shared by all the bots
     for (const b of this.list) {

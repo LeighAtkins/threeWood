@@ -3,6 +3,7 @@ import { createGameRng, getSeedFromUrl, generateSeed, cleanSeed } from './core/r
 import {
   createBall, copyBall, placeBall, launchBall, puttBall, stepBall, SIM_DT, BALL_R, CUP_R,
 } from './core/ballSim.js';
+import { classify } from './core/happenings.js';
 import { CLUBS, PUTTER, autoSelectClub, clubAllowed, distanceAt, lieFor, powerFor } from './core/clubs.js';
 import {
   createSwing, startSwing, swingClick, swingStep, strikeFromTiming, describeStrike, markerToPercent, SWING,
@@ -1311,6 +1312,7 @@ export class Game {
       fromSurface: this.onTee ? 'tee' : ball.surface,
       toPin: this.toPin,
       treeCalled: false,
+      events: [], // (for the room's feed: what the shot did)
       shapeable: false, bend: 0, bite: 0, replan: false, shaped: false,
     };
     this.follow = { t: 0, putt: wasPutt, dirX: this.dirX, dirZ: this.dirZ, x: ball.x, y: ball.y, z: ball.z, kind: this.clubKind(), size: this.clubSize || 1.3 };
@@ -1450,6 +1452,8 @@ export class Game {
     let steps = 0;
     while (this.simAccumulator >= SIM_DT && steps < 40 && (ball.mode === 'air' || ball.mode === 'roll')) {
       stepBall(ball, world, this.env, SIM_DT, this.events);
+      // Off a friend's head: a new flight, so a new plan
+      if (this.net.bonkCheck(ball, null, null, this.shot.putt)) { this.plan = this.planShot(); this.shot.events.push('bonk'); }
       this.simAccumulator -= SIM_DT;
       steps++;
       if (this.gimmicks.rings.length) this.checkRings(); // every step: a fast ball must not skip a hoop
@@ -1556,6 +1560,7 @@ export class Game {
   handleBallEvent(e) {
     const fx = this.effects;
     this.boing(e);
+    this.shot?.events?.push(e.type);
     if (e.type === 'land' && this.shot.fromSurface === 'tee' && !this.shot.bull) {
       this.shot.bull = true;
       const hit = this.gimmicks.bullseye(e.x, e.z);
@@ -1585,6 +1590,7 @@ export class Game {
         this.hud.callout('LIP OUT!', 'bad');
         break;
       case 'splash':
+        this.reportShot('water');
         fx.splash(e.x, e.y, e.z);
         this.audio.splash();
         this.dog.on('splash');
@@ -1592,17 +1598,33 @@ export class Game {
         this.penalty(this.world.biome.liquid === 'lava' ? 'LAVA' : 'WATER');
         break;
       case 'oob':
+        this.reportShot('oob');
         this.penalty('OUT OF BOUNDS');
         break;
       case 'holed':
+        this.reportShot('holed');
         this.holed(e);
         break;
       case 'rest':
+        this.reportShot('rest');
         this.atRest();
         break;
       default:
         break;
     }
+  }
+
+  /** Tell the room what my shot did, if it was anything worth hearing (once a shot). */
+  reportShot(mode) {
+    const { shot, ball, world } = this;
+    if (!shot || shot.reported || !this.net.active) return;
+    shot.reported = true;
+    const h = classify({
+      putt: shot.putt, fromSurface: shot.fromSurface, fromX: shot.fromX, fromZ: shot.fromZ,
+      cupX: world.cup.x, cupZ: world.cup.z, mode, surface: ball.surface, x: ball.x, z: ball.z,
+      events: shot.events, strokes: this.strokes, par: world.spec.par, lane: !!world.spec.green.channel,
+    });
+    if (h) this.net.happen(h);
   }
 
   penalty(label) {
@@ -2039,6 +2061,7 @@ export class Game {
     const showCard = () => this.hud.showSummary({
       total, par, strokes, points: round.points, best, seed: round.seed, card, outfits,
       board: this.net.active && this.net.players.length > 1 ? this.net.standings(total) : null,
+      awards: this.net.active && this.net.players.length > 1 ? this.net.awards() : null,
       onCamp: () => this.campPoses(showCard),
       onNabe: round.nabeDone ? null : () => this.startNabe(showCard),
       stats: [

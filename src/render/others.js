@@ -15,6 +15,7 @@ import { teeSlot } from '../course/courseWorld.js';
 import { createBall, placeBall, launchBall, puttBall, stepBall, SIM_DT } from '../core/ballSim.js';
 
 const SCALE = CAMPER_SCALE;
+const FACE_FAR = 14; // metres from the camera beyond which a friend's face is not drawn
 
 export class Others {
   constructor(scene, root, before) {
@@ -158,7 +159,25 @@ export class Others {
   }
 
   /** A word over their head for a moment. */
-  say(id, text) { const o = this.map.get(id); if (o) o.bubble = { text, t: 2.6 }; }
+  say(id, text) { const o = this.map.get(id); if (o) o.bubble = { text, t: text.length > 3 ? 3.2 : 2.6 }; }
+
+  /** A face and a hop: joy | oops. */
+  react(id, mood) {
+    const o = this.map.get(id);
+    if (!o) return;
+    o.camper.feel(mood, 1.8);
+    o.hop = 0.45;
+  }
+
+  /** Their ball took a new flight (off someone's head): fly the replay from there. */
+  resync(id, s) {
+    const o = this.map.get(id);
+    if (!o || !s) return;
+    const n = (v) => (Number.isFinite(+v) ? +v : 0);
+    Object.assign(o.sim, { x: n(s.x), y: n(s.y), z: n(s.z), vx: n(s.vx), vy: n(s.vy), vz: n(s.vz), mode: 'air' });
+    o.flying = true;
+    o.flyT = Math.min(o.flyT, 20);
+  }
 
   /** They have hit: fly it. */
   shot(id, world, msg) {
@@ -195,6 +214,8 @@ export class Others {
       const g = o.camper.group;
       if (!show || !o.placed) { g.visible = false; o.ball.visible = false; o.tag.style.display = 'none'; continue; }
       g.visible = true;
+      // (a face down the fairway is a few pixels: draw it only up close)
+      o.camper.setFar(camera.position.distanceToSquared(g.position) > FACE_FAR * FACE_FAR);
       if (o.camp) { o.ball.visible = false; o.camper.update(dt, o.camp); this.tagAt(o, 1.75, camera); continue; }
       if (o.flying) {
         o.acc += dt; o.flyT += dt;
@@ -202,6 +223,7 @@ export class Others {
           o.acc -= SIM_DT;
           events.length = 0;
           stepBall(o.sim, world, env, SIM_DT, events);
+          this.onStep?.(o);
           if (o.flyT > 25 || events.some((e) => e.type === 'rest' || e.type === 'holed' || e.type === 'splash' || e.type === 'oob')) o.flying = false;
         }
         o.ball.position.set(o.sim.x, o.sim.y, o.sim.z);
@@ -234,6 +256,7 @@ export class Others {
         }
       }
       o.camper.update(dt, pose);
+      if (o.hop > 0) { o.hop = Math.max(0, o.hop - dt); g.position.y = world.heightAt(g.position.x, g.position.z) + Math.sin((o.hop / 0.45) * Math.PI) * 0.18; }
 
       this.tagAt(o, SCALE, camera);
     }

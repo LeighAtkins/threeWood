@@ -275,6 +275,7 @@ export class Camper {
     // Per shape: [width, height, tilt at the outer corner, iris size]
     const EYE = { round: [1, 1, 0, 1], soft: [1.05, 1.1, -0.05, 1.12], sharp: [1.08, 0.74, 0.2, 0.9], sleepy: [1.02, 0.62, -0.08, 1], smiley: [1, 1, 0, 1] }[shape];
     this.eyes = [];
+    this.faceParts = []; // hidden when far away (setFar)
     for (const side of [-1, 1]) {
       const eye = new THREE.Group();
       const ex = side * 0.046, ey = -0.008;
@@ -310,6 +311,7 @@ export class Camper {
       this.eyes.push({ open, arch, rest, brow, side, base: EYE[1] });
       const cheek = add(head, ball(0.026, 10, 8), flat(0xff8f98, { transparent: true, opacity: 0.55 }), side * 0.083, -0.05, 0.088, 1, 0.6, 0.2);
       cheek.rotation.y = side * 0.75;
+      this.faceParts.push(eye, brow, cheek);
     }
     this.blinkT = 2 + Math.random() * 3;
     this.blink = 0;
@@ -624,11 +626,23 @@ export class Camper {
     this.face(dt, pose);
   }
 
+  /**
+   * Far away (a friend down the fairway), the face is a few pixels: eyes,
+   * brows, cheeks and mouth are hidden and not animated. Eight or so draw
+   * calls saved per camper, which in a room of eight is most of the crowd.
+   */
+  setFar(far) {
+    if (this.far === far || !this.faceParts) return;
+    this.far = far;
+    for (const m of this.faceParts) m.visible = !far;
+    if (far) for (const m of Object.values(this.mouths)) m.visible = false;
+  }
+
   /** A passing feeling for a few seconds: joy | oops | focus | calm | cheeky */
   feel(name, seconds = 1.5) { if (FACES[name]) this.mood = { name, t: seconds }; }
 
   face(dt, pose) {
-    if (!this.eyes) return;
+    if (!this.eyes || this.far) return;
     if (this.mood) { this.mood.t -= dt; if (this.mood.t <= 0) this.mood = null; }
     const name = this.mood?.name || POSE_FACE[pose] || 'neutral';
     const f = FACES[name];

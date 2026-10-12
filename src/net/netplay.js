@@ -23,6 +23,7 @@ import { cleanLook } from '../core/camp.js';
 import { generateSeed, cleanSeed } from '../core/rng.js';
 import { BUILD, isStale, reloadFresh } from './fresh.js';
 import { contestFor, judgeContest, perkFor } from '../core/contests.js';
+import { HAPPENINGS, quipText, awards } from '../core/happenings.js';
 
 const WAIT_LIMIT = 30;  // seconds the ready players wait for the rest
 const NEXT_DELAY = 8;   // seconds on the result card once everyone has finished
@@ -38,9 +39,17 @@ export class NetPlay {
     this.g = game;
     const { root, layer } = game.hud;
     this.others = new Others(game.scene, root, layer);
+    // The host's phone watches the bots' balls for heads in the way
+    this.others.onStep = (o) => { if (this.room?.isHost && this.isBot(o.id)) this.bonkCheck(o.sim, null, o.id, o.kind === 'putter'); };
     this.pill = document.createElement('div');
     this.pill.className = 'net-pill hidden';
     root.insertBefore(this.pill, layer);
+    // The room's feed: what everyone's shots did, newest at the bottom
+    this.feed = document.createElement('div');
+    this.feed.className = 'net-feed hidden';
+    root.insertBefore(this.feed, layer);
+    this.haps = new Map();     // id -> { kind: count } this round (for the awards)
+    this.bonked = new Set();   // victims of the ball in the air right now (once a shot each)
     this.lobby = document.createElement('div');
     this.lobby.className = 'overlay dim hidden';
     root.appendChild(this.lobby);
@@ -156,6 +165,9 @@ export class NetPlay {
     this.judged.clear();
     this.contestNow = this.perk = null;
     this.lastRanks.clear();
+    this.haps.clear();
+    this.feed.innerHTML = '';
+    this.feed.classList.add('hidden');
     this.g.camper?.setCrown(false);
   }
 
@@ -270,9 +282,31 @@ export class NetPlay {
         break;
       case 'emote': {
         const i = EMOTES.indexOf(msg.e);
-        if (i >= 0) { this.others.say(from, EMOTES[i]); g.hud.callout(`${this.nameOf(from)} ${EMOTES[i]}`, 'small'); }
+        if (i < 0) break;
+        this.others.say(from, EMOTES[i]);
+        const at = typeof msg.to === 'string' && this.players.some((p) => p.id === msg.to) ? msg.to : null;
+        if (at) {
+          // A reaction aimed at someone: it lands on them too
+          if (at === this.myId) { g.hud.callout(`${this.nameOf(from)} ${EMOTES[i]} YOU`, 'small'); g.camper.feel(EMOTES[i] === '😂' ? 'oops' : 'joy', 1.4); }
+          else this.others.react(at, EMOTES[i] === '😂' ? 'oops' : 'joy');
+          this.addFeed(`${this.nameOf(from)} ${EMOTES[i]} ${at === this.myId ? 'you' : this.nameOf(at)}`, 'react');
+        } else g.hud.callout(`${this.nameOf(from)} ${EMOTES[i]}`, 'small');
         break;
       }
+      case 'hap':
+        if (HAPPENINGS[msg.k]) this.onHap(from, msg.k, num(msg.v, 0, 999));
+        break;
+      case 'quip': {
+        // (a bot's line, by number: never text off the wire)
+        if (!this.isBot(from)) break;
+        const to = typeof msg.to === 'string' ? msg.to : null;
+        const text = quipText(msg.k, num(msg.i, 0, 99), to === this.myId ? 'you' : to ? this.nameOf(to) : 'friend');
+        if (text) { this.others.say(from, text); if (to === this.myId) g.hud.callout(`${this.nameOf(from)}: ${text}`, 'small'); }
+        break;
+      }
+      case 'bonk':
+        this.onBonk(typeof msg.by === 'string' ? msg.by : from, typeof msg.who === 'string' ? msg.who : null, msg.s, from);
+        break;
       case 'go':
         if (from === this.room.hostId) this.go(Array.isArray(msg.ids) ? msg.ids : []);
         break;
@@ -335,6 +369,9 @@ export class NetPlay {
   begin(seed, length) {
     this.inRound = true;
     this.scores.clear();
+    this.haps.clear();
+    this.crowns.clear();
+    this.leader = null;
     this.closeLobby();
     this.g.startNetRound(seed, length);
   }
@@ -407,12 +444,170 @@ export class NetPlay {
     this.judged.add(hole);
     const contest = this.contestNow || contestFor(g.round.seed, hole, g.world.spec.par, g.world.spec.archetype);
     const best = judgeContest(contest, this.players.map((p) => ({ id: p.id, stats: this.scores.get(p.id) })));
+    this.leadNews();
     if (!best) { this.crownNews = `👑 ${contest.label} · A TIE, NO CROWN`; return; }
     this.nextCrown = best.id;
     this.crowns.set(best.id, (this.crowns.get(best.id) || 0) + 1);
     const who = best.id === this.myId ? 'YOU' : this.nameOf(best.id).toUpperCase();
     this.crownNews = `👑 ${contest.label} · ${who} · ${contest.fmt(best.v)}`;
     g.hud.updateBoard(this.board());
+  }
+
+  // ---- Happenings: the room's feed, reactions and bonks ------------------------
+
+  /** My shot did something worth hearing: tell the room (and show it here). */
+  happen(h) {
+    if (!this.active || this.players.length < 2) return;
+    this.room.send({ t: 'hap', k: h.k, v: h.v });
+    this.onHap(this.myId, h.k, h.v);
+  }
+
+  onHap(id, k, v) {
+    const h = HAPPENINGS[k];
+    if (!h || !this.inRound) return;
+    const c = this.haps.get(id) || {};
+    c[k] = (c[k] || 0) + 1;
+    this.haps.set(id, c);
+    const me = id === this.myId;
+    const name = me ? 'You' : this.nameOf(id);
+    // The same thing to several people in one volley is one line: "Toba, Saito +2 lipped out"
+    const r = this.lastHap;
+    if (r && r.k === k && performance.now() - r.at < 2500 && r.line.isConnected && !r.ids.includes(id)) {
+      r.ids.push(id); r.at = performance.now();
+      const names = r.ids.map((i) => (i === this.myId ? 'You' : this.nameOf(i)));
+      const who = names.length > 2 ? `${names.slice(0, 2).join(', ')} +${names.length - 2}` : names.join(' & ');
+      r.line.querySelector('span').textContent = `${h.e} ${h.say(who, v)}`;
+      r.line.classList.remove('bump'); void r.line.offsetWidth; r.line.classList.add('bump');
+    } else {
+      const line = this.addFeed(`${h.e} ${h.say(name, v)}`, h.tone, me ? null : id);
+      this.lastHap = { k, ids: [id], at: performance.now(), line };
+    }
+    if (!me) {
+      this.others.say(id, h.e);
+      this.others.react(id, h.tone === 'wow' ? 'joy' : 'oops');
+    }
+    // The room's noise: a laugh for the funny, applause for the good
+    if (h.tone === 'lol') this.g.audio.giggle(me ? 3 : 2);
+    else this.g.audio.applause(me ? 1.2 : 0.7);
+  }
+
+  /**
+   * A line in the feed. tone: wow | lol | react. about: whose happening it
+   * was (the line gets a button to laugh or clap at them).
+   */
+  addFeed(text, tone, about = null) {
+    const line = document.createElement('div');
+    line.className = `line ${tone}`;
+    const span = document.createElement('span');
+    span.textContent = text;
+    line.appendChild(span);
+    if (about && tone !== 'react') {
+      const e = tone === 'lol' ? '😂' : '👏';
+      const b = document.createElement('button');
+      b.textContent = e;
+      b.addEventListener('pointerdown', (ev) => {
+        ev.preventDefault(); ev.stopPropagation();
+        if (b.disabled) return;
+        b.disabled = true;
+        this.react(about, e);
+      });
+      line.appendChild(b);
+    }
+    this.feed.appendChild(line);
+    this.feed.classList.remove('hidden');
+    while (this.feed.children.length > 4) this.feed.firstChild.remove();
+    setTimeout(() => { line.classList.add('going'); setTimeout(() => line.remove(), 500); }, tone === 'react' ? 3500 : 6000);
+    return line;
+  }
+
+  /** Laugh or clap at someone (from the feed). */
+  react(id, e) {
+    if (!this.active || !EMOTES.includes(e)) return;
+    this.room.send({ t: 'emote', e, to: id });
+    this.others.react(id, e === '😂' ? 'oops' : 'joy');
+    this.addFeed(`You ${e} ${this.nameOf(id)}`, 'react');
+    this.g.audio.pop();
+  }
+
+  /**
+   * Is a ball (mine, or a bot's on the host's phone) at someone's head?
+   * Called every step of a flight. Mine ricochets (and tells the room the
+   * new flight, so every phone sees the same bounce); a bot's only looks it.
+   */
+  bonkCheck(ball, e = null, by = null, putt = false) {
+    if (!this.active || this.players.length < 2) return false;
+    if (e && e.type !== 'land' && e.type !== 'bounce') return false;
+    const owner = by || this.myId;
+    for (const o of this.others.map.values()) {
+      if (o.id === owner || !o.placed || !o.camper.group.visible || o.camp) continue;
+      const p = o.camper.group.position;
+      const dx = ball.x - p.x, dz = ball.z - p.z;
+      // A ball dropping on them (not one rolling through their feet, nor one
+      // climbing away over the front row from the back of the tee)
+      const dropping = ball.mode === 'air' && ball.vy <= 0 && ball.y - p.y >= 0.3 && ball.y - p.y < 1.7;
+      const running = !putt && ball.mode === 'roll' && ball.vx * ball.vx + ball.vz * ball.vz > 16;
+      if (dx * dx + dz * dz > 0.36 || !(dropping || running)) continue;
+      const key = `${owner}>${o.id}`;
+      if (this.bonked.has(key)) continue;
+      this.bonked.add(key);
+      setTimeout(() => this.bonked.delete(key), 4000);
+      let s = null;
+      if (!by) {
+        // Off the head: back the way it came, softer, with a little pop
+        const d = Math.hypot(dx, dz) || 1, nx = dx / d, nz = dz / d;
+        const vn = ball.vx * nx + ball.vz * nz;
+        if (vn < 0) { ball.vx -= 1.8 * vn * nx; ball.vz -= 1.8 * vn * nz; }
+        ball.vx *= 0.45; ball.vz *= 0.45; ball.vy = Math.max(ball.vy, 2.6);
+        ball.mode = 'air';
+        s = { x: ball.x, y: ball.y, z: ball.z, vx: ball.vx, vy: ball.vy, vz: ball.vz };
+      }
+      this.room.send({ t: 'bonk', by: owner, who: o.id, s });
+      this.onBonk(owner, o.id, null, this.myId);
+      return !by;
+    }
+    return false;
+  }
+
+  onBonk(by, who, s, from) {
+    if (!this.inRound || !who) return;
+    // (only the ball's owner says, or the host for a bot)
+    if (from !== this.myId && from !== by && !(from === this.room?.hostId && this.isBot(by))) return;
+    const c = this.haps.get(by) || {};
+    c.bonk = (c.bonk || 0) + 1;
+    this.haps.set(by, c);
+    const victim = who === this.myId ? 'YOU' : this.nameOf(who);
+    const shooter = by === this.myId ? 'Your ball' : `${this.nameOf(by)}'s ball`;
+    this.addFeed(`💫 ${shooter} bonked ${who === this.myId ? 'you' : victim}`, 'lol', by === this.myId ? null : by);
+    this.g.audio.bonk();
+    this.g.audio.giggle(2);
+    if (who === this.myId) { this.g.camper.feel('oops', 2.2); this.g.hud.callout('BONK!', 'bad'); this.g.rig.addShake?.(0.06); }
+    else { this.others.say(who, '💫'); this.others.react(who, 'oops'); }
+    // Someone else's ball, bounced off someone: put the replay on the same new flight
+    if (s && from !== this.myId) this.others.resync(by, s);
+  }
+
+  /** After a hole: a new leader (or a tie at the top) is news. */
+  leadNews() {
+    const rows = this.board();
+    if (!rows.length) return;
+    const top = rows.filter((r) => r.total === rows[0].total);
+    const was = this.leader;
+    this.leader = top.length === 1 ? top[0].id : null;
+    if (this.g.round.index === 0 && top.length > 3) return;
+    if (this.leader && this.leader !== was) {
+      const r = top[0];
+      this.addFeed(`🏆 ${r.me ? 'You take' : `${r.name} takes`} the lead at ${vsPar(r.total)}`, 'wow', r.me ? null : r.id);
+    } else if (!this.leader && was && top.length <= 3) {
+      this.addFeed(`⚔️ ${top.map((r) => (r.me ? 'You' : r.name)).join(', ')} tied for the lead`, 'lol');
+    }
+  }
+
+  /** End of the round: the funny awards, from everyone's happenings. */
+  awards() {
+    const list = awards(this.haps, this.players.map((p) => p.id));
+    const bonks = [...this.haps.entries()].filter(([, c]) => c.bonk).sort((a, b) => b[1].bonk - a[1].bonk)[0];
+    if (bonks && !list.some((a) => a.id === bonks[0])) list.push({ id: bonks[0], e: '💫', label: 'Head Hunter', award: 'bonk', n: bonks[1].bonk });
+    return list.map((a) => ({ ...a, name: a.id === this.myId ? 'You' : this.nameOf(a.id), me: a.id === this.myId }));
   }
 
   /** A gold callout of mine, shared with the room. */
@@ -627,6 +822,7 @@ export class NetPlay {
   /** The pill under the score: who is in the room and what they are doing. */
   paintNow() {
     this.pill.classList.toggle('hidden', !this.active || this.g.state === 'title');
+    if (!this.active || this.g.state === 'title') this.feed.classList.add('hidden');
     if (!this.active) return;
     this.pill.innerHTML = '';
     // This hole's contest on top, then the leaderboard as it stands

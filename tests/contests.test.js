@@ -50,3 +50,30 @@ test('eight tee slots sit on two tiers of the tee, the back row a step down', ()
   }
   assert.ok(checked >= 10);
 });
+
+import { classify, awards, quipText, QUIPS, HAPPENINGS } from '../src/core/happenings.js';
+
+test('happenings: the shot classifier finds the funny and the good', () => {
+  const base = { putt: false, fromSurface: 'fairway', fromX: 0, fromZ: 0, cupX: 100, cupZ: 0, mode: 'rest', surface: 'fairway', x: 50, z: 0, events: [], strokes: 2, par: 4 };
+  assert.equal(classify({ ...base, mode: 'water' }).k, 'splash');
+  assert.equal(classify({ ...base, events: ['land', 'tree'] }).k, 'tree');
+  assert.equal(classify({ ...base, x: 12 }).k, 'topped');
+  assert.equal(classify({ ...base, mode: 'holed', x: 100 }).k, 'chipin');
+  assert.equal(classify({ ...base, mode: 'holed', x: 100, strokes: 1 }).k, 'ace');
+  assert.equal(classify({ ...base, fromSurface: 'tee', x: 250, cupX: 400 }).k, 'bomb');
+  assert.equal(classify({ ...base, surface: 'green', x: 99.5 }).k, 'dead');
+  assert.equal(classify({ ...base, x: 60 }), null, 'an ordinary shot is not news');
+  const putt = { ...base, putt: true, fromX: 0, cupX: 6, surface: 'green' };
+  assert.equal(classify({ ...putt, x: 14 }).k, 'zoom');
+  assert.equal(classify({ ...putt, mode: 'holed', x: 6, cupX: 10 }).k, 'snake');
+  assert.equal(classify({ ...putt, cupX: 1, x: 0.6 }).k, 'yips');
+  for (const k of Object.keys(QUIPS)) assert.ok(k === 'bonked' || HAPPENINGS[k], `quips for a known happening: ${k}`);
+  assert.equal(quipText('splash', 0, 'Rin'), 'Bring a snorkel, Rin');
+  assert.equal(quipText('nonsense', 0, 'Rin'), null);
+});
+
+test('awards: one each, most of the kind wins', () => {
+  const counts = new Map([['a', { splash: 3, bomb: 1 }], ['b', { splash: 1, bomb: 2 }], ['c', { tree: 1 }]]);
+  const list = awards(counts, ['a', 'b', 'c']);
+  assert.deepEqual(list.map((x) => [x.award, x.id]), [['fish', 'a'], ['lumber', 'c'], ['rocket', 'b']]);
+});

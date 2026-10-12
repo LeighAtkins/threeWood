@@ -88,7 +88,7 @@ export class RoomObject {
     this.scheduleTick();
   }
 
-  botsPlaying() { return !!(this.bots?.list.length && this.botNet?.g.world && this.round); }
+  botsPlaying() { return !!(this.bots?.list.length && ((this.botNet?.g.world && this.round) || this.bots.pending?.length)); }
 
   async scheduleTick() {
     if (!this.botsPlaying()) return;
@@ -99,6 +99,7 @@ export class RoomObject {
 
   tickBots() {
     if (!this.botsPlaying()) return;
+    if (!this.botNet?.g.world) { this.bots.update(Math.min(1, (Date.now() - (this.lastTick || Date.now())) / 1000)); this.lastTick = Date.now(); return; }
     const now = Date.now();
     const dt = Math.min(1, (now - (this.lastTick || now)) / 1000);
     this.lastTick = now;
@@ -223,6 +224,8 @@ export class RoomObject {
     // Everything else is game traffic: pass it on, stamped with who sent it
     this.broadcast({ ...msg, from: att.id }, ws);
     this.watch(att.id, msg);
+    // The bots listen to the room too, and answer back
+    if ((msg.t === 'hap' || msg.t === 'bonk') && this.bots?.list.length) { this.bots.heard(att.id, msg); this.scheduleTick(); }
   }
 
   /** A deliberate leave (the app closes with 'bye') gives the seat up at once; a dropped

@@ -958,3 +958,41 @@ button { font: inherit; color: inherit; border: 0; background: none; padding: 0;
 .net-list { grid-template-columns: 1fr 1fr; }
 .net-player { padding: 8px 34px 8px 10px; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .net-player small { display: block; margin: 1px 0 0 18px; }
+
+/* ---- The room's feed: what everyone's shots did ------------------------------ */
+.net-feed {
+  position: absolute; left: calc(var(--sal, 0px) + 10px); top: calc(var(--sat) + 196px);
+  display: grid; gap: 4px; max-width: min(64vw, 340px); pointer-events: none; z-index: 2;
+}
+.net-feed .line {
+  display: flex; align-items: center; gap: 6px; justify-self: start;
+  padding: 4px 6px 4px 10px; border-radius: 12px; background: rgba(16, 38, 26, 0.72); color: var(--cream);
+  font-size: 12px; font-weight: 700; line-height: 1.2; text-shadow: none;
+  animation: feedIn 0.35s cubic-bezier(.2, 1.4, .4, 1) both; transition: opacity 0.5s, transform 0.5s;
+}
+.net-feed .line.wow { background: rgba(255, 210, 63, 0.95); color: #3a2800; }
+.net-feed .line.react { background: rgba(255, 255, 255, 0.86); color: var(--ink); font-size: 11px; }
+.net-feed .line.going { opacity: 0; transform: translateX(-20px); }
+.net-feed .line button {
+  pointer-events: auto; font: inherit; font-size: 15px; line-height: 1; padding: 3px 6px; border: 0; border-radius: 9px;
+  background: rgba(255, 255, 255, 0.18); cursor: pointer;
+}
+.net-feed .line.wow button { background: rgba(0, 0, 0, 0.1); }
+.net-feed .line button:disabled { opacity: 0.35; }
+@keyframes feedIn { 0% { opacity: 0; transform: translateX(-24px) scale(0.9); } 100% { opacity: 1; transform: none; } }
+@media (orientation: landscape) and (max-height: 500px) {
+  .net-feed { top: auto; bottom: calc(var(--sab, 0px) + 92px); max-width: 40vw; }
+  .net-feed .line { font-size: 11px; }
+}
+
+/* Round awards */
+.card .awards { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 8px 0; }
+.card .awards .aw { display: flex; align-items: center; gap: 8px; padding: 7px 9px; border-radius: 12px; background: rgba(255, 255, 255, 0.08); text-align: left; animation: feedIn 0.4s both; }
+.card .awards .aw.me { background: rgba(255, 210, 63, 0.18); }
+.card .awards .aw i { font-style: normal; font-size: 22px; }
+.card .awards .aw b { display: block; font-size: 12px; color: var(--gold); letter-spacing: 0.5px; }
+.card .awards .aw span { display: block; font-size: 12px; font-weight: 700; }
+.card .awards .aw small { opacity: 0.7; font-weight: 600; }
+
+.net-feed .line.bump { animation: feedBump 0.35s ease-out; }
+@keyframes feedBump { 40% { transform: scale(1.08); } }

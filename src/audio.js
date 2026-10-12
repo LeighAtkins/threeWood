@@ -221,6 +221,20 @@ export class Audio {
     this.tone(200, 0.3, { type: 'sawtooth', gain: 0.08, to: 100, delay: 0.16 });
   }
 
+  /** A room's laugh, for a funny happening: a few quick "he"s, falling. */
+  giggle(voices = 2) {
+    for (let v = 0; v < voices; v++) {
+      const base = 520 + v * 170 + Math.random() * 60, at = v * 0.07;
+      for (let i = 0; i < 4; i++) this.tone(base * (1 - i * 0.06), 0.07, { type: 'triangle', gain: 0.05, delay: at + i * 0.11, to: base * (0.9 - i * 0.06) });
+    }
+  }
+
+  /** A ball off someone's head. */
+  bonk() {
+    this.tone(880, 0.12, { type: 'square', gain: 0.07, to: 300 });
+    this.tone(1320, 0.08, { type: 'triangle', gain: 0.05, delay: 0.03 });
+  }
+
   whoosh() { this.burst(0.5, { gain: 0.1, freq: 400, to: 1800, q: 0.6 }); }
 
   // --- Ambience: the course is never silent -------------------------------------
