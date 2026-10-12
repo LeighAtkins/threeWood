@@ -24,6 +24,7 @@ import { generateSeed, cleanSeed } from '../core/rng.js';
 import { BUILD, isStale, reloadFresh } from './fresh.js';
 import { contestFor, judgeContest, perkFor } from '../core/contests.js';
 import { HAPPENINGS, quipText, awards } from '../core/happenings.js';
+import { CARDS, deal, combine, targetFor } from '../core/cards.js';
 
 const WAIT_LIMIT = 30;  // seconds the ready players wait for the rest
 const NEXT_DELAY = 8;   // seconds on the result card once everyone has finished
@@ -49,6 +50,10 @@ export class NetPlay {
     this.feed.className = 'net-feed hidden';
     root.insertBefore(this.feed, layer);
     this.haps = new Map();     // id -> { kind: count } this round (for the awards)
+    this.hand = null;          // cards dealt to me after this hole: [id, id, id]
+    this.kept = null;          // the one I kept (a boost for me, for the next hole)
+    this.incoming = [];        // mischief played on me: [{ id, from }] (next hole)
+    this.cardsNow = { mine: null, hit: [] }; // what is in play this hole (for the hole card)
     this.bonked = new Set();   // victims of the ball in the air right now (once a shot each)
     this.lobby = document.createElement('div');
     this.lobby.className = 'overlay dim hidden';
@@ -166,6 +171,9 @@ export class NetPlay {
     this.contestNow = this.perk = null;
     this.lastRanks.clear();
     this.haps.clear();
+    this.hand = this.kept = null;
+    this.incoming = [];
+    this.cardsNow = { mine: null, hit: [] };
     this.feed.innerHTML = '';
     this.feed.classList.add('hidden');
     this.g.camper?.setCrown(false);
@@ -304,6 +312,9 @@ export class NetPlay {
         if (text) { this.others.say(from, text); if (to === this.myId) g.hud.callout(`${this.nameOf(from)}: ${text}`, 'small'); }
         break;
       }
+      case 'card':
+        if (CARDS[msg.id]) this.onCard(from, msg.id, typeof msg.to === 'string' ? msg.to : null);
+        break;
       case 'bonk':
         this.onBonk(typeof msg.by === 'string' ? msg.by : from, typeof msg.who === 'string' ? msg.who : null, msg.s, from);
         break;
@@ -367,6 +378,7 @@ export class NetPlay {
   }
 
   begin(seed, length) {
+    this.hand = this.kept = null; this.incoming = []; this.cardsNow = { mine: null, hit: [] };
     this.inRound = true;
     this.scores.clear();
     this.haps.clear();
@@ -389,7 +401,17 @@ export class NetPlay {
     this.nextCrown = null;
     this.perk = this.crown ? perkFor(round.seed, round.index) : null;
     this.contestNow = null; // (needs the hole's par: set in atHole)
+    // The cards kept and the mischief received after the last hole are played now
+    this.cardsNow = { mine: this.kept, hit: this.incoming };
+    this.kept = null; this.incoming = []; this.hand = null; this.picked = false;
     return this.crown === this.myId ? this.perk : null;
+  }
+
+  /** Everything shaping my hole: the crown's perk if I wear it, my card, mischief on me. */
+  holeMods() {
+    if (!this.active) return combine([]);
+    const ids = [this.cardsNow.mine, ...this.cardsNow.hit.map((h) => h.id)].filter(Boolean);
+    return combine(ids, this.myPerk);
   }
 
   /** The perk I play this hole with, if I wear the crown. */
@@ -428,7 +450,11 @@ export class NetPlay {
       const mine = this.crown === this.myId;
       crown = { mine, who: mine ? 'YOU' : this.nameOf(this.crown).toUpperCase(), perk: this.perk };
     }
-    return { contest, crown };
+    const cards = [
+      ...(this.cardsNow.mine ? [{ ...CARDS[this.cardsNow.mine], mine: true }] : []),
+      ...this.cardsNow.hit.map((h) => ({ ...CARDS[h.id], from: this.nameOf(h.from) })),
+    ];
+    return { contest, crown, cards };
   }
 
   /**
@@ -584,6 +610,58 @@ export class NetPlay {
     else { this.others.say(who, '💫'); this.others.react(who, 'oops'); }
     // Someone else's ball, bounced off someone: put the replay on the same new flight
     if (s && from !== this.myId) this.others.resync(by, s);
+  }
+
+  // ---- Camp Cards -----------------------------------------------------------------
+
+  /** My hole is done: three cards, by where I stand. */
+  dealHand() {
+    if (!this.active || this.players.length < 2 || this.hand) return null;
+    if (this.g.round.index >= this.g.round.holes.length) return null; // (no next hole)
+    const rows = this.board();
+    const me = rows.find((r) => r.me);
+    this.hand = deal(Math.random, me ? me.rank : 1, rows.length);
+    // (a tie for the lead still has someone 'above': only a clear leader gets no mischief)
+    return this.hand.map((id) => {
+      const c = CARDS[id];
+      const to = c.kind === 'mischief' ? targetFor(rows.map((r) => r.id), this.myId) : null;
+      return { id, ...c, to: to ? this.nameOf(to) : null, dead: c.kind === 'mischief' && !to };
+    });
+  }
+
+  /** I kept a card. Mischief goes to the player one place above me, now. */
+  keep(id) {
+    if (!this.hand?.includes(id) || this.kept || this.picked) return false;
+    this.picked = true;
+    const c = CARDS[id];
+    if (c.kind === 'self') {
+      this.kept = id;
+      this.room.send({ t: 'card', id });
+      this.addFeed(`${c.e} You keep ${c.label}`, 'react');
+    } else {
+      const to = targetFor(this.board().map((r) => r.id), this.myId);
+      if (!to) return false;
+      this.room.send({ t: 'card', id, to });
+      this.onCard(this.myId, id, to);
+    }
+    this.g.audio.pop();
+    return true;
+  }
+
+  onCard(from, id, to) {
+    const c = CARDS[id];
+    if (!this.inRound || !c) return;
+    if (c.kind === 'self') { if (from !== this.myId) this.addFeed(`${c.e} ${this.nameOf(from)} keeps ${c.label}`, 'react'); return; }
+    if (!to) return;
+    const who = to === this.myId ? 'you' : this.nameOf(to);
+    const by = from === this.myId ? 'You' : this.nameOf(from);
+    this.addFeed(`${c.e} ${by} gave ${who} ${c.label}`, 'lol', to === this.myId || from === this.myId ? null : to);
+    if (to === this.myId) {
+      this.incoming.push({ id, from });
+      this.g.hud.callout(`${c.e} ${c.label.toUpperCase()} FROM ${this.nameOf(from).toUpperCase()}`, 'bad small');
+      this.g.camper.feel('oops', 2);
+    } else this.others.react(to, 'oops');
+    this.g.audio.giggle(2);
   }
 
   /** After a hole: a new leader, or a new group sharing the lead, is news. */

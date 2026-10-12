@@ -426,6 +426,7 @@ export class Hud {
   }
 
   showIntro({ index, total, name, par, yards, blurb, biome, pips = 1, wind = 0, tip, challenge, toy = null, pond = null, crown = null }) {
+    const cards = crown?.cards || [];
     this.clearLayer();
     const dots = '●'.repeat(pips) + '○'.repeat(5 - pips);
     const node = el('div', 'overlay pass', `
@@ -439,6 +440,7 @@ export class Hud {
         ${pond ? `<div class="toy pond"><b>FISHING POND</b> Off the fairway on the ${pond}.</div>` : ''}
         ${challenge ? `<div class="quest">☆ ${challenge.text} <b>+${challenge.points}</b></div>` : ''}
         ${crown?.contest ? `<div class="quest contest">👑 CONTEST · <b>${crown.contest.label}</b></div>` : ''}
+        ${cards.length ? `<div class="in-play">${cards.map((c) => `<span class="${c.kind}">${c.e} ${esc(c.label)}${c.from ? ` <small>from ${esc(c.from)}</small>` : ''}</span>`).join('')}</div>` : ''}
         ${crown?.crown ? `<div class="toy crown"><b>${crown.crown.mine ? 'YOU WEAR THE CROWN' : `${esc(crown.crown.who)} WEARS THE CROWN`}</b> ${crown.crown.perk.label}: ${crown.crown.perk.blurb}</div>` : ''}
         ${tip ? `<div class="tip">${tipIcon(tip.icon)}<span>${tip.text}</span></div>` : ''}
         <div class="skip">${glyph('tap')}</div>
@@ -446,7 +448,7 @@ export class Hud {
     this.layer.appendChild(node);
   }
 
-  showResult({ title, kind, strokes, par, bonuses, holePoints, challenge, card, last, board = null, onNext, onToggle = null }) {
+  showResult({ title, kind, strokes, par, bonuses, holePoints, challenge, card, last, board = null, cards = null, onCard = null, onNext, onToggle = null }) {
     this.clearLayer();
     const node = el('div', 'overlay', `
       <div class="card result">
@@ -458,11 +460,22 @@ export class Hud {
           ${mergeBonuses(bonuses).map((b, i) => `<div class="bonus" style="animation-delay:${0.25 + i * 0.12}s"><span>${b.label}</span><b>+${b.points}</b></div>`).join('')}
           <div class="total-line"><span>HOLE POINTS</span><span class="gold">★ ${holePoints.toLocaleString()}</span></div>
         </div>
-        ${board ? `<div class="spect hidden"></div><div class="board live">${boardHtml(board)}</div>` : ''}
+        ${board ? '<div class="spect hidden"></div>' : ''}
+        ${cards ? `<div class="hand"><div class="hand-title">KEEP A CARD FOR THE NEXT HOLE</div><div class="hand-row">${cards.map((c) => `<button class="camp-card ${c.kind}${c.dead ? ' dead' : ''}" data-card="${c.id}" ${c.dead ? 'disabled' : ''}><i>${c.e}</i><b>${esc(c.label)}</b><span>${c.kind === 'mischief' ? (c.to ? `→ ${esc(c.to)}` : 'nobody above you') : esc(c.blurb)}</span></button>`).join('')}</div></div>` : ''}
+        ${board ? `<div class="board live">${boardHtml(board)}</div>` : ''}
         ${scorecardHtml(card, true)}
         <button class="btn" data-a="next">${last ? 'FINISH ROUND' : 'NEXT HOLE'}<span class="auto"></span></button>
       </div>`);
     node.querySelector('[data-a="next"]').addEventListener('click', onNext);
+    for (const b of node.querySelectorAll('[data-card]')) {
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (!onCard?.(b.dataset.card)) return;
+        node.querySelector('.hand').classList.add('picked');
+        b.classList.add('kept');
+        node.querySelector('.hand-title').textContent = b.classList.contains('mischief') ? 'SENT!' : 'KEPT FOR THE NEXT HOLE';
+      });
+    }
     // (tucked away while watching friends: a tap on it opens it again)
     node.querySelector('.card').addEventListener('click', (e) => { if (!e.target.closest('[data-a]') && onToggle) onToggle(); });
     this.layer.appendChild(node);

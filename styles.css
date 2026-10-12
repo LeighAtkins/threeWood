@@ -962,7 +962,7 @@ button { font: inherit; color: inherit; border: 0; background: none; padding: 0;
 /* ---- The room's feed: what everyone's shots did ------------------------------ */
 .net-feed {
   position: absolute; left: calc(var(--sal, 0px) + 10px); top: calc(var(--sat) + 196px);
-  display: grid; gap: 4px; max-width: min(64vw, 340px); pointer-events: none; z-index: 2;
+  display: grid; gap: 4px; max-width: min(64vw, 340px); pointer-events: none;
 }
 .net-feed .line {
   display: flex; align-items: center; gap: 6px; justify-self: start;
@@ -1011,3 +1011,33 @@ button { font: inherit; color: inherit; border: 0; background: none; padding: 0;
   .card.result.mini .board { max-height: 46vh; }
 }
 .net-tag.far { font-size: 10px; padding: 1px 6px; opacity: 0.85; }
+
+/* Camp Cards */
+.card .hand { margin: 8px 0 4px; }
+.card .hand-title { font-size: 11px; letter-spacing: 1.5px; font-weight: 800; color: var(--gold); margin-bottom: 6px; }
+.card .hand-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.camp-card {
+  font: inherit; color: var(--cream); border: 0; cursor: pointer; border-radius: 12px; padding: 7px 4px 8px;
+  background: rgba(255, 255, 255, 0.1); display: grid; justify-items: center; gap: 2px; text-align: center;
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.12); transition: transform 0.15s, opacity 0.2s;
+  animation: dealIn 0.4s cubic-bezier(.2, 1.4, .4, 1) both;
+}
+.camp-card:nth-child(2) { animation-delay: 0.08s; } .camp-card:nth-child(3) { animation-delay: 0.16s; }
+.camp-card i { font-style: normal; font-size: 24px; line-height: 1.1; }
+.camp-card b { font-size: 12px; }
+.camp-card span { font-size: 10px; opacity: 0.75; line-height: 1.2; }
+.camp-card.mischief { background: rgba(255, 110, 90, 0.18); box-shadow: inset 0 0 0 2px rgba(255, 130, 110, 0.35); }
+.camp-card.dead { opacity: 0.35; cursor: default; }
+.camp-card:active:not(:disabled) { transform: scale(0.95); }
+.hand.picked .camp-card:not(.kept) { opacity: 0.25; pointer-events: none; }
+.hand.picked .camp-card.kept { box-shadow: inset 0 0 0 3px var(--gold); transform: scale(1.04); pointer-events: none; }
+@keyframes dealIn { 0% { opacity: 0; transform: translateY(14px) rotate(-4deg) scale(0.9); } 100% { opacity: 1; transform: none; } }
+.card.result.mini .hand { display: block; }
+.card.result.mini .hand-row { gap: 4px; }
+.card.result.mini .camp-card { padding: 4px 2px 5px; }
+.card.result.mini .camp-card span { display: none; }
+.card.result.mini .hand.picked { display: none; }
+.intro .in-play { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin-top: 8px; }
+.intro .in-play span { padding: 5px 10px; border-radius: 12px; font-size: 13px; font-weight: 700; text-shadow: none; background: rgba(120, 220, 140, 0.92); color: #0d2c16; }
+.intro .in-play span.mischief { background: rgba(255, 120, 100, 0.94); color: #3a0d06; }
+.intro .in-play small { opacity: 0.75; font-weight: 600; }

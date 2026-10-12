@@ -542,16 +542,18 @@ export class Game {
   startHole() {
     const round = this.round;
     const number = round.holes[round.index];
-    // The crown passes first: its perk can shape the hole (a wider cup)
-    const perk = this.net.passCrown();
+    // The crown passes first, and the cards are played: they can shape the
+    // hole (a wider cup, a breeze) for me alone
+    this.net.passCrown();
+    const mods = this.net.holeMods();
     let spec = designHole(round.seed, number);
-    if (perk?.cup) spec = { ...spec, cupR: (spec.cupR || CUP_R) * perk.cup };
+    if (mods.cup !== 1) spec = { ...spec, cupR: (spec.cupR || CUP_R) * mods.cup };
     this.loadWorld(spec);
-    this.perk = perk;
-    if (perk?.wind) {
-      // A breeze at your back: along the hole, tee to pin, on top of the day's wind
+    this.mods = mods;
+    if (mods.wind) {
+      // Along the hole, tee to pin, on top of the day's wind (+ at my back)
       const dx = spec.pin.x - spec.tee.x, dz = spec.pin.z - spec.tee.z, d = Math.hypot(dx, dz) || 1;
-      this.env = { windX: this.env.windX + (dx / d) * perk.wind, windZ: this.env.windZ + (dz / d) * perk.wind };
+      this.env = { windX: this.env.windX + (dx / d) * mods.wind, windZ: this.env.windZ + (dz / d) * mods.wind };
     }
 
     this.strokes = 0;
@@ -1214,7 +1216,7 @@ export class Game {
         this.coach = [ 'hold', 0.6, 0.8 ][this.hints.swing] ?? null;
         this.setState('swing');
         this.hud.setSwinging(true);
-        this.hud.showSwingMeter(this.idealPower, this.coach ? 1 : 1 / this.assists.tight);
+        this.hud.showSwingMeter(this.idealPower, this.coach ? 1 : 1 / (this.assists.tight * (this.mods?.tight ?? 1)));
         this.hud.setMeterSteps(2);
         if (this.idealPower) {
           this.hud.setMeterCaption('');
@@ -1354,7 +1356,7 @@ export class Game {
   hitShot(timing) {
     const { ball } = this;
     // Later in the round the same miss costs more
-    const tight = (this.coach ? 1 : this.assists.tight) * (this.steady ? 0.55 : 1);
+    const tight = (this.coach ? 1 : this.assists.tight * (this.mods?.tight ?? 1)) * (this.steady ? 0.55 : 1);
     const strike = strikeFromTiming(Math.max(-1, Math.min(1, timing * tight)), this.club.loft, this.rng);
     const launch = buildLaunch({
       club: this.club, power: this.swing.power, dirX: this.dirX, dirZ: this.dirZ,
@@ -1412,9 +1414,9 @@ export class Game {
     if (this.hints.putt < 3) { this.hints.putt += 1; store.set(HINT_KEY, this.hints); }
   }
 
-  /** The crown's perk, applied to a lie: sure footing halves what rough and sand cost. */
+  /** This hole's cards and perk, applied to a lie: rough and sand may cost half. */
   perkLie(lie) {
-    const p = this.perk;
+    const p = this.mods;
     if (!p?.lieHalf || lie.speedFactor >= 1) return lie;
     return { ...lie, speedFactor: 1 - (1 - lie.speedFactor) * 0.5 };
   }
@@ -1969,6 +1971,8 @@ export class Game {
       challenge: { text: this.challenge.text, won },
       card, last,
       board: this.net.active && this.net.players.length > 1 ? this.net.board() : null,
+      cards: last ? null : this.net.dealHand(),
+      onCard: (id) => this.net.keep(id),
       onNext: () => this.pressNext(),
       onToggle: () => { this.cardOpen = !this.cardOpen; this.hud.miniResult(!!this.spectName && !this.cardOpen, this.spectName); },
     });

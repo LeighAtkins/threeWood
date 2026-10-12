@@ -113,7 +113,8 @@ export class RoomObject {
     if (msg.t === 'start' && typeof msg.seed === 'string') {
       const length = msg.length === 9 ? 9 : 18;
       this.round = { seed: msg.seed.slice(0, 40), length, holes: roundHoles(length), index: 0 };
-      for (const b of this.botHost().list) b.total = 0;
+      for (const b of this.botHost().list) { b.total = 0; b.mod = b.nextMod = 1; }
+      this.bots.totals = new Map();
       this.botsToHole();
     } else if (msg.t === 'next' && this.round && Number.isInteger(msg.hole)) {
       this.round.index = msg.hole;
@@ -225,7 +226,7 @@ export class RoomObject {
     this.broadcast({ ...msg, from: att.id }, ws);
     this.watch(att.id, msg);
     // The bots listen to the room too, and answer back
-    if ((msg.t === 'hap' || msg.t === 'bonk') && this.bots?.list.length) { this.bots.heard(att.id, msg); this.scheduleTick(); }
+    if ((msg.t === 'hap' || msg.t === 'bonk' || msg.t === 'card' || msg.t === 'done') && this.bots?.list.length) { this.bots.heard(att.id, msg); this.scheduleTick(); }
   }
 
   /** A deliberate leave (the app closes with 'bye') gives the seat up at once; a dropped

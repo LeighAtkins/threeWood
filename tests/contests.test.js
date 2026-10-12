@@ -77,3 +77,24 @@ test('awards: one each, most of the kind wins', () => {
   const list = awards(counts, ['a', 'b', 'c']);
   assert.deepEqual(list.map((x) => [x.award, x.id]), [['fish', 'a'], ['lumber', 'c'], ['rocket', 'b']]);
 });
+
+import { deal, combine, targetFor, CARDS } from '../src/core/cards.js';
+import { mulberry32 } from '../src/core/rng.js';
+
+test('camp cards: the leader gets no mischief, last place gets two; effects combine', () => {
+  const rng = mulberry32(7);
+  for (let i = 0; i < 50; i++) {
+    const lead = deal(rng, 1, 8);
+    assert.equal(lead.length, 3);
+    assert.equal(new Set(lead).size, 3);
+    assert.ok(lead.every((id) => CARDS[id].kind === 'self'));
+    assert.equal(deal(rng, 8, 8).filter((id) => CARDS[id].kind === 'mischief').length, 2);
+    assert.equal(deal(rng, 3, 8).filter((id) => CARDS[id].kind === 'mischief').length, 1);
+  }
+  assert.deepEqual(combine([]), { wind: 0, cup: 1, lieHalf: false, tight: 1 });
+  const m = combine(['tailwind', 'rain', 'tiny'], { cup: 1.5 });
+  assert.equal(m.wind, 1);
+  assert.ok(Math.abs(m.cup - 1.08) < 1e-9);
+  assert.equal(targetFor(['a', 'b', 'c'], 'c'), 'b');
+  assert.equal(targetFor(['a', 'b', 'c'], 'a'), null);
+});

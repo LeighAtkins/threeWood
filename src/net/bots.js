@@ -22,6 +22,7 @@ import { pathLength, pathInfo, pointAlongPath } from '../course/shapes.js';
 import { mulberry32, hashSeed } from '../core/rng.js';
 import { HAIR_STYLES, EYE_SHAPES, OUTFITS } from '../core/camp.js';
 import { classify, HAPPENINGS, QUIPS } from '../core/happenings.js';
+import { CARDS, deal, targetFor } from '../core/cards.js';
 
 export const BOT_LEVELS = {
   easy: { label: 'Easy', skill: 1.3, think: [2.2, 3.8] },
@@ -68,6 +69,8 @@ export class Bots {
     // Each bot tees up on its own seat's spot, like everyone else
     this.list.forEach((b) => {
       b.strokes = 0; b.putts = 0; b.drive = 0; b.pin = null; b.near = null; b.holed = false;
+      // Cards from the last hole: a boost steadies the hands, mischief shakes them
+      b.mod = b.nextMod || 1; b.nextMod = 1;
       b.rng = mulberry32(hashSeed(`${round.seed}:${b.id}:${round.index}`));
       const at = teeSlot(world, this.net.seatOf(b.id));
       placeBall(b.ball, world, at.x, at.z);
@@ -93,7 +96,7 @@ export class Bots {
     const ball = b.ball;
     const env = { windX: world.spec.wind.x, windZ: world.spec.wind.z };
     const lvl = BOT_LEVELS[b.level] || BOT_LEVELS.par;
-    const skill = lvl.skill;
+    const skill = lvl.skill * (b.mod || 1);
     const rng = b.rng;
     const onTee = b.strokes === 0;
     const lie = lieFor(ball.surface);
@@ -271,6 +274,19 @@ export class Bots {
    */
   heard(from, msg) {
     if (!this.list.length) return;
+    // The board, as the bots know it: everyone's total from their 'done'
+    this.totals ||= new Map();
+    if (msg.t === 'done' && Number.isFinite(+msg.total)) this.totals.set(from, +msg.total);
+    if (msg.t === 'card' && CARDS[msg.id]?.kind === 'mischief') {
+      const b = this.list.find((x) => x.id === msg.to);
+      if (b) {
+        b.nextMod = (b.nextMod || 1) * 1.35;
+        // (and they have something to say about it)
+        this.pending ||= [];
+        this.pending.push({ id: b.id, t: 1 + Math.random(), msg: { t: 'emote', e: Math.random() < 0.5 ? '😱' : '😂', to: from } });
+      }
+      return;
+    }
     let kind = null, to = from, only = null;
     if (msg.t === 'hap' && QUIPS[msg.k]) kind = msg.k;
     else if (msg.t === 'bonk' && typeof msg.who === 'string') { kind = 'bonked'; to = typeof msg.by === 'string' ? msg.by : from; only = msg.who; }
@@ -288,11 +304,29 @@ export class Bots {
     }
   }
 
+  /** A bot's Camp Card, a moment after it finishes: often mischief for whoever is just above it. */
+  playCard(b) {
+    const ids = [...(this.totals || new Map()).entries()].sort((x, y) => x[1] - y[1]).map(([id]) => id);
+    const rank = Math.max(1, ids.indexOf(b.id) + 1);
+    const hand = deal(Math.random, rank, Math.max(ids.length, 2));
+    const mean = hand.filter((id) => CARDS[id].kind === 'mischief');
+    const to = targetFor(ids, b.id);
+    const id = mean.length && to && Math.random() < 0.7 ? mean[0] : hand.find((x) => CARDS[x].kind === 'self');
+    if (!id) return;
+    if (CARDS[id].kind === 'self') b.nextMod = (b.nextMod || 1) * 0.85;
+    this.pending ||= [];
+    this.pending.push({ id: b.id, t: 2 + Math.random() * 3, msg: CARDS[id].kind === 'mischief' ? { t: 'card', id, to } : { t: 'card', id } });
+  }
+
   update(dt) {
     const { round, world } = this.game;
     if (this.pending?.length) {
       for (const p of this.pending) p.t -= dt;
-      for (const p of this.pending.filter((q) => q.t <= 0)) if (this.list.some((b) => b.id === p.id)) this.net.deliverBot(p.id, p.msg);
+      for (const p of this.pending.filter((q) => q.t <= 0)) {
+        if (!this.list.some((b) => b.id === p.id)) continue;
+        this.net.deliverBot(p.id, p.msg);
+        if (p.msg.t === 'card') this.heard(p.id, p.msg); // (bots pick on bots too)
+      }
       this.pending = this.pending.filter((q) => q.t > 0);
     }
     if (!round || !world) return;
@@ -333,6 +367,8 @@ export class Bots {
         b.state = 'finished';
         b.total += b.strokes - world.spec.par;
         this.net.deliverBot(b.id, { t: 'done', strokes: b.strokes, total: b.total, putts: b.putts, drive: b.drive || 0, pin: b.pin ?? null, near: b.near ?? null });
+        this.heard(b.id, { t: 'done', total: b.total });
+        this.playCard(b);
       }
     }
   }
