@@ -10,14 +10,22 @@
  *     the same id gets the seat back, and if the host is really gone the
  *     next person in becomes host);
  *   - every phone sees the same roster from one source;
- *   - phones behind strict mobile NATs work: it is a plain WebSocket.
+ *   - phones behind strict mobile NATs work: it is a plain WebSocket;
+ *   - bots live here, not on the host's phone: they play the same game code
+ *     (src/net/bots.js, the shot planner and physics), stepped by the
+ *     object's alarm, and keep playing whoever leaves.
  *
  * Deploy: `npx wrangler deploy` in this folder. The object hibernates between
  * messages, so an idle room costs nothing; the Workers paid plan covers far
  * more rooms than 10,000 players need.
  */
 
+import { Bots, BOT_LEVELS, botLook } from '../src/net/bots.js';
+import { designHole, roundHoles } from '../src/course/holeDesigner.js';
+import { buildWorld } from '../src/course/courseWorld.js';
+
 const MAX_PLAYERS = 8;
+const BOT_TICK = 200;        // ms between bot steps while a round with bots is on
 const LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
 const GONE_AFTER = 40_000;   // silence this long and the seat is given up
 const SWEEP_EVERY = 15_000;
@@ -30,10 +38,88 @@ export class RoomObject {
     this.players = new Map(); // id -> { id, host, look, build, bot?, level? }
     this.hostId = null;
     this.seq = 0;
+    this.round = null;      // { seed, length, holes, index } while a round is on
     this.state.blockConcurrencyWhile(async () => {
       const saved = await this.state.storage.get('room');
-      if (saved) { this.players = new Map(saved.players); this.hostId = saved.hostId; this.seq = saved.seq || 0; this.created = saved.created; }
+      if (saved) { this.players = new Map(saved.players); this.hostId = saved.hostId; this.seq = saved.seq || 0; this.created = saved.created; this.round = saved.round || null; }
     });
+  }
+
+  // ---- Bots ---------------------------------------------------------------------
+
+  /**
+   * The bots' view of the game: the same three things a phone gave them
+   * (the hole and round, a way to speak, seat numbers), so src/net/bots.js
+   * runs here unchanged.
+   */
+  botHost() {
+    if (this.bots) return this.bots;
+    const room = this;
+    const net = {
+      g: { world: null, round: null },
+      deliverBot: (id, msg) => room.broadcast({ ...msg, from: id }),
+      seatOf: (id) => Math.max(0, [...room.players.keys()].indexOf(id)),
+    };
+    this.bots = new Bots(net);
+    Object.defineProperty(this.bots, 'game', { get: () => net.g });
+    this.botNet = net;
+    // Seats that were bots before the object was last evicted come back
+    for (const p of this.players.values()) if (p.bot) this.bots.list.push(this.freshBot(p.id, p.level));
+    return this.bots;
+  }
+
+  freshBot(id, level) {
+    const b = this.bots.add(level);
+    this.bots.list.pop();
+    b.id = id;
+    return b;
+  }
+
+  /** Load the round's current hole for the bots and send them to the tee. */
+  botsToHole() {
+    const r = this.round;
+    const bots = this.botHost();
+    if (!r || r.index >= r.holes.length || !bots.list.length) { this.botNet.g.world = null; return; }
+    const spec = designHole(r.seed, r.holes[r.index]);
+    this.botNet.g.world = buildWorld(spec);
+    this.botNet.g.round = { seed: r.seed, index: r.index };
+    bots.atHole();
+    this.lastTick = Date.now();
+    this.scheduleTick();
+  }
+
+  botsPlaying() { return !!(this.bots?.list.length && this.botNet?.g.world && this.round); }
+
+  async scheduleTick() {
+    if (!this.botsPlaying()) return;
+    const cur = await this.state.storage.getAlarm();
+    const at = Date.now() + BOT_TICK;
+    if (!cur || cur > at) await this.state.storage.setAlarm(at);
+  }
+
+  tickBots() {
+    if (!this.botsPlaying()) return;
+    const now = Date.now();
+    const dt = Math.min(1, (now - (this.lastTick || now)) / 1000);
+    this.lastTick = now;
+    // (a server has time to spare: let the bots read their putts in a few steps)
+    for (let k = 0; k < 4; k++) this.bots.update(k === 0 ? dt : 0);
+  }
+
+  /** Game messages the server listens in on, to keep its bots in step with the round. */
+  watch(from, msg) {
+    if (from !== this.hostId) return;
+    if (msg.t === 'start' && typeof msg.seed === 'string') {
+      const length = msg.length === 9 ? 9 : 18;
+      this.round = { seed: msg.seed.slice(0, 40), length, holes: roundHoles(length), index: 0 };
+      for (const b of this.botHost().list) b.total = 0;
+      this.botsToHole();
+    } else if (msg.t === 'next' && this.round && Number.isInteger(msg.hole)) {
+      this.round.index = msg.hole;
+      this.botsToHole();
+    } else if (msg.t === 'go' && Array.isArray(msg.ids)) {
+      this.botHost().go(msg.ids);
+    }
   }
 
   async fetch(req) {
@@ -65,7 +151,7 @@ export class RoomObject {
   send(ws, msg) { try { ws.send(JSON.stringify(msg)); } catch { /* gone */ } }
   broadcast(msg, except = null) { for (const ws of this.sockets()) if (ws !== except && ws.deserializeAttachment()?.id) this.send(ws, msg); }
 
-  async save() { await this.state.storage.put('room', { players: [...this.players.entries()], hostId: this.hostId, seq: this.seq, created: this.created }); }
+  async save() { await this.state.storage.put('room', { players: [...this.players.entries()], hostId: this.hostId, seq: this.seq, created: this.created, round: this.round }); }
 
   async shareRoster() {
     this.broadcast({ t: 'roster', players: [...this.players.values()], hostId: this.hostId });
@@ -96,6 +182,7 @@ export class RoomObject {
           const bot = [...this.players.values()].find((p) => p.bot);
           if (!bot) { this.send(ws, { t: 'full' }); ws.close(4001, 'full'); return; }
           this.players.delete(bot.id);
+          this.bots?.remove(bot.id);
           this.broadcast({ t: 'bot:dropped', id: bot.id });
         }
         id = this.hostId ? `p-${(++this.seq).toString(36)}${Math.random().toString(36).slice(2, 5)}` : 'host';
@@ -112,11 +199,22 @@ export class RoomObject {
 
     // Host-only: seating bots, and speaking for them
     if (att.id === this.hostId) {
-      if (msg.t === 'bot:add' && this.players.size < MAX_PLAYERS && typeof msg.id === 'string' && msg.id.startsWith('bot-')) {
-        this.players.set(msg.id, { id: msg.id, host: false, bot: true, level: msg.level, look: msg.look });
+      if (msg.t === 'bot:add' && this.players.size < MAX_PLAYERS) {
+        const level = BOT_LEVELS[msg.level] ? msg.level : 'par';
+        const bots = this.botHost();
+        const b = bots.add(level);
+        const taken = [...this.players.values()].map((p) => p.look?.name);
+        this.players.set(b.id, { id: b.id, host: false, bot: true, level, look: botLook(bots.list.length, taken) });
+        await this.shareRoster();
+        // Joining mid-round: straight onto the current hole
+        if (this.round) this.botsToHole();
+        return;
+      }
+      if (msg.t === 'bot:remove' && this.players.get(msg.id)?.bot) {
+        this.players.delete(msg.id);
+        this.bots?.remove(msg.id);
         await this.shareRoster(); return;
       }
-      if (msg.t === 'bot:remove') { this.players.delete(msg.id); await this.shareRoster(); return; }
       if (msg.t === 'as' && typeof msg.id === 'string' && this.players.get(msg.id)?.bot && msg.msg && typeof msg.msg === 'object') {
         this.broadcast({ ...msg.msg, from: msg.id }, ws); return;
       }
@@ -124,9 +222,12 @@ export class RoomObject {
     if (msg.t === 'bot:add' || msg.t === 'bot:remove' || msg.t === 'as' || msg.t === 'roster' || msg.t === 'welcome' || msg.t === 'host') return;
     // Everything else is game traffic: pass it on, stamped with who sent it
     this.broadcast({ ...msg, from: att.id }, ws);
+    this.watch(att.id, msg);
   }
 
-  async webSocketClose(ws) { await this.drop(ws, true); }
+  /** A deliberate leave (the app closes with 'bye') gives the seat up at once; a dropped
+   *  connection keeps it for a while, in case the phone comes back. */
+  async webSocketClose(ws, code, reason) { await this.drop(ws, reason !== 'bye'); }
   async webSocketError(ws) { await this.drop(ws, true); }
 
   /**
@@ -149,8 +250,7 @@ export class RoomObject {
       this.hostId = next?.id ?? null;
       for (const p of this.players.values()) p.host = p.id === this.hostId;
       if (next) this.broadcast({ t: 'host', id: next.id });
-      // (bots were run by the old host's phone: they go with it)
-      for (const p of [...this.players.values()]) if (p.bot) this.players.delete(p.id);
+      // (the bots stay: they live here, not on anyone's phone)
     }
     await this.shareRoster();
   }
@@ -158,6 +258,11 @@ export class RoomObject {
   /** Sweep: seats whose socket has been silent (or gone) too long are given up. */
   async alarm() {
     const now = Date.now();
+    // Bots step every BOT_TICK; the sweep runs every SWEEP_EVERY
+    if (this.round && !this.botNet?.g.world) this.botsToHole(); // (after an eviction)
+    this.tickBots();
+    if (this.nextSweep && now < this.nextSweep) { await this.rearm(now); return; }
+    this.nextSweep = now + SWEEP_EVERY;
     const live = new Set();
     for (const ws of this.sockets()) {
       const att = ws.deserializeAttachment();
@@ -173,9 +278,16 @@ export class RoomObject {
       } else delete p.lostAt;
     }
     const humans = [...this.players.values()].filter((p) => !p.bot).length;
-    if (humans) await this.state.storage.setAlarm(now + SWEEP_EVERY);
-    else if (!this.emptySince) { this.emptySince = now; await this.state.storage.setAlarm(now + KEEP_EMPTY); }
-    else if (now - this.emptySince >= KEEP_EMPTY) { this.players.clear(); this.hostId = null; this.created = null; await this.state.storage.deleteAll(); }
+    if (humans) { this.emptySince = null; await this.rearm(now); }
+    else if (!this.emptySince) { this.emptySince = now; this.round = null; await this.state.storage.setAlarm(now + KEEP_EMPTY); }
+    else if (now - this.emptySince >= KEEP_EMPTY) { this.players.clear(); this.hostId = null; this.created = null; this.round = null; this.bots = null; await this.state.storage.deleteAll(); }
+    else await this.state.storage.setAlarm(this.emptySince + KEEP_EMPTY);
+  }
+
+  /** The next alarm: the next bot step if bots are playing, else the next sweep. */
+  async rearm(now) {
+    const sweep = this.nextSweep || now + SWEEP_EVERY;
+    await this.state.storage.setAlarm(this.botsPlaying() ? Math.min(sweep, now + BOT_TICK) : sweep);
   }
 }
 

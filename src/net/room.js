@@ -130,13 +130,10 @@ export class Room {
     else this.outbox.push(msg);
   }
 
-  /** Host: send a message on behalf of a bot, so the others see it as that player's. */
-  sendAs(id, msg) { if (this.isHost) this.send({ t: 'as', id, msg }); }
-
-  /** Host: seat a bot (or take one away); the server shares the new roster. */
-  addBot(id, look, level) {
+  /** Host: seat a bot (or take one away); the server plays it and shares the new roster. */
+  addBot(level) {
     if (!this.isHost || this.players.length >= MAX_PLAYERS) return false;
-    this.send({ t: 'bot:add', id, look, level });
+    this.send({ t: 'bot:add', level });
     return true;
   }
 

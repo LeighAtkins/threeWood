@@ -17,7 +17,7 @@
  */
 
 import { Room, cleanCode, MAX_PLAYERS } from './room.js';
-import { Bots, BOT_LEVELS, botLook } from './bots.js';
+import { BOT_LEVELS } from './bots.js';
 import { Others } from '../render/others.js';
 import { cleanLook } from '../core/camp.js';
 import { generateSeed, cleanSeed } from '../core/rng.js';
@@ -62,7 +62,6 @@ export class NetPlay {
     this.watching = null;
     this.watchIdle = 0;
     this.emotesOpen = 0; // seconds the emote row stays open after the 💬 tap
-    this.bots = new Bots(this); // the host's: empty seats filled from the lobby
     this.myPose = null;  // by the fire: my pose, said again now and then
     this.poseT = 0;
   }
@@ -99,7 +98,6 @@ export class NetPlay {
       open: () => this.renderLobby(),
       roster: (players) => this.onRoster(players),
       message: (from, msg) => this.onMessage(from, msg),
-      botDropped: (id) => this.bots.remove(id),
       closed: (reason) => {
         const wasPlaying = this.inRound;
         this.reset();
@@ -120,22 +118,14 @@ export class NetPlay {
     this.renderLobby();
   }
 
-  /** Host: seat a bot of this level. */
+  /**
+   * Host: ask the room for a bot of this level. Bots live on the room
+   * server (server/room.js), which picks their look and name and plays them;
+   * every phone, the host's included, hears them like any other player.
+   */
   addBot(level = 'par') {
     if (!this.room?.isHost || !BOT_LEVELS[level]) return;
-    const bot = this.bots.add(level);
-    const taken = this.players.map((p) => cleanLook(p.look).name);
-    if (!this.room.addBot(bot.id, botLook(this.bots.list.length, taken), level)) this.bots.remove(bot.id);
-  }
-
-  /**
-   * A bot said something (host only): the guests get it under the bot's id,
-   * and we hear it ourselves the way we would hear a guest.
-   */
-  deliverBot(id, msg) {
-    if (!this.room?.isHost) return;
-    this.room.sendAs(id, msg);
-    this.onMessage(id, msg);
+    this.room.addBot(level);
   }
 
   /** Leave the room entirely. */
@@ -146,7 +136,6 @@ export class NetPlay {
 
   reset() {
     this.room = null;
-    this.bots.clear();
     this.buildChecked = false;
     this.myPose = null;
     this.inRound = false;
@@ -206,7 +195,7 @@ export class NetPlay {
       else if (a === 'leave') { this.leave(); this.error = ''; this.renderLobby(); }
       else if (a === 'go9' || a === 'go18') this.startRound(a === 'go9' ? 9 : 18);
       else if (a === 'bot') this.addBot(e.target.closest('[data-a]').dataset.level);
-      else if (a === 'unbot') { const id = e.target.closest('[data-a]').dataset.id; this.bots.remove(id); room.removeBot(id); }
+      else if (a === 'unbot') { const id = e.target.closest('[data-a]').dataset.id; room.removeBot(id); }
       else if (a === 'share') {
         const url = `${location.origin}${location.pathname}?room=${room.code}`;
         const text = `Play ThreeWood with me — room ${room.code}`;
@@ -352,7 +341,6 @@ export class NetPlay {
     this.watching = null;
     this.others.sync(this.friends);
     this.others.toTee(this.g.world, (id) => this.seatOf(id));
-    if (this.room.isHost) this.bots.atHole();
     // The crown passes to whoever won the last hole's contest
     this.crown = this.nextCrown;
     this.nextCrown = null;
@@ -476,7 +464,6 @@ export class NetPlay {
 
   go(ids) {
     if (ids.includes(this.myId) && this.g.state === 'skip') this.g.skip.close(); // GO: back to your ball
-    if (this.room?.isHost) this.bots.go(ids);
     for (const id of ids) if (this.status.get(id) === 'ready') { this.status.set(id, 'busy'); this.others.setStatus(id, 'busy'); }
     if (ids.includes(this.myId) && this.g.state === 'aim') {
       this.cleared = true;
@@ -615,7 +602,6 @@ export class NetPlay {
 
   update(dt) {
     const g = this.g;
-    if (this.active && this.room.isHost && ['aim', 'swing', 'flight', 'settle', 'holed', 'result', 'fishing', 'skip', 'cook'].includes(g.state)) this.bots.update(dt);
     const show = this.active && ['aim', 'swing', 'flight', 'settle', 'holed', 'result', 'fishing', 'summary', 'nabe', 'skip'].includes(g.state);
     if (g.world) this.others.update(dt, g.world, g.env, g.camera, show);
     if (this.active) {

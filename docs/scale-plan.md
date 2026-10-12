@@ -11,9 +11,11 @@ Written October 2026. Prices are from the providers' public pages at that date
   phone's localStorage.
 - **Rooms run on Cloudflare** (`server/room.js`, one Durable Object per code,
   at `rooms.threewood.app`). PeerJS is gone. The host's phone still decides
-  GO and NEXT and runs the bots; the server keeps the roster, relays, gives
-  a reconnecting phone its seat back, and hands the room to the next person
-  if the host is really gone.
+  GO and NEXT; the server keeps the roster, relays, gives a reconnecting
+  phone its seat back, hands the room to the next person if the host is
+  really gone, and **plays the bots itself** (the same bot code the phone
+  used, stepped by the object's alarm), so a round with bots carries on
+  whoever leaves.
 - Rooms hold eight, with bots (Easy / Par / Pro) the host seats from the lobby.
 
 What breaks first as players arrive, in order:
@@ -183,7 +185,7 @@ pricing fixes it.
    daily course. ~1–2 weeks.
 5. Camp Pass: Stripe Checkout + webhook that flags the account; the client
    reads the flag. ~1 week.
-6. Bots into the room object, so rounds survive the host leaving. ~1 week.
+6. ✅ Bots in the room object: rounds survive the host leaving.
 
 ## Sources
 
