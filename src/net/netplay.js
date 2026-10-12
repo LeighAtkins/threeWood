@@ -84,6 +84,7 @@ export class NetPlay {
     this.watchIdle = 0;
     this.emotesOpen = 0; // seconds the emote row stays open after the 💬 tap
     this.mischiefOn = true; // host, in the lobby: mischief cards this round?
+    this.trophies = new Map(); // id -> rounds won in this room tonight (kept between rounds)
     this.myPose = null;  // by the fire: my pose, said again now and then
     this.poseT = 0;
   }
@@ -114,9 +115,19 @@ export class NetPlay {
 
   closeLobby() { this.lobby.classList.add('hidden'); this.lobby.innerHTML = ''; }
 
+  /** The round's winners (a tie shares it; the whole room level wins nothing) take a trophy. */
+  awardTrophies() {
+    const rows = this.board();
+    const top = rows.filter((r) => r.rank === 1);
+    if (rows.length < 2 || !this.scores.size || top.length === rows.length) return;
+    for (const r of top) this.trophies.set(r.id, (this.trophies.get(r.id) || 0) + 1);
+  }
+
   /** The round is over: back to the room's lobby, everyone still in it, for another. */
   backToRoom() {
     if (!this.room) return false;
+    // The round's winner (or winners: a tie shares it) takes a trophy for the night
+    if (this.inRound && !this.trophied) { this.trophied = true; this.awardTrophies(); }
     this.inRound = false;
     this.others.hideAll();
     this.feed.innerHTML = '';
@@ -198,6 +209,7 @@ export class NetPlay {
     this.contestNow = this.perk = null;
     this.lastRanks.clear();
     this.haps.clear();
+    this.trophies.clear();
     this.hand = this.kept = null;
     this.incoming = [];
     this.cardsNow = { mine: null, hit: [] };
@@ -222,7 +234,7 @@ export class NetPlay {
       body = `<h2>PLAY WITH FRIENDS</h2><p>Connecting…</p><button class="btn ghost" data-a="leave">CANCEL</button>`;
     } else {
       const old = (p) => p.build && p.build !== BUILD;
-      const list = this.players.map((p) => `<div class="net-player ${p.bot ? 'bot' : ''}"><i></i>${esc(cleanLook(p.look).name)}${p.host ? ' <small>HOST</small>' : ''}${p.id === room.me.id ? ' <small>YOU</small>' : ''}${p.bot ? ` <small>BOT · ${BOT_LEVELS[p.level]?.label.toUpperCase() || 'PAR'}</small>` : ''}${old(p) ? ' <small class="stale">NEEDS A REFRESH</small>' : ''}${p.bot && room.isHost ? `<button class="x" data-a="unbot" data-id="${esc(p.id)}" aria-label="Remove">×</button>` : ''}</div>`).join('');
+      const list = this.players.map((p) => `<div class="net-player ${p.bot ? 'bot' : ''}"><i></i>${esc(cleanLook(p.look).name)}${this.trophies.get(p.id) ? ` <small class="trophy">🏆×${this.trophies.get(p.id)}</small>` : ''}${p.host ? ' <small>HOST</small>' : ''}${p.id === room.me.id ? ' <small>YOU</small>' : ''}${p.bot ? ` <small>BOT · ${BOT_LEVELS[p.level]?.label.toUpperCase() || 'PAR'}</small>` : ''}${old(p) ? ' <small class="stale">NEEDS A REFRESH</small>' : ''}${p.bot && room.isHost ? `<button class="x" data-a="unbot" data-id="${esc(p.id)}" aria-label="Remove">×</button>` : ''}</div>`).join('');
       const seats = MAX_PLAYERS - this.players.length;
       const botRow = room.isHost && seats > 0 ? `<div class="bot-row"><span>ADD A BOT</span>${Object.entries(BOT_LEVELS).map(([id, l]) => `<button data-a="bot" data-level="${id}">${l.label.toUpperCase()}</button>`).join('')}${seats > 1 ? '<button data-a="fill" class="fill">FILL ALL</button>' : ''}</div>` : '';
       body = `
@@ -429,6 +441,9 @@ export class NetPlay {
   }
 
   begin(seed, length, mischief = true) {
+    // (a guest still on the last round's card when the host starts: count its trophy first)
+    if (this.inRound && !this.trophied) this.awardTrophies();
+    this.trophied = false;
     this.mischief = mischief !== false; // (the host's choice for the round: mischief cards, or only boosts)
     this.acorns = 0;
     this.hand = this.kept = null; this.incoming = []; this.cardsNow = { mine: null, hit: [] };
