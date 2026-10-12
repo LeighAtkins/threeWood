@@ -67,7 +67,8 @@ test('happenings: the shot classifier finds the funny and the good', () => {
   assert.equal(classify({ ...putt, x: 14 }).k, 'zoom');
   assert.equal(classify({ ...putt, mode: 'holed', x: 6, cupX: 10 }).k, 'snake');
   assert.equal(classify({ ...putt, cupX: 1, x: 0.6 }).k, 'yips');
-  for (const k of Object.keys(QUIPS)) assert.ok(k === 'bonked' || HAPPENINGS[k], `quips for a known happening: ${k}`);
+  const answers = ['bonked', 'niceshot', 'unlucky', 'fore', 'hurry', 'watch', 'gg'];
+  for (const k of Object.keys(QUIPS)) assert.ok(answers.includes(k) || HAPPENINGS[k], `quips for a known happening: ${k}`);
   assert.equal(quipText('splash', 0, 'Rin'), 'Bring a snorkel, Rin');
   assert.equal(quipText('nonsense', 0, 'Rin'), null);
 });

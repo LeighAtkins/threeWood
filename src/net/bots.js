@@ -289,13 +289,15 @@ export class Bots {
       return;
     }
     let kind = null, to = from, only = null;
+    const SAY = ['niceshot', 'unlucky', 'fore', 'hurry', 'watch', 'gg'];
+    if (msg.t === 'say' && SAY[msg.i]) kind = SAY[msg.i];
     if (msg.t === 'hap' && QUIPS[msg.k]) kind = msg.k;
     else if (msg.t === 'bonk' && typeof msg.who === 'string') { kind = 'bonked'; to = typeof msg.by === 'string' ? msg.by : from; only = msg.who; }
     if (!kind) return;
     const tone = HAPPENINGS[kind]?.tone;
     // A bot that was hit always says so; otherwise one or two of the others chip in
     const pool = this.list.filter((b) => (only ? b.id === only : b.id !== from));
-    const n = only ? pool.length : Math.min(pool.length, tone === 'wow' || Math.random() < 0.55 ? 1 + (Math.random() < 0.3 ? 1 : 0) : 0);
+    const n = only ? pool.length : msg.t === 'say' ? Math.min(pool.length, 1) : Math.min(pool.length, tone === 'wow' || Math.random() < 0.55 ? 1 + (Math.random() < 0.3 ? 1 : 0) : 0);
     this.pending ||= [];
     // (a volley of eight shots is a lot of news: two lines waiting is plenty)
     if (!only && this.pending.length >= 2) return;

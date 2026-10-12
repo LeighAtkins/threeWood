@@ -131,6 +131,13 @@ export const QUIPS = {
   eagle: ['Eagle eyes!', 'Fly {n}, fly'],
   birdie: ['Tweet tweet!', 'Birdie for {n}!', 'Nice one, {n}'],
   bonked: ['OW!', 'My head, {n}!', 'Watch it, {n}!', 'Fore?! FORE?!', 'Seeing stars…'],
+  // Answers to the quick-chat lines (SAYINGS in netplay, in order)
+  niceshot: ['Thank you, {n}!', 'I try ✨', 'Pure luck', 'Did you see that?!'],
+  unlucky: ['Rub of the green', 'Next time!', 'The wind did it'],
+  fore: ['*ducks*', 'WHERE?!', 'Not again!'],
+  hurry: ['Can\u2019t rush art', 'Coming!', 'Patience, {n} 🐢', 'Five more minutes'],
+  watch: ['Ooh', 'No pressure, {n}', 'Watching…', 'Don\u2019t miss!'],
+  gg: ['GG!', 'Rematch?', 'GG {n}!'],
 };
 
 /** Fill in a quip's name. */
