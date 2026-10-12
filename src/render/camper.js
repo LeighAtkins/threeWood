@@ -205,7 +205,8 @@ export class Camper {
     if (fit.collar || top === 'hoodie') {
       if (!fit.scarf) add(upper, new THREE.TorusGeometry(0.062, 0.028, 8, 16), fit.collar ? trim : jacket, 0, Y(0.705), -0.01).rotation.x = Math.PI / 2 - 0.25;
       // The hood, folded down the back (long hair falls where it would be)
-      if (hair !== 'long') add(upper, ball(1, 12, 8), fit.collar ? trim : jacket, 0, Y(0.67), -rAt(0.67) + 0.005, 0.085, 0.06, 0.045);
+      // (flat against the back, below the collar: it used to be a lump that stuck out when bending)
+      if (hair !== 'long') add(upper, ball(1, 12, 8), fit.collar ? trim : jacket, 0, Y(0.672), -rAt(0.672) + 0.014, 0.092, 0.028, 0.045);
     }
     if (fit.scarf) {
       const scarf = toon(fit.scarf);
@@ -245,8 +246,8 @@ export class Camper {
       add(elbow, tube(puff * 0.92, puff * 0.8, 0.11, 10), sleeve, 0, -0.055, 0);
       add(elbow, tube(puff * 0.82, puff * 0.82, 0.02, 10), open ? seam : trim, 0, -0.105, 0); // cuff
       // A mitten of a hand with a thumb
-      add(elbow, ball(0.03, 12, 8), skinMat, 0, -0.136, 0, 0.88, 1.12, 0.92);
-      add(elbow, ball(0.012, 8, 6), skinMat, 0, -0.124, 0.024, 1, 1.4, 1);
+      add(elbow, ball(0.028, 12, 8), skinMat, 0, -0.134, 0, 0.85, 1.15, 0.7);
+      add(elbow, ball(0.011, 8, 6), skinMat, 0, -0.122, 0.019, 1, 1.4, 1);
       shoulder.add(elbow);
       armRig.add(shoulder);
       return { shoulder, elbow };
@@ -371,12 +372,18 @@ export class Camper {
       return m;
     };
     // (under a hat the crown is the hat's: only the fringe and the lengths show)
+    const close = hair === 'buzz';
+    const capR = R + (close ? 0.007 : 0.02), capY = 0.006, capZ = close ? -0.004 : -0.01;
     if (!hatted) {
-      const close = hair === 'buzz';
-      const shell = add(head, new THREE.SphereGeometry(R + (close ? 0.007 : 0.02), 22, 14, 0, Math.PI * 2, 0, Math.PI * (close ? 0.52 : 0.6)), hairMat, 0, 0.006, close ? -0.004 : -0.01);
+      const shell = add(head, new THREE.SphereGeometry(capR, 22, 14, 0, Math.PI * 2, 0, Math.PI * (close ? 0.56 : 0.6)), hairMat, 0, capY, capZ, 1.04, 1, 1);
       shell.rotation.x = close ? -0.62 : -0.52;
+      // The lower back of the head is the same sphere (same centre, same
+      // radius), so the two surfaces coincide and there is no step where
+      // the cap ends (it used to show as a line across the back)
+      if (hair !== 'curly') add(head, new THREE.SphereGeometry(capR, 22, 10, Math.PI, Math.PI, Math.PI * 0.42, Math.PI * 0.4), hairMat, 0, capY, capZ, 1.04, 1, 1);
+    } else if (hair !== 'curly') {
+      add(head, ball(R + 0.012, 16, 12), hairMat, 0, -0.016, -0.034, 1.05, 0.9, 0.95); // the back of the head under a hat
     }
-    if (hair !== 'curly') add(head, ball(R + (hair === 'buzz' ? 0.004 : 0.012), 16, 12), hairMat, 0, -0.016, -0.034, hair === 'buzz' ? 1.0 : 1.05, hatted ? 0.9 : hair === 'buzz' ? 0.92 : 1, 0.95); // back of the head
     const fringeY = hatted ? 0.066 : 0.09;
     const strand = (x, drop, lean, sy = 2.0, w = 0.95) => {
       const z = Math.sqrt(Math.max(0.001, (R + 0.012) ** 2 - x * x - 0.05 * 0.05));
@@ -394,8 +401,8 @@ export class Camper {
         const part = add(head, new THREE.BoxGeometry(0.004, 0.003, 0.08), flat(new THREE.Color(HAIR_COLORS[hairColor]).multiplyScalar(0.6)), -0.03, R + 0.016, 0.0);
         part.rotation.x = -0.25;
       }
-      strand(-0.085, 0.03, 0.45, 1.6);
-      strand(0.1, 0.035, -0.5, 1.7);
+      strand(-0.083, 0.03, 0.3, 1.6);
+      strand(0.094, 0.035, -0.35, 1.7);
     } else if (hair === 'spiky') {
       for (const [x, drop, lean] of [[-0.075, 0.02, 0.45], [-0.035, 0.03, 0.15], [0.005, 0.035, -0.05], [0.045, 0.028, -0.25], [0.085, 0.02, -0.5]]) {
         const z = Math.sqrt(Math.max(0.001, (R + 0.012) ** 2 - x * x - 0.04 * 0.04));
@@ -408,14 +415,12 @@ export class Camper {
         add(head, ball(0.03, 10, 8), hairMat, x, fringeY - drop + 0.012, z - 0.012, 1, 1, 0.8);
       }
     } else if (hair === 'buzz') {
-      // Just a hairline
-      const line = add(head, new THREE.TorusGeometry(0.075, 0.012, 5, 16, Math.PI), hairMat, 0, 0.072, 0.07, 1, 0.5, 1);
-      line.rotation.x = -0.75;
+      // (the close cap's own edge is the hairline)
     } else {
       const messy = hair === 'messy';
       const strands = messy
-        ? [[-0.09, 0.02, 0.7], [-0.05, 0.035, 0.35], [-0.012, 0.01, -0.3], [0.028, 0.035, 0.1], [0.066, 0.015, -0.6], [0.1, 0.04, -0.85]]
-        : [[-0.088, 0.03, 0.5], [-0.052, 0.022, 0.2], [-0.012, 0.012, -0.1], [0.03, 0.022, -0.25], [0.07, 0.03, -0.45], [0.1, 0.04, -0.6]];
+        ? [[-0.086, 0.02, 0.45], [-0.05, 0.035, 0.35], [-0.012, 0.01, -0.3], [0.028, 0.035, 0.1], [0.066, 0.015, -0.45], [0.094, 0.04, -0.55]]
+        : [[-0.084, 0.03, 0.3], [-0.052, 0.022, 0.2], [-0.012, 0.012, -0.1], [0.03, 0.022, -0.25], [0.07, 0.03, -0.3], [0.094, 0.04, -0.36]];
       for (const [x, drop, lean] of strands) strand(x, drop, lean, messy ? 1.7 : 2.0);
     }
     const long = hair === 'long' || hair === 'twintails';
@@ -423,7 +428,8 @@ export class Camper {
       // Locks framing the face (short cuts get sideburns)
       if (hair === 'buzz') { add(head, ball(0.02, 8, 6), hairMat, side * 0.118, -0.0, 0.03, 0.5, 1.6, 0.8); continue; }
       if (hair === 'curly') continue;
-      const lock = add(head, ball(0.034, 10, 8), hairMat, side * 0.118, long ? -0.075 : short ? -0.02 : -0.035, 0.04, 0.6, long ? 3.8 : short ? 1.7 : 2.4, 0.9);
+      // (their tops stay under the cap: they used to poke above it like horns from behind)
+      const lock = add(head, ball(0.034, 10, 8), hairMat, side * 0.114, long ? -0.09 : short ? -0.035 : -0.045, 0.04, 0.52, long ? 3.8 : short ? 1.4 : 2.4, 0.9);
       lock.rotation.z = side * -0.06;
     }
     if (hair === 'spiky' && !hatted) {
@@ -478,8 +484,8 @@ export class Camper {
       for (const side of [-1, 1]) add(head, ball(0.04, 10, 8), hairMat, side * 0.09, -0.2, -0.05, 0.8, 3.6, 0.7).rotation.z = side * 0.08;
     }
     if (hair === 'short' || hair === 'bun' || hair === 'ponytail' || hair === 'spiky' || hair === 'messy' || hair === 'parted') {
-      // A tidy nape: two little points at the back of the neck
-      for (const side of [-1, 1]) add(head, ball(0.03, 8, 6), hairMat, side * 0.035, -0.105, -0.1, 1, 1.8, 0.7).rotation.z = side * 0.15;
+      // A tidy nape: one soft wedge tapering down the back of the neck
+      add(head, ball(0.03, 10, 8), hairMat, 0, -0.098, -0.092, 2.1, 1.3, 0.55);
     }
     if (hair === 'twintails') {
       for (const side of [-1, 1]) {
