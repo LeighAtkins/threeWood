@@ -449,7 +449,7 @@ export class Hud {
     this.layer.appendChild(node);
   }
 
-  showResult({ title, kind, strokes, par, bonuses, holePoints, challenge, card, last, board = null, cards = null, onCard = null, onNext, onToggle = null }) {
+  showResult({ title, kind, strokes, par, bonuses, holePoints, challenge, card, last, board = null, cards = null, acorns = 0, onCard = null, onReroll = null, onNext, onToggle = null }) {
     this.clearLayer();
     const node = el('div', 'overlay', `
       <div class="card result">
@@ -462,21 +462,34 @@ export class Hud {
           <div class="total-line"><span>HOLE POINTS</span><span class="gold">★ ${holePoints.toLocaleString()}</span></div>
         </div>
         ${board ? '<div class="spect hidden"></div>' : ''}
-        ${cards ? `<div class="hand"><div class="hand-title">KEEP A CARD FOR THE NEXT HOLE</div><div class="hand-row">${cards.map((c) => `<button class="camp-card ${c.kind}${c.dead ? ' dead' : ''}" data-card="${c.id}" ${c.dead ? 'disabled' : ''}><i>${c.e}</i><b>${esc(c.label)}</b><span>${c.kind === 'mischief' ? (c.to ? `→ ${esc(c.to)}` : 'nobody above you') : esc(c.blurb)}</span></button>`).join('')}</div></div>` : ''}
+        ${cards ? `<div class="hand"><div class="hand-head"><span class="hand-title">KEEP A CARD FOR THE NEXT HOLE</span><button class="reroll" data-a="reroll" ${acorns < 1 ? 'disabled' : ''}>⟳ 🌰<b>${acorns}</b></button></div><div class="hand-row">${cardsHtml(cards)}</div></div>` : ''}
         ${board ? `<div class="board live">${boardHtml(board)}</div>` : ''}
         ${scorecardHtml(card, true)}
         <button class="btn" data-a="next">${last ? 'FINISH ROUND' : 'NEXT HOLE'}<span class="auto"></span></button>
       </div>`);
     node.querySelector('[data-a="next"]').addEventListener('click', onNext);
-    for (const b of node.querySelectorAll('[data-card]')) {
-      b.addEventListener('click', (e) => {
+    const hand = node.querySelector('.hand');
+    hand?.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-card]');
+      if (b) {
         e.stopPropagation();
         if (!onCard?.(b.dataset.card)) return;
-        node.querySelector('.hand').classList.add('picked');
+        hand.classList.add('picked');
         b.classList.add('kept');
-        node.querySelector('.hand-title').textContent = b.classList.contains('mischief') ? 'SENT!' : 'KEPT FOR THE NEXT HOLE';
-      });
-    }
+        hand.querySelector('.hand-title').textContent = b.classList.contains('mischief') ? 'SENT!' : 'KEPT FOR THE NEXT HOLE';
+        return;
+      }
+      const r = e.target.closest('[data-a="reroll"]');
+      if (r) {
+        e.stopPropagation();
+        const fresh = onReroll?.();
+        if (!fresh) return;
+        hand.querySelector('.hand-row').innerHTML = cardsHtml(fresh);
+        const left = +r.querySelector('b').textContent - 1;
+        r.querySelector('b').textContent = left;
+        r.disabled = left < 1;
+      }
+    });
     // (tucked away while watching friends: a tap on it opens it again)
     node.querySelector('.card').addEventListener('click', (e) => { if (!e.target.closest('[data-a]') && onToggle) onToggle(); });
     this.layer.appendChild(node);
@@ -491,6 +504,9 @@ export class Hud {
     const sp = card.querySelector('.spect');
     if (sp) { sp.classList.toggle('hidden', !name); sp.textContent = name ? `👀 WATCHING ${name.toUpperCase()}` : ''; }
   }
+
+  /** My acorns changed: a little pop by the points. */
+  acorns(n, text) { this.callout(text, 'small'); }
 
   /** A friend finished the hole after the card came up: the board on it catches up. */
   updateBoard(rows) {
@@ -700,6 +716,10 @@ function mergeBonuses(bonuses) {
  * The room's leaderboard. rows: [{ name, me, total, strokes|null, done, crowns,
  * crown, rank, move }] best first. final: the round is over (medals, no movement).
  */
+function cardsHtml(cards) {
+  return cards.map((c) => `<button class="camp-card ${c.kind}${c.dead ? ' dead' : ''}" data-card="${c.id}" ${c.dead ? 'disabled' : ''}><i>${c.e}</i><b>${esc(c.label)}</b><span>${c.kind === 'mischief' ? (c.to ? `→ ${esc(c.to)}` : 'nobody above you') : esc(c.blurb)}</span></button>`).join('');
+}
+
 function boardHtml(rows, final = false) {
   const medal = ['🥇', '🥈', '🥉'];
   return rows.map((r) => `

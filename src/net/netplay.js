@@ -53,6 +53,7 @@ export class NetPlay {
     root.insertBefore(this.feed, layer);
     this.haps = new Map();     // id -> { kind: count } this round (for the awards)
     this.hand = null;          // cards dealt to me after this hole: [id, id, id]
+    this.acorns = 0;           // 🌰 mine: earned by birdies, contests, mushrooms and misfortune; a reroll costs one
     this.kept = null;          // the one I kept (a boost for me, for the next hole)
     this.incoming = [];        // mischief played on me: [{ id, from }] (next hole)
     this.cardsNow = { mine: null, hit: [] }; // what is in play this hole (for the hole card)
@@ -402,6 +403,7 @@ export class NetPlay {
   }
 
   begin(seed, length) {
+    this.acorns = 0;
     this.hand = this.kept = null; this.incoming = []; this.cardsNow = { mine: null, hit: [] };
     this.inRound = true;
     this.scores.clear();
@@ -502,6 +504,7 @@ export class NetPlay {
     if (!best) { this.crownNews = `👑 ${contest.label} · A TIE, NO CROWN`; return; }
     this.nextCrown = best.id;
     this.crowns.set(best.id, (this.crowns.get(best.id) || 0) + 1);
+    if (best.id === this.myId) this.earnAcorns(2);
     const who = best.id === this.myId ? 'YOU' : this.nameOf(best.id).toUpperCase();
     this.crownNews = `👑 ${contest.label} · ${who} · ${contest.fmt(best.v)}`;
     g.hud.updateBoard(this.board());
@@ -524,6 +527,8 @@ export class NetPlay {
     this.haps.set(id, c);
     const me = id === this.myId;
     const name = me ? 'You' : this.nameOf(id);
+    // Acorns: the good earns them, and so (a little) does bad luck
+    if (me) this.earnAcorns(h.tone === 'lol' ? 1 : k === 'shroom' || k === 'fish' ? 1 : ['birdie', 'eagle', 'ace', 'chipin'].includes(k) ? 2 : 0, h.tone === 'lol');
     // The same thing to several people in one volley is one line: "Toba, Saito +2 lipped out"
     const r = this.lastHap;
     if (r && r.k === k && performance.now() - r.at < 2500 && r.line.isConnected && !r.ids.includes(id)) {
@@ -685,6 +690,22 @@ export class NetPlay {
   }
 
   // ---- Camp Cards -----------------------------------------------------------------
+
+  earnAcorns(n, pity = false) {
+    if (!n || !this.active) return;
+    this.acorns = Math.min(9, this.acorns + n);
+    this.g.hud.acorns?.(this.acorns, pity ? `+${n} 🌰 (bad luck)` : `+${n} 🌰`);
+  }
+
+  /** Spend an acorn on a fresh hand. Returns the new cards (as dealHand), or null. */
+  reroll() {
+    if (!this.hand || this.picked || this.acorns < 1) return null;
+    this.acorns -= 1;
+    this.hand = null;
+    const cards = this.dealHand();
+    this.g.audio.whoosh();
+    return cards;
+  }
 
   /** My hole is done: three cards, by where I stand. */
   dealHand() {

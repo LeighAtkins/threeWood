@@ -2010,7 +2010,9 @@ export class Game {
       card, last,
       board: this.net.active && this.net.players.length > 1 ? this.net.board() : null,
       cards: last ? null : this.net.dealHand(),
+      acorns: this.net.acorns,
       onCard: (id) => this.net.keep(id),
+      onReroll: () => this.net.reroll(),
       onNext: () => this.pressNext(),
       onToggle: () => { this.cardOpen = !this.cardOpen; this.hud.miniResult(!!this.spectName && !this.cardOpen, this.spectName); },
     });
