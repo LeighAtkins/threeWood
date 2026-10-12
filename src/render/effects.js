@@ -396,8 +396,16 @@ const CONFETTI = [0xff4d6d, 0xffd23f, 0x3bceac, 0x4d9de0, 0xffffff, 0xff8c42];
 export class Effects {
   constructor(scene) {
     this.scene = scene;
-    this.aimArc = new Ribbon(scene, { color: 0xffffff, width: 3.5, dashed: true, opacity: 0.9, depthTest: false });
-    this.puttLine = new Ribbon(scene, { color: 0xffffff, width: 4.5, opacity: 0.95, depthTest: false, vertexColors: true });
+    this.aimArc = new Ribbon(scene, { color: 0xffffff, width: 5, dashed: true, opacity: 0.92, depthTest: false });
+    this.puttLine = new Ribbon(scene, { color: 0xffffff, width: 7, opacity: 0.95, depthTest: false, vertexColors: true });
+    // After the landing: the bounce and roll to where the ball stops
+    this.rollLine = new Ribbon(scene, { color: 0xffffff, width: 4, opacity: 0.7, depthTest: false });
+    // Where the putt comes to rest: a ghost of the ball
+    this.ghost = new THREE.Mesh(new THREE.SphereGeometry(0.11, 16, 12),
+      new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.55, depthTest: false, depthWrite: false }));
+    this.ghost.renderOrder = 5;
+    this.ghost.visible = false;
+    scene.add(this.ghost);
     this.comet = new Comet(scene);
     this.particles = new Particles(scene);
     this.paper = new Paper(scene);
@@ -434,18 +442,32 @@ export class Effects {
   resize(w, h, pixelRatio) {
     this.aimArc.resize(w, h);
     this.puttLine.resize(w, h);
+    this.rollLine.resize(w, h);
     this.particles.material.uniforms.uScale.value = h * pixelRatio * 0.9;
   }
 
   // Aim preview -------------------------------------------------------------
-  showAim(points, landX, landY, landZ, cameraDist) {
+  showAim(points, landX, landY, landZ, cameraDist, roll = null, rest = null) {
     this.aimArc.set(points);
     this.ring.position.set(landX, landY + 0.12, landZ);
     this.ring.scale.setScalar(Math.max(1.2, cameraDist * 0.03));
     this.ring.visible = true;
+    // The roll-out, floated clear of the turf, and a ghost ball where it stops
+    const far = rest && Math.hypot(rest.x - landX, rest.z - landZ) > 1.5;
+    if (roll && roll.length >= 6 && far) {
+      const lifted = roll.slice();
+      for (let i = 1; i < lifted.length; i += 3) lifted[i] += 0.1;
+      this.rollLine.set(lifted);
+      this.ghost.visible = true;
+      this.ghost.position.set(rest.x, lifted[lifted.length - 2], rest.z);
+      this.ghost.material.color.setHex(rest.water ? 0x9ad8ff : 0xffffff);
+    } else {
+      this.rollLine.hide();
+      this.ghost.visible = false;
+    }
   }
 
-  showPutt(points, holed) {
+  showPutt(points, holed, end) {
     const n = points.length / 3;
     const colors = new Float32Array(n * 3);
     for (let i = 0; i < n; i++) {
@@ -455,15 +477,22 @@ export class Effects {
       colors[i * 3 + 1] = holed ? 1 : 1 - t * 0.18;
       colors[i * 3 + 2] = holed ? 1 - t * 0.5 : 1 - t * 0.75;
     }
+    // Floated clear of the turf so it never sinks into a bump between samples
     const lifted = points.slice();
-    for (let i = 1; i < lifted.length; i += 3) lifted[i] += 0.03;
+    for (let i = 1; i < lifted.length; i += 3) lifted[i] += 0.07;
     this.puttLine.set(lifted, colors);
+    this.rollLine.hide();
+    this.ghost.visible = !!end && !holed && n > 1;
+    if (end) this.ghost.position.set(end.endX, lifted[lifted.length - 2], end.endZ);
+    this.ghost.material.color.setHex(0xffffff);
   }
 
   hideAim() {
     this.aimArc.hide();
     this.puttLine.hide();
+    this.rollLine.hide();
     this.ring.visible = false;
+    this.ghost.visible = false;
   }
 
   // Trail --------------------------------------------------------------------

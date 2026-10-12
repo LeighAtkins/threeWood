@@ -65,6 +65,7 @@ export class Hud {
       </div>
       <div class="side-right play"><canvas id="minimap" width="208" height="208"></canvas></div>
       <div class="pin-tag play hidden"></div>
+      <div class="pin-tag land play hidden"></div>
       <div class="carry hidden"></div>
       <div class="callouts"></div>
       <div class="pill hint hidden"></div>
@@ -107,7 +108,8 @@ export class Hud {
     this.points = q('.points');
     this.goal = q('.goal');
     this.minimap = q('#minimap');
-    this.pinTag = q('.pin-tag');
+    this.pinTag = q('.pin-tag:not(.land)');
+    this.landTag = q('.pin-tag.land');
     this.callouts = q('.callouts');
     this.carry = q('.carry');
     this.hintEl = q('.hint');
@@ -212,11 +214,14 @@ export class Hud {
     this.bottom.querySelector('.club').style.opacity = canChange ? 1 : 0.6;
   }
 
-  setPinTag(text, x, y, visible) {
-    this.pinTag.classList.toggle('hidden', !visible);
+  setPinTag(text, x, y, visible) { this.placeTag(this.pinTag, text, x, y, visible); }
+  /** Where the shot being lined up comes down, with its length. */
+  setLandTag(text, x, y, visible) { this.placeTag(this.landTag, text, x, y, visible); }
+  placeTag(tag, text, x, y, visible) {
+    tag.classList.toggle('hidden', !visible);
     if (!visible) return;
-    this.pinTag.textContent = text;
-    this.pinTag.style.transform = `translate(${x}px, ${y}px) translate(-50%, -100%)`;
+    if (tag.textContent !== text) tag.textContent = text;
+    tag.style.transform = `translate(${x}px, ${y}px) translate(-50%, ${tag === this.landTag ? '8px' : '-100%'})`;
   }
 
   /**
@@ -520,6 +525,7 @@ export class Hud {
       <div class="card">
         <h2>HOW TO PLAY</h2>
         ${row(glyph('drag'), 'Aim', 'Drag left or right')}
+        ${row(glyph('drag'), 'Distance', 'Drag up or down (or scroll): the line shows where it stops')}
         ${row(glyph('tap') + pips(0), 'Swing', 'Tap 3 times: start, power, hit')}
         ${row(glyph('tap') + pips(0, 3, true), 'Long shot', 'MAX power fills itself: tap 2 times')}
         ${row(glyph('shape'), 'Curve', 'Good hit? Swipe while it flies')}

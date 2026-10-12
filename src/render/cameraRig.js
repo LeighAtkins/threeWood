@@ -27,7 +27,70 @@ export class CameraRig {
     this.t = 0;
     this.portrait = true;
     this._v = new THREE.Vector3();
+    // A scratch camera for asking "where would this land on screen?" of a
+    // framing before it is used
+    this._cam = new THREE.PerspectiveCamera();
   }
+
+  /** Screen position (NDC) of a world point as seen from wantPos looking at wantLook. */
+  ndc(x, y, z) {
+    const c = this._cam;
+    c.projectionMatrix.copy(this.camera.projectionMatrix);
+    c.position.copy(this.wantPos);
+    c.up.set(0, 1, 0);
+    c.lookAt(this.wantLook);
+    c.updateMatrixWorld();
+    c.matrixWorldInverse.copy(c.matrixWorld).invert();
+    return this._v.set(x, y, z).project(c);
+  }
+
+  /**
+   * Tip the view down until the point sits no lower than `minY` on screen
+   * (-1 bottom, 1 top). The ball has to be in the picture on every screen
+   * shape: a wide monitor's narrow field of view used to drop it off the
+   * bottom of the aim view.
+   */
+  fit(x, y, z, minY) {
+    for (let i = 0; i < 5; i++) {
+      const v = this.ndc(x, y, z);
+      if (v.z < 1 && v.y >= minY) break;
+      const dist = this.wantPos.distanceTo(this.wantLook);
+      const halfTan = Math.tan((this.camera.fov * Math.PI / 360));
+      const short = v.z >= 1 ? 0.4 : Math.min(1.5, minY - v.y);
+      this.wantLook.y -= short * halfTan * dist;
+    }
+  }
+
+  /**
+   * Shot preview: from behind the ball, high enough and far enough back that
+   * the whole path (ball, apex, landing) is on screen. `points` is the flat
+   * path; the view looks along (dirX, dirZ).
+   */
+  frame(ball, dirX, dirZ, points) {
+    this.mode = 'preview';
+    this.stiffness = 4.5;
+    let ex = ball.x, ey = ball.y, ez = ball.z;
+    for (let i = 0; i < points.length; i += 3) { ex = points[i]; ey = points[i + 1]; ez = points[i + 2]; }
+    const span = Math.max(4, Math.hypot(ex - ball.x, ez - ball.z));
+    const mx = (ball.x + ex) / 2, mz = (ball.z + ez) / 2, my = (ball.y + ey) / 2;
+    // High behind the ball, looking down the line at the landing: the path
+    // on the ground and where it ends are what matter (the top of a high
+    // arc may leave the frame). Pull back only until both ends fit.
+    let back = span * 0.22 + 3;
+    for (let i = 0; i < 8; i++) {
+      const up = back * 0.9 + 2.5;
+      this.wantPos.set(ball.x - dirX * back, Math.max(ball.y, ey) + up, ball.z - dirZ * back);
+      this.wantLook.set(mx, my, mz);
+      let ok = true;
+      for (const [x, y, z] of [[ball.x, ball.y, ball.z], [ex, ey, ez]]) {
+        const v = this.ndc(x, y, z);
+        if (v.z >= 1 || Math.abs(v.x) > 0.8 || v.y < -0.78 || v.y > 0.82) { ok = false; break; }
+      }
+      if (ok) break;
+      back *= 1.2;
+    }
+  }
+
 
   /** `placed`: big set pieces from the scenery, which can block a camera just as a tree can. */
   setWorld(world, placed = []) {
@@ -75,7 +138,7 @@ export class CameraRig {
     this.stiffness = 7;
     const k = Math.max(0, Math.min(1, reach / 150));
     const back = 4.2 + 4.2 * k + (this.portrait ? 0.8 : 0);
-    const up = 2.1 + 3.4 * k;
+    const up = 2.1 + 3.4 * k + (this.portrait ? 0 : 0.6);
     const ahead = 6 + 30 * k;
     this.wantPos.set(ball.x - dirX * back, ball.y + up, ball.z - dirZ * back);
     // Never park the lens inside a tree: tuck in tight behind the ball instead
@@ -86,6 +149,8 @@ export class CameraRig {
       }
     }
     this.wantLook.set(ball.x + dirX * ahead, ball.y + 0.3, ball.z + dirZ * ahead);
+    // The ball itself must be in the picture, whatever the screen's shape
+    this.fit(ball.x, ball.y, ball.z, -0.5);
   }
 
   /** Putting view: ball near the bottom of frame, cup beyond it. */
@@ -102,6 +167,7 @@ export class CameraRig {
     this.wantPos.set(ball.x - dirX * back - dirZ * off, ball.y + up, ball.z - dirZ * back + dirX * off);
     const ahead = Math.max(1.5, d * 0.62);
     this.wantLook.set(ball.x + dirX * ahead, ball.y + lift, ball.z + dirZ * ahead);
+    this.fit(ball.x, ball.y, ball.z, -0.42);
   }
 
   /** Follow a ball in flight from behind and above. */

@@ -267,7 +267,7 @@ export class Game {
     let drag = null;
     c.addEventListener('pointerdown', (e) => {
       this.audio.unlock();
-      drag = { id: e.pointerId, x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, t: performance.now(), moved: 0 };
+      drag = { id: e.pointerId, x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, t: performance.now(), moved: 0, axis: null, len0: this.putting ? this.puttPct : this.wantDist };
       // A finger on Kuri's stick: this drag throws it, it does not turn the aim
       if (this.state === 'aim' && !this.paused && this.dog.grabStick(e.clientX, e.clientY)) drag.stick = true;
       try { c.setPointerCapture?.(e.pointerId); } catch { /* synthetic pointer */ }
@@ -280,6 +280,11 @@ export class Game {
       drag.x = e.clientX; drag.y = e.clientY;
       if (drag.stick) return;
       if (this.state === 'aim' && !this.paused) {
+        // A drag is one thing or the other: sideways turns the aim, up and
+        // down sets how far the shot goes. Decide on the first real movement.
+        if (!drag.axis && drag.moved > 7) drag.axis = Math.abs(e.clientX - drag.sx) >= Math.abs(e.clientY - drag.sy) ? 'x' : 'y';
+        if (drag.axis === 'y') { this.adjustLength(e.clientY - prevY); return; }
+        if (drag.axis !== 'x') return;
         // Putts need a jeweller's touch; full shots a quicker turn
         const base = (this.putting ? 0.0011 : 0.003) * (this.steady ? 0.6 : 1);
         if (this.steady && Math.abs(dx) < 2) return; // a bump, not a drag
@@ -303,9 +308,12 @@ export class Game {
       const held = performance.now() - drag.t;
       const tap = drag.moved < 12 && held < 400;
       const dy = e.clientY - drag.sy, dx = e.clientX - drag.sx;
-      // A quick flick up or down: fly to a friend's ball, or come back
-      // (a vertical drag has no other meaning while aiming, so any speed counts)
-      const flick = Math.abs(dy) > 70 && Math.abs(dy) > Math.abs(dx) * 1.6;
+      // A quick flick up or down: fly to a friend's ball, or come back.
+      // (While aiming a vertical drag sets the length; only a fast flick with
+      // a friend's ball in the air, or a flick back from watching, is a swipe)
+      const quick = Math.abs(dy) > 70 && Math.abs(dy) > Math.abs(dx) * 1.6;
+      const flick = quick && (this.state !== 'aim' || (held < 260 && (this.net.watching || this.net.flyingFriend())));
+      if (flick && this.state === 'aim') { if (this.putting) this.puttPct = drag.len0; else this.wantDist = drag.len0; this.planDirty = true; this.previewUntil = 0; }
       const stick = drag.stick;
       drag = null;
       if (stick) { if (tap) this.dog.tapStick(e.clientX, e.clientY); else this.dog.flickStick(dx, dy, held); return; }
@@ -315,6 +323,12 @@ export class Game {
     };
     c.addEventListener('pointerup', end);
     c.addEventListener('pointercancel', end);
+    // A mouse wheel does the same as the vertical drag (PC)
+    c.addEventListener('wheel', (e) => {
+      if (this.state !== 'aim' || this.paused) return;
+      e.preventDefault();
+      this.adjustLength(Math.sign(e.deltaY) * 36);
+    }, { passive: false });
     for (const type of ['pointerdown', 'touchend', 'click']) {
       document.addEventListener(type, () => { this.audio.unlock(); this.music.wake(); }, { capture: true, passive: true });
     }
@@ -944,6 +958,9 @@ export class Game {
     this.target = this.lie.id === 'green' && !world.spec.green.channel ? { x: world.cup.x, z: world.cup.z, isPin: true } : aimTarget(world, ball.x, ball.z);
     this.targetDist = Math.hypot(this.target.x - ball.x, this.target.z - ball.z);
     this.aimAngle = Math.atan2(this.target.z - ball.z, this.target.x - ball.x);
+    this.wantDist = null;
+    this.puttPct = null;
+    this.previewUntil = 0;
     this.setClub(autoSelectClub(this.targetDist, this.lie, this.onTee));
     this.toPin = toPin;
 
@@ -976,6 +993,10 @@ export class Game {
     this.club = club;
     this.planDirty = true;
     this.puttMax = null;
+    if (!this.putting && this.wantDist != null) {
+      const reach = distanceAt(club, 100, this.lie.speedFactor);
+      this.wantDist = Math.max(reach * 0.15, Math.min(reach, this.wantDist));
+    }
     if (this.putting) {
       // Putts always start aimed at the hole, whatever the path says (bar
       // crazy golf, where the path is the lane round the bends)
@@ -1007,16 +1028,49 @@ export class Game {
     }
   }
 
+  /**
+   * How far the shot goes, by hand: drag up for more, down for less (or
+   * the mouse wheel). The club follows the distance, the meter's marker
+   * follows the club, and the preview line shows exactly what you asked for.
+   * On the green the same drag sets the pace of the putt.
+   */
+  adjustLength(dyPx) {
+    if (this.state !== 'aim' || this.paused || !dyPx) return;
+    const scale = 640 / Math.max(320, Math.min(window.innerHeight, 1000));
+    if (this.putting) {
+      const pct = this.puttPct ?? this.idealPct ?? 50;
+      this.puttPct = Math.max(12, Math.min(96, pct - dyPx * 0.22 * scale));
+    } else {
+      const reach = distanceAt(this.club, 100, this.lie.speedFactor);
+      const cur = this.wantDist ?? Math.min(reach, this.targetDist);
+      const longest = this.availableClubs().filter((c) => c !== PUTTER).reduce((m, c) => Math.max(m, distanceAt(c, 100, this.lie.speedFactor)), 0);
+      const want = Math.max(6, Math.min(longest || reach, cur - dyPx * 0.3 * scale));
+      // Out of this club's range, or well inside it: move to the club that fits
+      if (want > reach + 0.5 || want < reach * 0.5) {
+        const pick = autoSelectClub(want, this.lie, this.onTee);
+        if (pick && pick !== PUTTER && pick !== this.club && this.availableClubs().includes(pick)) { this.club = pick; this.puttMax = null; this.audio.tap(); }
+      }
+      const now = distanceAt(this.club, 100, this.lie.speedFactor);
+      this.wantDist = Math.max(now * 0.15, Math.min(now, want));
+    }
+    this.previewUntil = performance.now() + 1100;
+    this.planDirty = true;
+    this.hud.demo(null);
+    this.hud.hint('');
+  }
+
   refreshClubHud() {
     const lie = this.lie;
     const penalty = Math.round((1 - lie.speedFactor) * 100);
     const lieText = this.onTee && !this.world.spec.green.channel ? 'TEE' : penalty ? `${lie.name.toUpperCase()} −${penalty}%` : lie.name.toUpperCase();
     if (this.putting) {
       this.hud.setClub({ name: 'Putter', yards: `${feet(this.targetDist)} ft to hole`, lie: lieText, canChange: this.availableClubs().length > 1 });
+      this.hud.setLandTag('', 0, 0, false);
       this.hud.setAction('hold');
     } else {
       const max = Math.round(distanceAt(this.club, 100, lie.speedFactor));
-      this.hud.setClub({ name: this.club.name, yards: `${max}y max`, lie: lieText, lieBad: penalty > 0, canChange: true });
+      const want = Math.round(Math.min(max, this.wantDist ?? this.targetDist));
+      this.hud.setClub({ name: this.club.name, yards: want < max - 1 ? `${want}y · max ${max}` : `${max}y max`, lie: lieText, lieBad: penalty > 0, canChange: true });
       this.hud.setAction('swing', this.fullPower);
     }
   }
@@ -1034,16 +1088,21 @@ export class Game {
       // Pace for the cup, or (crazy golf) for the bend the putt is played to
       const to = this.target && !this.target.isPin ? this.target : world.cup;
       const dist = Math.hypot(to.x - ball.x, to.z - ball.z);
-      this.idealSpeed = puttSpeedFor(world, ball, dirX, dirZ, dist);
-      if (!this.puttMax) this.puttMax = puttMeterMax(this.idealSpeed);
-      this.idealPct = Math.min(96, (this.idealSpeed / this.puttMax) * 100);
+      this.readSpeed = puttSpeedFor(world, ball, dirX, dirZ, dist);
+      if (!this.puttMax) this.puttMax = puttMeterMax(this.readSpeed);
+      // The caddie's read is the pace to start from; a vertical drag sets your own
+      this.readPct = Math.min(96, (this.readSpeed / this.puttMax) * 100);
+      this.idealPct = this.puttPct ?? this.readPct;
+      this.idealSpeed = puttSpeedAt(this.puttMax, this.idealPct);
       const preview = previewPutt(world, ball, dirX, dirZ, this.idealSpeed);
       this.effects.aimArc.hide();
       this.effects.ring.visible = false;
       const a = this.assists;
-      const keep = Math.max(2, Math.ceil((preview.points.length / 3) * a.puttLine));
-      this.effects.showPutt(preview.points.slice(0, keep * 3), a.confirmLine && preview.holed);
-      this.landing = null;
+      // The whole roll, like the line on a pool table: where it goes, how it
+      // breaks, where it stops (or drops)
+      this.effects.showPutt(preview.points, a.confirmLine && preview.holed, preview);
+      this.previewPts = preview.points;
+      this.landing = null; this.rest = null;
       this.hud.showPuttMeter(this.idealPct);
       // A tick when the read is right (while that help lasts)
       this.hud.setMeterCaption(a.confirmLine && preview.holed ? 'ok' : '');
@@ -1051,9 +1110,10 @@ export class Game {
       this.hud.setMeterSteps(null);
     } else {
       const reach = distanceAt(this.club, 100, this.lie.speedFactor);
+      const aimDist = this.wantDist ?? this.targetDist;
       // Near enough to everything the club has counts as a full shot: asking
       // for a tap a hair before the bar tops out is a trap, not a skill
-      const want = reach >= this.targetDist ? powerFor(this.club, this.targetDist, this.lie.speedFactor) : null;
+      const want = reach >= aimDist ? powerFor(this.club, aimDist, this.lie.speedFactor) : null;
       this.idealPower = want && want < 96 ? want : null;
       this.slope = slopeAlong(world, ball, dirX, dirZ);
       const launch = buildLaunch({
@@ -1071,7 +1131,10 @@ export class Game {
       this.effects.puttLine.hide();
       this.landing = { x: preview.landX, y: preview.landY, z: preview.landZ };
       const camDist = Math.hypot(preview.landX - this.camera.position.x, preview.landZ - this.camera.position.z);
-      this.effects.showAim(preview.points, preview.landX, world.heightAt(preview.landX, preview.landZ), preview.landZ, camDist);
+      this.rest = { x: preview.restX, z: preview.restZ, water: preview.water };
+      this.effects.showAim(preview.points, preview.landX, world.heightAt(preview.landX, preview.landZ), preview.landZ, camDist, preview.roll, this.rest);
+      this.previewPts = preview.points.concat(preview.roll);
+      if (this.state === 'aim' || this.state === 'swing') this.refreshClubHud();
       // Sky rings hang along the first tee shot the caddie lines up
       if (this.strokes === 0 && this.state === 'aim' && this.round) this.gimmicks.hangRings(preview.points);
       if (this.state === 'aim') { this.hud.hideMeter(); this.hud.setAction('swing', this.fullPower); }
@@ -1082,8 +1145,10 @@ export class Game {
   showHint() {
     if (this.putting) {
       this.hud.demo(this.hints.putt < 3 ? 'drag' : null, { high: true });
+      this.hud.hint(this.hints.putt < 3 ? 'Drag ← → to aim · ↑ ↓ for pace' : '');
     } else {
       this.hud.demo(this.hints.swing < 3 ? 'drag' : null);
+      this.hud.hint(this.hints.swing < 3 ? 'Drag ← → to aim · ↑ ↓ for distance' : '');
     }
   }
 
@@ -1118,6 +1183,7 @@ export class Game {
       this.coachHeld = null;
       this.dwell = 0;
       if (this.planDirty) this.updatePlan();
+      this.hud.hint('');
       if (this.putting) {
         this.charging = true;
         this.coach = [ 'hold', 0.6 ][this.hints.putt] ?? null;
@@ -2253,6 +2319,11 @@ export class Game {
   aimCamera() {
     const { ball } = this;
     const dirX = Math.cos(this.aimAngle), dirZ = Math.sin(this.aimAngle);
+    // Setting the length: pull up and back so the whole path is on screen
+    if (this.state === 'aim' && this.previewUntil > performance.now() && this.previewPts?.length >= 6) {
+      this.rig.frame(ball, dirX, dirZ, this.previewPts);
+      return;
+    }
     if (this.putting) {
       this.rig.putt(ball, dirX, dirZ, this.targetDist);
     } else {
@@ -2275,7 +2346,9 @@ export class Game {
     // ball flies away, that made it balloon next to the scenery; a faint halo
     // does the job of keeping it readable instead)
     const air = this.state === 'flight' && ball.mode === 'air';
-    const want = Math.max(1.4, Math.min(12, camDist / (this.rig.portrait ? 8.5 : 11)));
+    // (and never past 4×: from a camera parked behind the golfer, a ball 150
+    // yards out drawn 12× was a beach ball on the green. The halo carries it.)
+    const want = Math.max(1.4, Math.min(4, camDist / (this.rig.portrait ? 8.5 : 11)));
     // Shrink at once (camera cuts), grow smoothly (ball flying away)
     this.ballScale = want < this.ballScale ? want : this.ballScale + (want - this.ballScale) * Math.min(1, dt * 8);
     const s = this.ballScale;
@@ -2296,8 +2369,8 @@ export class Game {
     this.ballGlowK = (this.ballGlowK || 0) + ((air ? 1 : 0) - (this.ballGlowK || 0)) * Math.min(1, dt * 6);
     this.ballGlow.visible = this.ballGlowK > 0.02 && this.ballMesh.visible;
     this.ballGlow.position.copy(this.ballMesh.position);
-    this.ballGlow.scale.setScalar(BALL_R * s * 5);
-    this.ballGlow.material.opacity = this.ballGlowK * 0.45;
+    this.ballGlow.scale.setScalar(Math.max(BALL_R * s * 5, camDist * 0.012));
+    this.ballGlow.material.opacity = this.ballGlowK * Math.min(0.7, 0.45 + camDist * 0.002);
     if (ball.mode === 'roll' || ball.mode === 'air') {
       const speed = Math.hypot(ball.vx, ball.vz);
       if (speed > 0.05) {
@@ -2372,6 +2445,17 @@ export class Game {
       this.hud.setPinTag(`${Math.round(d)}y`, (this._v.x * 0.5 + 0.5) * window.innerWidth, (-this._v.y * 0.5 + 0.5) * window.innerHeight, visible);
     } else {
       this.hud.setPinTag('', 0, 0, false);
+    }
+    if (showTag && this.landing) {
+      // Where the shot finishes (ball at rest), with how far that is
+      const at = this.rest || this.landing;
+      this._v2 = this._v2 || new THREE.Vector3();
+      this._v2.set(at.x, world.heightAt(at.x, at.z) + 0.2, at.z).project(camera);
+      const visible = this._v2.z < 1 && Math.abs(this._v2.x) < 1.05 && Math.abs(this._v2.y) < 1.05;
+      const d = Math.hypot(at.x - ball.x, at.z - ball.z);
+      this.hud.setLandTag(`${Math.round(d)}y`, (this._v2.x * 0.5 + 0.5) * window.innerWidth, (-this._v2.y * 0.5 + 0.5) * window.innerHeight, visible);
+    } else {
+      this.hud.setLandTag('', 0, 0, false);
     }
 
     if (this.state === 'aim' || this.state === 'swing' || this.state === 'flight') {

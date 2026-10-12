@@ -40,13 +40,20 @@ export function buildLaunch({ club, power, dirX, dirZ, lie, strike = PERFECT_STR
   };
 }
 
-/** Flight preview for the aim line: stops at first landing. Ignores wind. */
+/**
+ * Flight preview for the aim line: the arc to the first landing, then the
+ * bounce and roll to where the ball stops (`roll` points, `restX/restZ`).
+ * Ignores wind.
+ */
 export function previewShot(world, ball, launch) {
   const b = copyBall(ball);
   launchBall(b, launch);
   const run = simulate(b, world, null, { sample: 0.08, stopOnLand: true, maxTime: 12 });
+  const landX = b.x, landY = b.y, landZ = b.z, landed = b.landed;
+  const out = simulate(b, world, null, { sample: 0.1, maxTime: 10 });
   return {
-    points: run.points, landX: b.x, landY: b.y, landZ: b.z, landed: b.landed,
+    points: run.points, landX, landY, landZ, landed,
+    roll: out.points, restX: b.x, restZ: b.z, water: b.mode === 'water' || b.mode === 'lost',
     blocked: run.events.some((e) => e.type === 'tree'),
   };
 }

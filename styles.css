@@ -116,6 +116,9 @@ button { font: inherit; color: inherit; border: 0; background: none; padding: 0;
   content: ''; position: absolute; left: 50%; bottom: -5px; margin-left: -5px;
   border: 5px solid transparent; border-top-color: var(--cream); border-bottom: 0;
 }
+.pin-tag.land { background: var(--ink); color: var(--cream); }
+/* hangs under its spot, so it never sits on top of the flag's tag */
+.pin-tag.land::after { top: -5px; bottom: auto; border-top: 0; border-bottom: 5px solid var(--ink); }
 
 /* ---- Bottom controls ------------------------------------------------------ */
 .bottom {
