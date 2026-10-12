@@ -1138,6 +1138,9 @@ export class NetPlay {
   update(dt) {
     const g = this.g;
     const show = this.active && ['aim', 'swing', 'flight', 'settle', 'holed', 'result', 'fishing', 'summary', 'nabe', 'skip'].includes(g.state);
+    // (the hole card has the floor while it is up: the feed waits underneath)
+    const quiet = g.state === 'intro';
+    if (quiet !== this.feedQuiet) { this.feedQuiet = quiet; this.feed.classList.toggle('quiet', quiet); }
     // What the camera is about (nobody may stand in front of it): my ball as I
     // line up, or the friend's ball I am watching from the result card
     const lining = ['aim', 'swing', 'flight', 'settle', 'holed'].includes(g.state) && g.rig?.mode !== 'gallery' && !this.watching;

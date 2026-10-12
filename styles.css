@@ -1068,3 +1068,6 @@ button { font: inherit; color: inherit; border: 0; background: none; padding: 0;
 
 .intro .room-event { display: block; width: fit-content; margin: 0 auto 8px; padding: 6px 16px; border-radius: 14px; background: linear-gradient(90deg, #6a4cff, #b44cff); color: #fff; font-size: 16px; font-weight: 800; letter-spacing: 1.5px; text-shadow: none; animation: finalPulse 1.4s ease-in-out infinite; }
 .intro .room-event small { display: block; font-size: 11px; letter-spacing: 0.5px; font-weight: 600; opacity: 0.9; }
+
+.net-feed { transition: opacity 0.3s; }
+.net-feed.quiet { opacity: 0; }
