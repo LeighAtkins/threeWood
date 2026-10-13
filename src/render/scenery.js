@@ -3,6 +3,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { createGameRng } from '../core/rng.js';
 import { CUP_R } from '../core/ballSim.js';
 import { pathInfo, pointAlongPath, blobRadius } from '../course/shapes.js';
+import { WATER_DRAWN } from '../course/courseWorld.js';
 import { buildProps } from './props.js';
 
 /**
@@ -83,7 +84,7 @@ function buildWater(world) {
     // low ground beyond the bank as a detached crescent of water
     const N = 64, pts = [new THREE.Vector3(0, 0, 0)];
     for (let i = 0; i <= N; i++) {
-      const a = (i / N) * Math.PI * 2, r = blobRadius(p, a) * 1.2;
+      const a = (i / N) * Math.PI * 2, r = blobRadius(p, a) * WATER_DRAWN; // (the same edge the physics splashes at)
       pts.push(new THREE.Vector3(Math.cos(a) * r, 0, Math.sin(a) * r));
     }
     const shape = new THREE.BufferGeometry().setFromPoints(pts);

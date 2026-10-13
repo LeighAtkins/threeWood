@@ -21,6 +21,8 @@ const ID = Object.fromEntries(SURFACE_IDS.map((s, i) => [s, i]));
 
 const COARSE = 2.5;   // grid spacing across the tile
 const FINE = 0.5;     // grid spacing over the green
+// How far past a pond's blob outline its water surface is drawn (scenery.js)
+export const WATER_DRAWN = 1.2;
 const TEE_RADIUS = 4.6;   // room for a front row of four
 // The back tier of the tee: starts `back` m behind the tee point, drops `drop`
 // m over `ramp` m, runs `depth` m back and `half` m to either side
@@ -188,7 +190,8 @@ export function buildWorld(spec) {
     if (gd < FRINGE_EDGE) return ID.fringe;
     if (Math.hypot(x - spec.tee.x, z - spec.tee.z) < TEE_RADIUS) return ID.tee;
     if (!green.channel && stepAt(x, z)?.onStep) return ID.tee;
-    for (const p of ponds) if (h < p.level + 0.04 && blobCovers(p, x, z, 1)) return ID.water;
+    // (water where it is drawn: the same edge the splash check uses)
+    for (const p of ponds) if (h < p.level + 0.04 && Math.hypot(x - p.x, z - p.z) < blobRadius(p, Math.atan2(z - p.z, x - p.x)) * WATER_DRAWN) return ID.water;
     for (const b of bunkers) if (blobCovers(b, x, z)) return ID.bunker;
     const info = pathInfo(path, x, z);
     if (info.along >= spec.fairwayStart && info.dist <= fairwayHalfAt(info.along)) return ID.fairway;
@@ -283,8 +286,12 @@ export function buildWorld(spec) {
   const waterLevelAt = (x, z) => {
     let level = -Infinity;
     for (const p of ponds) {
-      const d = Math.hypot(x - p.x, z - p.z);
-      if (d < p.r * 1.7 && p.level > level) level = p.level;
+      const dx = x - p.x, dz = z - p.z, d = Math.hypot(dx, dz);
+      // Only where the water is drawn (its blob, as scenery's buildWater
+      // shapes it): ground below the pond's level outside that is a dry
+      // hollow, not a splash. (It used to be a plain circle 1.7 r round the
+      // pond, which on a downhill fairway caught drives on dry grass.)
+      if (d < p.r * 1.7 && p.level > level && d < blobRadius(p, Math.atan2(dz, dx)) * WATER_DRAWN) level = p.level;
     }
     return level;
   };

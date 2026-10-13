@@ -160,3 +160,26 @@ test('crazy golf is a billiard table: no putt, however hard or wild, leaves the 
   assert.ok(lanes >= 4, `crazy-golf holes found (${lanes})`);
   assert.ok(bounced > 20, `balls bounce off the rails (${bounced})`);
 });
+
+import { blobRadius as blobR } from '../src/course/shapes.js';
+import { WATER_DRAWN } from '../src/course/courseWorld.js';
+
+test('a ball only splashes where water is drawn', () => {
+  let checked = 0;
+  for (let k = 0; k < 12; k++) {
+    for (const n of rh(18)) {
+      const w = buildWorld(dh(`SPLASH-${k}`, n));
+      for (const p of w.ponds) {
+        for (let i = 0; i < 300; i++) {
+          const a = i * 2.399, rr = p.r * 1.8 * Math.sqrt((i + 0.5) / 300);
+          const x = p.x + Math.cos(a) * rr, z = p.z + Math.sin(a) * rr;
+          if (w.waterLevelAt(x, z) <= w.heightAt(x, z) + 0.02) continue;
+          checked += 1;
+          const drawn = Math.hypot(x - p.x, z - p.z) < blobR(p, Math.atan2(z - p.z, x - p.x)) * WATER_DRAWN;
+          assert.ok(drawn || w.ponds.some((q) => q !== p && Math.hypot(x - q.x, z - q.z) < blobR(q, Math.atan2(z - q.z, x - q.x)) * WATER_DRAWN), `seed ${k} hole ${n}: a splash on dry ground`);
+        }
+      }
+    }
+  }
+  assert.ok(checked > 1000, `real water was found to check (${checked})`);
+});
