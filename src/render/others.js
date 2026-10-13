@@ -88,6 +88,7 @@ export class Others {
       o.status = 'aim';
       o.flying = false;
       o.camp = null;
+      o.campAt = null;
       o.wantPose = null;
       o.gallery = null;
       // Their own spot on the tee (the same one their phone tees up on)
@@ -154,14 +155,33 @@ export class Others {
       const o = this.map.get(at.id);
       if (!o) continue;
       o.camp = o.wantPose || at.pose;
+      o.campAt = at;
       o.flying = false;
       o.placed = true;
       o.target = null;
       o.ball.visible = false;
-      o.camper.group.position.set(at.x, at.y, at.z);
-      o.camper.group.rotation.y = at.yaw;
       o.camper.group.scale.setScalar(1.75);
+      this.seat(o);
     }
+  }
+
+  /**
+   * Put a friend at their place by the fire for the pose they chose. In the
+   * camp chair a seated pose perches on its seat (like ours on the log); a
+   * standing one steps out beside it. Elsewhere, where they stand.
+   */
+  seat(o) {
+    const at = o.campAt;
+    if (!at) return;
+    const seated = ['sit', 'warm', 'perch', 'perchWarm'].includes(o.camp);
+    o.campShown = o.camp;
+    let p = at, lift = 0;
+    if (at.chair) {
+      if (seated) { lift = at.chair.lift; o.campShown = o.camp === 'warm' || o.camp === 'perchWarm' ? 'perchWarm' : 'perch'; }
+      else p = at.chair.beside;
+    }
+    o.camper.group.position.set(p.x, p.y + lift, p.z);
+    o.camper.group.rotation.y = p.yaw;
   }
 
   setStatus(id, status) { const o = this.map.get(id); if (o) o.status = status; }
@@ -189,7 +209,7 @@ export class Others {
     const o = this.map.get(id);
     if (!o) return;
     o.wantPose = p; // kept for when we sit down, if they got there first
-    if (o.camp) o.camp = p;
+    if (o.camp) { o.camp = p; this.seat(o); }
   }
 
   /** A word over their head for a moment. */
@@ -270,7 +290,7 @@ export class Others {
       // (nor between me and my ball: on a crowded green or a crazy-golf lane,
       // a friend standing on my line of sight steps out of the picture)
       else if (focus && !o.camp && o.id !== focusId && this.blocks(camera.position, focus, g.position)) { g.visible = false; o.tag.style.display = 'none'; }
-      if (o.camp) { o.ball.visible = false; o.camper.update(dt, o.camp); this.tagAt(o, 1.75, camera); continue; }
+      if (o.camp) { o.ball.visible = false; o.camper.update(dt, o.campShown || o.camp); this.tagAt(o, 1.75, camera); continue; }
       if (o.flying) {
         // (double speed while the bots hurry: the server shortens their flights to match)
         const fdt = dt * (this.replaySpeed || 1);

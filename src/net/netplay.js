@@ -1135,13 +1135,22 @@ export class NetPlay {
   campfire(site) {
     if (!this.active) return;
     // Seven spots round the fire, nearest first
-    const spots = [[1.3, 0.4, -0.8, 'sit'], [0.55, -1.2, -0.2, 'cheer'], [-2.1, 0.75, 0.85, 'peace'], [2.2, -0.9, -1.2, 'sit'], [-1.6, -1.5, 0.3, 'hello'], [2.6, 1.1, -0.5, 'warm'], [-2.8, -0.4, 1.0, 'cheer']];
+    // (the first is the camp chair: seated in it, or standing beside it; none
+    // stands in the tent, the table or the firewood)
+    const spots = [[1.3, 0.3, -1.9, 'sit', true], [-0.25, -1.65, -0.1, 'cheer'], [-2.1, 0.75, 0.85, 'peace'], [2.35, -0.75, -1.2, 'sit'], [-1.6, -1.5, 0.3, 'hello'], [2.6, 1.1, -0.5, 'warm'], [-2.8, -0.4, 1.0, 'cheer']];
     site.updateMatrixWorld();
     const v = this.others._v;
     this.others.camp(this.friends.slice(0, spots.length).map((p, i) => {
-      const [x, z, yaw, pose] = spots[i];
+      const [x, z, yaw, pose, chair] = spots[i];
       v.set(x, 0, z).applyMatrix4(site.matrixWorld);
-      return { id: p.id, x: v.x, y: this.g.world.heightAt(v.x, v.z), z: v.z, yaw: yaw + site.rotation.y, pose };
+      const at = { id: p.id, x: v.x, y: this.g.world.heightAt(v.x, v.z), z: v.z, yaw: yaw + site.rotation.y, pose };
+      if (chair) {
+        // Standing, they step out beside the chair rather than stand in it
+        const b = this._v2 ||= v.clone();
+        b.set(1.75, 0, 1.05).applyMatrix4(site.matrixWorld);
+        at.chair = { lift: 0.35 - 0.45 * 1.75, beside: { x: b.x, y: this.g.world.heightAt(b.x, b.z), z: b.z, yaw: -0.6 + site.rotation.y } };
+      }
+      return at;
     }));
     this.paint(); // the pill stays: a 👏 for the photo
   }
