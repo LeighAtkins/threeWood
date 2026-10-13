@@ -465,6 +465,7 @@ export function buildScenery(world, { lowDetail = false } = {}) {
     fireflies,
   );
   if (ambient) group.add(ambient);
+  if (world.biome.cave) backdrop.visible = false; // (a roof, not a sky)
   return { group, flag, clouds: backdrop.userData.clouds, fireflies, ambient, glow: props.glow, placed: props.placed };
 }
 

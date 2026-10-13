@@ -287,7 +287,22 @@ function toadstools(b, caps, n, size) {
   }
 }
 
+/** A stalagmite: a lumpy cone of wet rock, banded paler near the tip. */
+function stalagmite(b, h) {
+  b.fr(pick([0x4a4c56, 0x55565e, 0x3e4048]), h * R(0.16, 0.24), h * 0.03, h, { seg: 6, top: 0x8a8c94, topAt: R(0.65, 0.8), ry: R(0, TAU), rz: R(-0.08, 0.08), under: 0.75 });
+  b.bl(0x45474f, h * 0.2, { y: h * 0.06, sy: 0.4, sx: 1.3, shade: 0.9 });
+}
+
 const PROPS = {
+  stalagmite(b) {
+    stalagmite(b, R(1.2, 3.4));
+    if (chance(0.5)) {
+      // (and a smaller one beside it)
+      const [x, y, z] = [12, 13, 14].map((k) => b.baseM.elements[k]);
+      b.place(x + R(-1.2, 1.2), y, z + R(-1.2, 1.2));
+      stalagmite(b, R(0.6, 1.6));
+    }
+  },
   bush(b, biome) {
     for (let i = 0; i < 3; i++) b.bl(pick(biome.canopy), R(0.6, 1.1), { x: R(-0.8, 0.8), y: 0.5, z: R(-0.8, 0.8), sy: 0.8, shade: R(0.9, 1.1), under: 0.72 });
     // Now and then a few berries or blooms
@@ -491,6 +506,24 @@ const FEATURES = {
   stoneRing(b) {
     for (let i = 0; i < 8; i++) standingStone(b, 0x6a7a8a, R(2.2, 3.6), { x: Math.cos(i / 8 * TAU) * 5.5, z: Math.sin(i / 8 * TAU) * 5.5, top: 0x6aa85a, topAt: 0.8 });
     shards(b, [0x7ae8ff, 0xc49aff], 4, 4.2, { glow: true });
+  },
+  stalagmiteCluster(b) {
+    for (let i = 0; i < 6; i++) {
+      const a = R(0, TAU), d = i ? R(1.5, 4) : 0;
+      b.place(b.baseM.elements[12] + Math.cos(a) * d, b.baseM.elements[13], b.baseM.elements[14] + Math.sin(a) * d);
+      stalagmite(b, i ? R(2, 6) : R(6, 10));
+    }
+  },
+  minecart(b) {
+    // An old minecart on a short run of rails, a lantern hung on it
+    for (const side of [-0.55, 0.55]) b.bx(0x6a6a72, 7, 0.12, 0.1, { z: side, y: 0.05 });
+    for (let k = -3; k <= 3; k++) b.bx(0x5a4030, 0.25, 0.1, 1.6, { x: k, shade: R(0.85, 1.1) });
+    b.fr(0x4a3a30, 0.9, 1.1, 0.95, { y: 0.35, seg: 4, spin: Math.PI / 4, sx: 1.4 });
+    for (const x of [-0.75, 0.75]) for (const z of [-0.6, 0.6]) b.fr(0x2a2a2e, 0.25, 0.25, 0.1, { x, y: 0.25, z, rx: Math.PI / 2, seg: 8 });
+    b.bl(0x6a6a72, 0.55, { y: 1.15, sx: 1.4, sy: 0.4, shade: 0.8 }); // ore heaped in it
+    for (let i = 0; i < 4; i++) b.bl(pick([0x7ae8ff, 0xc49aff]), 0.18, { x: R(-0.5, 0.5), y: 1.35, z: R(-0.3, 0.3), glow: true });
+    b.fr(0x3a3a3e, 0.05, 0.05, 1.6, { x: 0.9, y: 0.9 });
+    b.bl(0xffd27a, 0.18, { x: 0.9, y: 2.4, glow: true });
   },
   crystalCluster(b) { shards(b, [0xc49aff, 0x7ae8ff, 0xff9ae0], 7, R(4, 7), { glow: true, shade: 0.85 }); rocks(b, 0x5a6a7a, 3, 1.4); },
   boat(b) {
@@ -706,6 +739,7 @@ const EDGE = 352; // nothing on the horizon may reach inside this radius
 function buildBackdrop(b, world) {
   const { biome, spec } = world;
   const { style, color, cap, capAt = 0.6, capGlow, height: [lo, hi] } = biome.backdrop;
+  if (style === 'none') return; // (a cave: its walls are the horizon)
   const ground = biome.base - biome.amp1 - 6;
   const n = style === 'islands' ? 12 : 22;
   for (let i = 0; i < n; i++) {

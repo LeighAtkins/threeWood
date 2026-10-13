@@ -4,6 +4,7 @@ import {
   createBall, copyBall, placeBall, launchBall, puttBall, stepBall, SIM_DT, BALL_R, CUP_R,
 } from './core/ballSim.js';
 import { classify } from './core/happenings.js';
+import { buildCave, updateCave } from './render/cave.js';
 // (a mouse: a PC, with a keyboard to aim with)
 const FINE_POINTER = typeof matchMedia === 'function' && matchMedia('(pointer: fine)').matches;
 import { eventFor, withEvent } from './core/events.js';
@@ -535,6 +536,8 @@ export class Game {
     if (this.nightGlow) { this.scene.remove(this.nightGlow); disposeGroup(this.nightGlow); }
     this.nightGlow = buildNightGlow(this.world);
     this.scene.add(this.nightGlow);
+    if (this.cave) { this.scene.remove(this.cave); disposeGroup(this.cave); this.cave = null; }
+    if (this.world.ceilingAt) { this.cave = buildCave(this.world); this.scene.add(this.cave); }
     if (this.dressing) { this.scene.remove(this.dressing); disposeGroup(this.dressing); }
     this.dressing = buildDressing(this.world);
     this.scene.add(this.dressing);
@@ -1602,6 +1605,12 @@ export class Game {
         fx.puff(e.x, e.y, e.z, 'rough', 1.2);
         if (!this.shot.treeCalled) { this.hud.callout('TIMBER!', 'bad small'); this.shot.treeCalled = true; }
         break;
+      case 'roof':
+        // A cave's roof: a clonk, a puff of grit, and the bats are not pleased
+        this.audio.tree();
+        fx.puff(e.x, e.y, e.z, 'bunker', 1.2);
+        if (!this.shot.roofCalled) { this.hud.callout('CLONK! MIND THE ROOF', 'bad small'); this.shot.roofCalled = true; }
+        break;
       case 'wall':
         // Off the rail: a crazy-golf clack
         this.audio.bounce(Math.min(8, e.speed * 2), 'tee');
@@ -2566,6 +2575,7 @@ export class Game {
     const busy = this.paused || ['fishing', 'cook', 'nabe', 'creator'].includes(this.state);
     this.audio.ambience(dt, { night: this.sky.night, wind: this.world?.spec.wind.speed || 0, level: busy ? 0.15 : this.state === 'title' ? 0.6 : 1 });
     updateScenery(this.scenery, this.time, dt, this.sky);
+    updateCave(this.cave, this.time);
     // After dark: the course, the ball and the campers carry their own light
     const night = this.sky.night;
     updateNightGlow(this.nightGlow, night, this.time, camera);

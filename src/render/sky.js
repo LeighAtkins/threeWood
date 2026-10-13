@@ -377,6 +377,9 @@ export class Sky {
   /** A hole brings its own ground bounce, haze, wind and cloud cover. */
   setHole(world) {
     const { biome, spec } = world;
+    // Underground: no sky at all, and the cave's own light (update, below)
+    this.cave = !!biome.cave;
+    this.dome.visible = !this.cave;
     this.ground.setHex(biome.hemiGround);
     this.haze.setHex(biome.haze);
     this.hazeAmount = biome.hazeAmount;
@@ -447,6 +450,8 @@ export class Sky {
     this.dim = look.dim;
     this.tint.setRGB(1, 1, 1).lerp(look.hemi, this.night * 0.8).multiplyScalar(look.dim);
 
+    if (this.cave) this.caveLight();
+
     // Dome
     const u = this.uniforms;
     u.uTime.value = time;
@@ -458,6 +463,33 @@ export class Sky {
     this._pole.set(0, Math.sin(lat / DEG), -Math.cos(lat / DEG));
     const turn = ((+date / 86164090.5) % 1) * Math.PI * 2;
     u.uStarRot.value.setFromMatrix4(this._m4.makeRotationAxis(this._pole, turn));
+  }
+
+  /**
+   * In a cave the clock does not matter: daylight comes down in shafts through
+   * the roof (a key light from nearly straight above), a cool dim fill, dark
+   * blue-green air, and everything that glows after dark glowing (night 0.7).
+   */
+  caveLight() {
+    this.night = 0.7;
+    this.lightDir.set(0.22, 1, 0.14).normalize();
+    this.lightColor.setHex(0xffeccc);
+    this.sun.color.copy(this.lightColor);
+    this.sun.intensity = 1.05;
+    this.hemi.color.setHex(0x6a8aa8);
+    // (the course throws its green light back up onto the roof)
+    this.hemi.groundColor.setHex(0x5a7a6a);
+    this.hemi.intensity = 1.4;
+    const fog = this.scene.fog;
+    fog.color.setHex(0x1c3440);
+    fog.near = 50;
+    fog.far = 420;
+    this.look.fog.copy(fog.color);
+    this.look.horizon.setHex(0x24404c);
+    this.renderer.toneMappingExposure = 1.15;
+    this.dim = 0.8;
+    this.tint.setHex(0x9ab4c8).multiplyScalar(0.85);
+    this.uniforms.uStars.value = 0;
   }
 
   /** Blend the palette for a sun altitude (degrees) into `this.look`. */

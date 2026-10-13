@@ -32,6 +32,7 @@ export function classify(s) {
   // (a real lip-out stays by the hole; a ball that rolled over it at pace and on is a zoom)
   if (has('lipout') && toPin1 < 2.5) return { k: 'lipout', v: 0 };
   if (!s.putt) {
+    if (has('roof')) return { k: 'roof', v: 0 };
     if (has('tree')) return { k: 'tree', v: 0 };
     if (s.fromSurface === 'tee' && s.par > 3 && carried >= 232) return { k: 'bomb', v: Math.round(carried) };
     if (toPin0 > 60 && carried < 22) return { k: 'topped', v: Math.round(carried) };
@@ -64,6 +65,7 @@ export const HAPPENINGS = {
   splash:   { e: '💦', tone: 'lol', say: (n) => `${n} went for a swim` },
   lost:     { e: '🌲', tone: 'lol', say: (n) => `${n} is lost in the woods` },
   tree:     { e: '🌳', tone: 'lol', say: (n) => `${n} hugged a tree` },
+  roof:     { e: '🦇', tone: 'lol', say: (n) => `${n} hit the cave roof` },
   topped:   { e: '🐛', tone: 'lol', say: (n, v) => `${n} topped it ${v}y` },
   sand:     { e: '🏖️', tone: 'lol', say: (n) => `${n} is at the beach` },
   stuck:    { e: '🏰', tone: 'lol', say: (n) => `${n} is building a sandcastle` },
@@ -84,6 +86,7 @@ export const HAPPENINGS = {
 export const AWARDS = [
   { id: 'fish', e: '🐟', label: 'Fish Whisperer', kinds: ['splash'] },
   { id: 'lumber', e: '🌳', label: 'Tree Hugger', kinds: ['tree', 'lost'] },
+  { id: 'bat', e: '🦇', label: 'Bat Botherer', kinds: ['roof'] },
   { id: 'beach', e: '🏖️', label: 'Beach Bum', kinds: ['sand', 'stuck'] },
   { id: 'rocket', e: '🚀', label: 'Rocket Launcher', kinds: ['bomb'] },
   { id: 'magic', e: '🎯', label: 'Magician', kinds: ['ace', 'chipin', 'snake', 'eagle'] },
@@ -120,6 +123,7 @@ export function awards(counts, order = [...counts.keys()]) {
 export const QUIPS = {
   splash: ['Bring a snorkel, {n}', 'Splish splash!', 'The fish say hi', '{n} fed the koi', 'Swimming lessons?'],
   lost: ['Send a search party', 'Bye bye ball!', '{n}, the woods are that way'],
+  roof: ['Mind your head, {n}!', 'The bats are cross', 'Ceiling shot!', 'Low bridge!', 'Echo… echo…'],
   tree: ['TIMBER!', 'The tree started it', 'Lumberjack {n}!', 'Leaf it to {n}'],
   topped: ['Worm burner!', 'It rolled… a bit', 'Is that a putt, {n}?', 'Grass cutter!'],
   sand: ['Sun’s out, {n}!', 'Bring a bucket', 'Beach day!'],

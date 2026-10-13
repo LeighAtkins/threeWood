@@ -181,6 +181,20 @@ function stepAir(ball, world, env, dt, events) {
 
   if (world.trees.length && hitTrees(ball, world, events)) return;
 
+  // A cave's roof: the ball clonks off it and drops, having lost most of its pace
+  if (world.ceilingAt) {
+    const roof = world.ceilingAt(ball.x, ball.z) - BALL_R;
+    if (ball.y > roof) {
+      ball.y = roof;
+      if (ball.vy > 0) {
+        events.push({ type: 'roof', x: ball.x, y: roof, z: ball.z, speed: ball.vy });
+        ball.vy = -ball.vy * 0.3;
+        ball.vx *= 0.55; ball.vz *= 0.55;
+        ball.back *= 0.3;
+      }
+    }
+  }
+
   const h = world.heightAt(ball.x, ball.z);
   if (ball.y - BALL_R > h) {
     // Still flying: remember the last dry land we passed over (drop point)

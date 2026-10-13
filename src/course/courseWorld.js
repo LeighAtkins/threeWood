@@ -296,6 +296,28 @@ export function buildWorld(spec) {
     return level;
   };
 
+  // --- A cave's roof: 22-32 m over the course, sampled once onto a coarse grid
+  // (the ball physics asks every step in the air; cave.js draws the same one).
+  // Clears any normal shot (a wedge peaks near 18 m); a sky-high one clonks.
+  let ceilingAt = null;
+  if (biome.cave) {
+    const N = 65, SPAN = TILE_HALF + 80, step = (SPAN * 2) / (N - 1);
+    const roof = new Float32Array(N * N);
+    const baseY = Math.max(heightAt(spec.tee.x, spec.tee.z), heightAt(spec.pin.x, spec.pin.z));
+    for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) {
+      const x = -SPAN + i * step, z = -SPAN + j * step;
+      const cx = clampT(x), cz = clampT(z);
+      const clear = 27 + 5 * noise(x * 0.012 + 300, z * 0.012 - 300);
+      roof[i * N + j] = Math.max(heightAt(cx, cz) + 19, baseY + clear);
+    }
+    ceilingAt = (x, z) => {
+      const fx = Math.max(0, Math.min(N - 1.001, (x + SPAN) / step)), fz = Math.max(0, Math.min(N - 1.001, (z + SPAN) / step));
+      const i = fx | 0, j = fz | 0, u = fx - i, v = fz - j;
+      const a = roof[i * N + j], b = roof[(i + 1) * N + j], c = roof[i * N + j + 1], d = roof[(i + 1) * N + j + 1];
+      return (a * (1 - u) + b * u) * (1 - v) + (c * (1 - u) + d * u) * v;
+    };
+  }
+
   // Shrink a wide dip that the coarse grid cannot represent: make sure the
   // tee and the pin sit on the surface the grid actually has.
   const cup = { x: spec.pin.x, z: spec.pin.z, y: heightAt(spec.pin.x, spec.pin.z), r: spec.cupR || undefined };
@@ -320,6 +342,7 @@ export function buildWorld(spec) {
     xs, zs, nx, nz, heights, types,
     heightAt, gradAt, surfaceAt, waterLevelAt,
     gravity: spec.gravity || 0, // (0: the usual; a room event can lower it)
+    ceilingAt, // (a cave's roof, or null under the open sky)
     lane: channel ? { pts: channel.pts, ...rails } : null, // (crazy golf: the rails the ball bounces off)
     cup, tee, trees, ponds, bunkers,
     half: PLAY_HALF,

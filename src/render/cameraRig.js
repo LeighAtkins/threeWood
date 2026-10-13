@@ -353,6 +353,9 @@ export class CameraRig {
     // Never let the lens dip under the turf
     const minY = this.ground(this.wantPos.x, this.wantPos.z) + 0.9;
     if (this.wantPos.y < minY) this.wantPos.y = minY;
+    // ...nor through a cave's roof
+    const roof = this.world?.ceilingAt ? this.world.ceilingAt(this.wantPos.x, this.wantPos.z) - 3 : Infinity;
+    if (this.wantPos.y > roof) this.wantPos.y = Math.max(minY, roof);
 
     if (this.snap) {
       this.pos.copy(this.wantPos);
@@ -365,6 +368,7 @@ export class CameraRig {
     }
     const floor = this.ground(this.pos.x, this.pos.z) + 0.7;
     if (this.pos.y < floor) this.pos.y = floor;
+    if (this.world?.ceilingAt) this.pos.y = Math.min(this.pos.y, Math.max(floor, this.world.ceilingAt(this.pos.x, this.pos.z) - 2.5));
 
     this.camera.position.copy(this.pos);
     if (this.shake > 0.001) {

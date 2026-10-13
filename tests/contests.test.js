@@ -183,3 +183,32 @@ test('a ball only splashes where water is drawn', () => {
   }
   assert.ok(checked > 1000, `real water was found to check (${checked})`);
 });
+
+import { strikeFromTiming as sft } from '../src/core/swing.js';
+import { buildLaunch as bl2 } from '../src/core/shotPlanner.js';
+import { CLUBS as CL, lieFor as lf } from '../src/core/clubs.js';
+import { createBall as cb2, placeBall as pb2, launchBall as lb2, simulate as sim2 } from '../src/core/ballSim.js';
+
+test('a cave has a roof: normal shots clear it, a sky-high lob clonks it and drops', () => {
+  const holes = rh(18).map((n) => buildWorld(dh('CAVE-T', n, { biome: 'cave' })));
+  assert.ok(holes.every((w) => typeof w.ceilingAt === 'function'));
+  assert.equal(buildWorld(dh('CAVE-T', 1, { biome: 'parkland' })).ceilingAt, null, 'open sky elsewhere');
+  let roofHits = 0;
+  for (const w of holes.slice(0, 6)) {
+    const dir = { x: w.cup.x - w.tee.x, z: w.cup.z - w.tee.z }, d = Math.hypot(dir.x, dir.z);
+    for (const club of CL.filter((c) => c.table.length && c.id !== 'chip')) {
+      const b = cb2(); pb2(b, w, w.tee.x, w.tee.z);
+      lb2(b, bl2({ club, power: 100, dirX: dir.x / d, dirZ: dir.z / d, lie: lf('tee'), strike: sft(0, club.loft, () => 0.5), scatter: 0, slope: 0 }));
+      const run = sim2(b, w, null, { maxTime: 20 });
+      if (run.events.some((e) => e.type === 'roof')) roofHits += 1;
+    }
+    // A lob launched nearly straight up at full pace must find the roof, and come back down under it
+    const b = cb2(); pb2(b, w, w.tee.x, w.tee.z);
+    lb2(b, { speed: 45, dirX: dir.x / d, dirZ: dir.z / d, loftDeg: 75, back: 0, side: 0 });
+    let highest = -Infinity;
+    const run = sim2(b, w, null, { maxTime: 20, onStep: (ball) => { highest = Math.max(highest, ball.y - w.ceilingAt(ball.x, ball.z)); } });
+    assert.ok(run.events.some((e) => e.type === 'roof'), 'the lob hits the roof');
+    assert.ok(highest <= 0.001, 'and never passes through it');
+  }
+  assert.equal(roofHits, 0, 'full shots with every club clear the roof');
+});

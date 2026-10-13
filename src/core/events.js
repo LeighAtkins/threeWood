@@ -19,7 +19,8 @@ export function eventFor(seed, index, spec) {
   if (index === 0 || spec.green.channel) return null;
   const r = mulberry32(hashSeed(`${seed}:event:${index}`));
   if (r() > 0.3) return null;
-  const ids = Object.keys(EVENTS);
+  // (no gale underground: the cave has no wind to pick up)
+  const ids = Object.keys(EVENTS).filter((k) => !(k === 'gale' && spec.biome === 'cave'));
   const id = ids[Math.floor(r() * ids.length)];
   return { id, ...EVENTS[id] };
 }

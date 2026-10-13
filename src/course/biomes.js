@@ -207,6 +207,28 @@ export const BIOMES = {
     ambient: ['spores', [0xc8f0ff, 0xf0c8ff, 0xfff6b0]],
     wind: [0, 5],
   },
+  cave: {
+    id: 'cave',
+    name: 'Glowstone Cavern',
+    // Underground: a rock roof over the whole hole (cave.js, and a real ceiling
+    // in the ball physics), no sky, no wind, the light coming down in shafts
+    // through gaps in the roof and everything that glows after dark glowing
+    cave: true,
+    base: 1.4, amp1: 1.2, amp2: 0.45, greenUndulation: 0.16,
+    rough: 0x56705e, fairway: 0x76b880, fringe: 0x88c890, green: 0x9ee0a0,
+    tee: 0x88c890, sand: 0xc8baa0, bed: 0x123a46, deepRough: 0x44564e,
+    haze: 0x16242c, hazeAmount: 0, cloud: [0, 0], hemiGround: 0x2a3a34,
+    water: 0x2ad0d8, liquid: 'water',
+    treeKind: 'mushroom', treeShape: 'round', treeCount: 34,
+    canopy: [0x3ae0d0, 0x7a6aff, 0xb46aff, 0x4ab8ff, 0x6affb4],
+    trunk: 0xd8d0c0, tuft: 0x4a7a6a, tufts: 0.4, flowers: [0x7ae8ff, 0xc49aff, 0x9affc8],
+    props: [['stalagmite', 44], ['crystal', 30], ['mossRock', 18], ['toadstool', 24], ['lantern', 8]],
+    features: [['crystalCluster', 4], ['minecart', 2], ['stalagmiteCluster', 4]],
+    backdrop: { style: 'none', color: 0x2a3036, height: [0, 0] },
+    landmarks: [],
+    ambient: ['spores', [0x7ae8ff, 0xb48aff, 0x9affc8]],
+    wind: [0, 0],
+  },
 };
 
 export const BIOME_IDS = Object.keys(BIOMES);
