@@ -89,6 +89,8 @@ export class NetPlay {
     this.watching = null;
     this.watchIdle = 0;
     this.emotesOpen = 0; // seconds the emote row stays open after the 💬 tap
+    this.away = new Set();  // people whose connection is gone for now (the room does not wait on them)
+    this.conn = null;       // my own: 'reconnecting' while I am getting back in
     this.mischiefOn = true; // host, in the lobby: mischief cards this round?
     this.trophies = new Map(); // id -> rounds won in this room tonight (kept between rounds)
     this.myPose = null;  // by the fire: my pose, said again now and then
@@ -150,6 +152,7 @@ export class NetPlay {
       open: () => this.renderLobby(),
       roster: (players) => this.onRoster(players),
       message: (from, msg) => this.onMessage(from, msg),
+      status: (st) => this.onConnection(st),
       closed: (reason) => {
         const wasPlaying = this.inRound;
         this.reset();
@@ -209,6 +212,9 @@ export class NetPlay {
     this.others.clear();
     this.pill.classList.add('hidden');
     this.watching = null;
+    this.away = new Set();
+    this.conn = null;
+    this.lastDone = null;
     this.crown = this.nextCrown = this.crownNews = null;
     this.crowns.clear();
     this.judged.clear();
@@ -286,6 +292,8 @@ export class NetPlay {
 
   onRoster(players) {
     this.players = players;
+    // (the server marks who is away; a newcomer learns it here)
+    this.away = new Set(players.filter((p) => p.away && p.id !== this.room?.me.id).map((p) => p.id));
     this.checkBuilds();
     const ids = new Set(players.map((p) => p.id));
     for (const id of [...this.status.keys()]) if (!ids.has(id)) { this.status.delete(id); this.scores.delete(id); }
@@ -316,8 +324,41 @@ export class NetPlay {
     }
   }
 
+  /**
+   * My own connection: 'reconnecting' (say so), 'back' (in again: the server
+   * has sent what I missed; tell the room where I am, in case what I sent was
+   * lost), 'gap' (too much was missed: ask everyone to say where they are).
+   */
+  onConnection(st) {
+    this.conn = st === 'reconnecting' ? 'reconnecting' : null;
+    if (st === 'back' || st === 'gap') {
+      this.resendState();
+      if (st === 'gap') this.room.send({ t: 'syncreq' });
+      this.g.hud.callout('BACK IN THE ROOM', 'small');
+    }
+    this.waitTick = 0;
+    this.paint();
+  }
+
+  /** Where I am in the hole, said again (every message here is safe to repeat). */
+  resendState() {
+    if (!this.active) return;
+    const g = this.g;
+    if (this.lastDone && this.lastDone.hole === this.holeIdx) { this.room.send(this.lastDone); return; }
+    if (g.state === 'aim' || g.state === 'swing') {
+      this.room.send({ t: 'at', x: g.ball.x, z: g.ball.z, hole: this.holeIdx });
+      const st = this.status.get(this.myId);
+      if (st === 'ready') this.room.send({ t: 'status', s: 'ready', aim: g.aimAngle, kind: g.clubKind() });
+    }
+  }
+
   onMessage(from, msg) {
     const g = this.g;
+    // The room has moved on to a later hole while I sat on this one's card
+    // (I missed the word to go on): go on now
+    if (this.inRound && Number.isInteger(msg.hole) && msg.hole > this.holeIdx && msg.t !== 'next' && g.state === 'result' && g.nextHole) {
+      g.nextHole();
+    }
     switch (msg.t) {
       case 'start':
         // (a seed from another phone is only ever letters, digits and dashes)
@@ -345,7 +386,7 @@ export class NetPlay {
           if (at === this.myId) { g.hud.callout(`${this.nameOf(from)} ${EMOTES[i]} YOU`, 'small'); g.camper.feel(EMOTES[i] === '😂' ? 'oops' : 'joy', 1.4); }
           else this.others.react(at, EMOTES[i] === '😂' ? 'oops' : 'joy');
           this.addFeed(`${this.nameOf(from)} ${EMOTES[i]} ${at === this.myId ? 'you' : this.nameOf(at)}`, 'react');
-        } else g.hud.callout(`${this.nameOf(from)} ${EMOTES[i]}`, 'small');
+        } else { g.hud.callout(`${this.nameOf(from)} ${EMOTES[i]}`, 'small'); this.addFeed(`${this.nameOf(from)} ${EMOTES[i]}`, 'react'); }
         break;
       }
       case 'say': {
@@ -353,6 +394,9 @@ export class NetPlay {
         if (!text) break;
         this.others.say(from, text);
         g.hud.callout(`${this.nameOf(from)}: ${text}`, 'small');
+        // (and in the feed, where it stays a few seconds: a callout is easily missed)
+        this.addFeed(`💬 ${this.nameOf(from)}: ${text}`, 'react');
+        g.audio.pop();
         break;
       }
       case 'hap':
@@ -402,9 +446,22 @@ export class NetPlay {
       case 'holed':
         this.others.holed(from);
         break;
+      case 'away':
+        // Their connection is gone for now: the room does not wait on them
+        if (typeof msg.id === 'string') { this.away.add(msg.id); if (msg.id !== this.myId) g.hud.callout(`${this.nameOf(msg.id).toUpperCase()} IS RECONNECTING…`, 'small'); }
+        this.judge();
+        break;
+      case 'back':
+        if (typeof msg.id === 'string') this.away.delete(msg.id);
+        break;
+      case 'syncreq':
+        this.resendState();
+        break;
       case 'done':
         // (a finished hole is only news on that hole: a late or stale one is dropped)
         if (Number.isInteger(msg.hole) && msg.hole !== this.holeIdx) break;
+        // (and said twice, after a reconnect, it is the same news)
+        if (this.status.get(from) === 'done' && this.scores.get(from)?.strokes === num(msg.strokes, 0, 20)) break;
         this.status.set(from, 'done');
         this.others.setStatus(from, 'done');
         this.scores.set(from, { total: num(msg.total, -99, 199), strokes: num(msg.strokes, 0, 20), putts: num(msg.putts, 0, 20), drive: num(msg.drive, 0, 400), pin: msg.pin == null ? null : num(msg.pin, 0, 400), near: msg.near == null ? null : num(msg.near, 0, 400) });
@@ -545,10 +602,10 @@ export class NetPlay {
     const g = this.g;
     const hole = g.round?.index;
     if (!this.inRound || hole == null || this.judged.has(hole) || this.players.length < 2) return;
-    if (!this.players.every((p) => this.status.get(p.id) === 'done' && this.scores.has(p.id))) return;
+    if (!this.players.every((p) => (this.status.get(p.id) === 'done' && this.scores.has(p.id)) || this.away.has(p.id))) return;
     this.judged.add(hole);
     const contest = this.contestNow || contestFor(g.round.seed, hole, g.world.spec.par, g.world.spec.archetype);
-    const best = judgeContest(contest, this.players.map((p) => ({ id: p.id, stats: this.scores.get(p.id) })));
+    const best = judgeContest(contest, this.players.filter((p) => this.scores.has(p.id)).map((p) => ({ id: p.id, stats: this.scores.get(p.id) })));
     this.leadNews();
     if (!best) { this.crownNews = `👑 ${contest.label} · A TIE, NO CROWN`; return; }
     this.nextCrown = best.id;
@@ -973,13 +1030,13 @@ export class NetPlay {
   /** Host: is it time to say GO, or to move everyone on? */
   /** Every person has finished the hole: only bots are left, and they hurry (bots.js). */
   get hurry() {
-    const people = this.players.filter((p) => !p.bot);
+    const people = this.players.filter((p) => !p.bot && !this.away.has(p.id));
     return this.active && people.length > 0 && people.every((p) => this.status.get(p.id) === 'done');
   }
 
   judge() {
     if (!this.active || !this.room.isHost) return;
-    const playing = this.players.filter((p) => this.status.get(p.id) !== 'done');
+    const playing = this.players.filter((p) => this.status.get(p.id) !== 'done' && !this.away.has(p.id));
     const ready = playing.filter((p) => this.status.get(p.id) === 'ready');
     if (!ready.length) { this.waitT = null; }
     else if (this.hurry) this.sayGo(ready.map((p) => p.id)); // (no volleys among bots: off they go)
@@ -994,7 +1051,7 @@ export class NetPlay {
    * longer for someone still lining up their shot.
    */
   goLimit() {
-    const waiting = this.players.filter((p) => !['ready', 'done'].includes(this.status.get(p.id)));
+    const waiting = this.players.filter((p) => !['ready', 'done'].includes(this.status.get(p.id)) && !this.away.has(p.id));
     return waiting.length && waiting.every((p) => this.status.get(p.id) === 'busy') ? MOVING_LIMIT : WAIT_LIMIT;
   }
 
@@ -1005,17 +1062,18 @@ export class NetPlay {
   waitLine() {
     const g = this.g;
     if (!this.active || this.players.length < 2) return '';
+    if (this.conn === 'reconnecting') return '📡 Reconnecting to the room…';
     const name = (p) => (p.id === this.myId ? 'you' : this.nameOf(p.id));
     const list = (ps) => (ps.length > 2 ? `${ps.slice(0, 2).map(name).join(', ')} +${ps.length - 2}` : ps.map(name).join(' & '));
     if (g.state === 'aim' && this.status.get(this.myId) === 'ready' && !this.cleared) {
-      const waiting = this.players.filter((p) => !['ready', 'done'].includes(this.status.get(p.id)));
+      const waiting = this.players.filter((p) => !['ready', 'done'].includes(this.status.get(p.id)) && !this.away.has(p.id));
       if (!waiting.length) return 'GO…';
       const rolling = waiting.every((p) => this.status.get(p.id) === 'busy');
       const left = this.waitT === null ? null : Math.ceil(this.goLimit() - this.waitT);
       return `Waiting for ${list(waiting)}${rolling ? ' (ball still moving)' : ''}${left !== null && left <= 10 && this.room.isHost ? ` · GO in ${Math.max(0, left)}` : ''}`;
     }
     if (g.state === 'result') {
-      const out = this.players.filter((p) => this.status.get(p.id) !== 'done');
+      const out = this.players.filter((p) => this.status.get(p.id) !== 'done' && !this.away.has(p.id));
       if (out.length) this.nextClock = null;
       if (out.length) return this.hurry ? `⏩ Bots finishing up (${out.length} left)` : `${out.length === 1 ? `${name(out[0])} is` : `${out.length} are`} still playing`;
       this.nextClock ??= performance.now();
@@ -1085,7 +1143,8 @@ export class NetPlay {
     this.status.set(this.myId, 'done');
     const s = { total, strokes, putts: stat.putts || 0, drive: stat.drive || 0, pin: stat.pin ?? null, near: stat.near ?? null };
     this.scores.set(this.myId, s);
-    this.room.send({ t: 'done', hole: this.holeIdx, ...s });
+    this.lastDone = { t: 'done', hole: this.holeIdx, ...s };
+    this.room.send(this.lastDone);
     this.streak(this.myId, strokes);
     this.paint();
     this.judge();
@@ -1094,7 +1153,7 @@ export class NetPlay {
 
   /** NEXT on the result card. */
   pressNext() {
-    const everyone = this.players.every((p) => this.status.get(p.id) === 'done');
+    const everyone = this.players.every((p) => this.status.get(p.id) === 'done' || this.away.has(p.id));
     if (!everyone) { this.g.hud.callout('WAITING FOR FRIENDS', 'small'); return; }
     if (!this.room.isHost) { this.g.hud.callout('WAITING FOR THE HOST', 'small'); return; }
     this.sayNext();
@@ -1184,9 +1243,9 @@ export class NetPlay {
     const rows = short ? all.filter((r, i) => i < 3 || r.me) : all;
     for (const r of rows) {
       const row = document.createElement('div');
-      row.className = `who ${this.status.get(r.id) || 'aim'}`;
+      row.className = `who ${this.away.has(r.id) ? 'away' : this.status.get(r.id) || 'aim'}`;
       row.innerHTML = '<i></i><b></b><span></span>';
-      row.querySelector('b').textContent = `${r.me ? 'YOU' : r.name}${this.crown === r.id ? ' 👑' : ''}${this.onFire(r.id) ? ' 🔥' : ''}`;
+      row.querySelector('b').textContent = `${r.me ? 'YOU' : r.name}${this.crown === r.id ? ' 👑' : ''}${this.onFire(r.id) ? ' 🔥' : ''}${this.away.has(r.id) ? ' 📡' : ''}`;
       row.querySelector('span').textContent = this.scores.has(r.id) ? `${vsPar(r.total)}${r.move > 0 ? ' ▲' : r.move < 0 ? ' ▼' : ''}` : '';
       if (r.move) row.classList.add(r.move > 0 ? 'up' : 'down');
       this.pill.appendChild(row);
@@ -1230,6 +1289,7 @@ export class NetPlay {
     if (!this.active || !SAYINGS[i]) return;
     this.room.send({ t: 'say', i });
     this.g.hud.callout(`YOU: ${SAYINGS[i]}`, 'small');
+    this.addFeed(`💬 You: ${SAYINGS[i]}`, 'react');
     this.g.audio.pop();
   }
 

@@ -89,8 +89,9 @@ export class Skip {
     this.bestEl = this.ui.querySelector('.skip-best');
     // A stone, and ripples
     const scene = game.scene;
-    this.stoneMesh = new THREE.Mesh(new THREE.DodecahedronGeometry(0.11, 0), new THREE.MeshLambertMaterial({ color: 0xa9adb5, flatShading: true }));
-    this.stoneMesh.scale.set(1.7, 0.6, 1.45); // big enough to follow
+    // (pale, with a little light of its own: it must read over dark water at night)
+    this.stoneMesh = new THREE.Mesh(new THREE.DodecahedronGeometry(0.11, 0), new THREE.MeshLambertMaterial({ color: 0xc4c8d0, emissive: 0x4a4e58, flatShading: true }));
+    this.stoneMesh.scale.set(2.2, 0.8, 1.9); // big enough to follow
     this.stoneMesh.visible = false;
     scene.add(this.stoneMesh);
     this.ripples = [];
@@ -262,9 +263,10 @@ export class Skip {
     rig.mode = 'skip';
     rig.stiffness = 4;
     const lookD = st && !st.done ? Math.min(14, 4 + Math.hypot(st.x - sh.x, st.z - sh.z) * 0.8) : 7;
-    // (the camper stands half a step to one side of the spot; the camera the other)
-    const cx = sh.x - sh.dx * 3.9 - sh.dz * 0.35, cz = sh.z - sh.dz * 3.9 + sh.dx * 0.35;
-    rig.wantPos.set(cx, Math.max(sh.pond.level, world.heightAt(cx, cz)) + 2.1, cz);
+    // (the camper stands a step to one side of the throwing line, the camera
+    // well to the other and up a little: the stone flies clear of the camper)
+    const cx = sh.x - sh.dx * 4.4 - sh.dz * 1.3, cz = sh.z - sh.dz * 4.4 + sh.dx * 1.3;
+    rig.wantPos.set(cx, Math.max(sh.pond.level, world.heightAt(cx, cz)) + 3.0, cz);
     rig.wantLook.set(sh.x + sh.dx * lookD, sh.pond.level + 0.4, sh.z + sh.dz * lookD);
     if (!st) return;
     if (st.done) {

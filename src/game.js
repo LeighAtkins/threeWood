@@ -801,7 +801,7 @@ export class Game {
     } else if (s === 'skip') {
       // On the bank, facing the water; the arm goes up for a throw
       const sh = this.skip.shore;
-      const x = sh.x - sh.dx * 0.4 + sh.dz * 0.3, z = sh.z - sh.dz * 0.4 - sh.dx * 0.3;
+      const x = sh.x - sh.dx * 0.4 + sh.dz * 0.6, z = sh.z - sh.dz * 0.4 - sh.dx * 0.6;
       const dx = x - g.position.x, dz = z - g.position.z, d = Math.hypot(dx, dz);
       if (d > 0.2) {
         const step = Math.min(d, Math.max(6, d * 1.5) * dt);

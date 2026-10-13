@@ -1101,3 +1101,4 @@ button { font: inherit; color: inherit; border: 0; background: none; padding: 0;
 @media (orientation: landscape) and (max-height: 500px) {
   .card.result.mini { max-height: calc(100vh - 24px); width: 320px; }
 }
+.net-pill .who.away { opacity: 0.5; }

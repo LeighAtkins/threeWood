@@ -29,7 +29,9 @@ import { eventFor, withEvent } from '../src/core/events.js';
 const MAX_PLAYERS = 8;
 const BOT_TICK = 200;        // ms between bot steps while a round with bots is on
 const LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
-const GONE_AFTER = 40_000;   // silence this long and the seat is given up
+const GONE_AFTER = 180_000;  // away this long and the seat is given up (a phone in a pocket comes back)
+const QUIET_AFTER = 15_000;  // a socket silent this long is dead (its phone pings every 5 s): close it
+const LOG_KEEP = 600;        // game messages kept for a phone that reconnects to catch up on
 const SWEEP_EVERY = 15_000;
 const KEEP_EMPTY = 60_000;   // a room with nobody in it is forgotten after this
 
@@ -183,7 +185,33 @@ export class RoomObject {
   socketOf(id) { return this.sockets().find((ws) => ws.deserializeAttachment()?.id === id) || null; }
 
   send(ws, msg) { try { ws.send(JSON.stringify(msg)); } catch { /* gone */ } }
-  broadcast(msg, except = null) { for (const ws of this.sockets()) if (ws !== except && ws.deserializeAttachment()?.id) this.send(ws, msg); }
+  broadcast(msg, except = null) {
+    // Game traffic (it has a sender) is numbered and kept, so a phone whose
+    // connection dropped can be sent what it missed when it is back
+    if (msg.from) {
+      msg = { ...msg, seq: (this.msgSeq = (this.msgSeq || 0) + 1) };
+      (this.log ||= []).push(msg);
+      if (this.log.length > LOG_KEEP) this.log.splice(0, this.log.length - LOG_KEEP);
+    }
+    for (const ws of this.sockets()) if (ws !== except && ws.deserializeAttachment()?.id) this.send(ws, msg);
+  }
+
+  /** Someone's connection is gone (for now): the room stops waiting on them, and a lost host hands over. */
+  async away(id) {
+    const p = this.players.get(id);
+    if (!p || p.bot || p.away) return;
+    p.away = Date.now();
+    this.broadcast({ t: 'away', id });
+    if (id === this.hostId) {
+      const next = [...this.players.values()].find((q) => !q.bot && !q.away && q.id !== id);
+      if (next) {
+        this.hostId = next.id;
+        for (const q of this.players.values()) q.host = q.id === this.hostId;
+        this.broadcast({ t: 'host', id: next.id });
+      }
+    }
+    await this.shareRoster();
+  }
 
   async save() { await this.state.storage.put('room', { players: [...this.players.entries()], hostId: this.hostId, seq: this.seq, created: this.created, round: this.round }); }
 
@@ -199,7 +227,7 @@ export class RoomObject {
     const att = ws.deserializeAttachment() || {};
     att.heard = Date.now();
     ws.serializeAttachment(att);
-    if (msg.t === 'ping') return;
+    if (msg.t === 'ping') { this.send(ws, { t: 'pong' }); return; } // (so a phone can tell a dead socket)
 
     if (msg.t === 'hello') {
       if (att.id) return;
@@ -209,7 +237,9 @@ export class RoomObject {
         const old = this.socketOf(id);
         if (old && old !== ws) { try { old.close(1000, 'replaced'); } catch { /* fine */ } }
         const p = this.players.get(id);
-        p.look = msg.look ?? p.look; p.build = String(msg.build || p.build || '');
+        // (their look may have changed; a name the room numbered to tell two apart stays)
+        p.look = msg.look ? { ...msg.look, name: p.look?.name ?? msg.look.name } : p.look;
+        p.build = String(msg.build || p.build || '');
       } else {
         // A full room gives a bot's seat to a person
         if (this.players.size >= MAX_PLAYERS) {
@@ -233,7 +263,26 @@ export class RoomObject {
         const free = NAMES.find((n) => !taken.has(n.toLowerCase()));
         if (free) p.look = { ...p.look, name: free };
       }
-      this.send(ws, { t: 'welcome', id, hostId: this.hostId });
+      // Two people with the same name: the one joining second is numbered
+      const me = this.players.get(id);
+      if (me && !me.bot && !msg.id) {
+        const name = String(me.look?.name || '');
+        const clash = (n) => [...this.players.values()].some((q) => q.id !== id && String(q.look?.name || '').toLowerCase() === n.toLowerCase());
+        if (name && clash(name)) {
+          for (let k = 2; k < 9; k++) { const n = `${name.slice(0, 8)} ${k}`; if (!clash(n)) { me.look = { ...me.look, name: n }; break; } }
+        }
+      }
+      const back = !!this.players.get(id)?.away;
+      if (this.players.get(id)) delete this.players.get(id).away;
+      this.send(ws, { t: 'welcome', id, hostId: this.hostId, seq: this.msgSeq || 0 });
+      // Back after a drop: everything it missed, in order (or word that too much was missed)
+      const since = Number.isFinite(+msg.since) ? +msg.since : null;
+      if (since !== null && since < (this.msgSeq || 0)) {
+        const log = this.log || [];
+        if (!log.length || log[0].seq > since + 1) this.send(ws, { t: 'gap' });
+        for (const m of log) if (m.seq > since && m.from !== id) this.send(ws, m);
+      }
+      if (back) this.broadcast({ t: 'back', id });
       await this.shareRoster();
       return;
     }
@@ -284,7 +333,9 @@ export class RoomObject {
   async drop(ws, graceful = false) {
     const id = ws.deserializeAttachment()?.id;
     if (!id || !this.players.has(id)) return;
-    if (graceful) return; // the sweep will decide
+    // (unless another socket of theirs is already back in)
+    if (this.sockets().some((o) => o !== ws && o.deserializeAttachment()?.id === id)) return;
+    if (graceful) { await this.away(id); return; } // the seat is kept; the sweep decides later
     await this.remove(id);
   }
 
@@ -314,12 +365,13 @@ export class RoomObject {
     for (const ws of this.sockets()) {
       const att = ws.deserializeAttachment();
       if (!att?.id) continue;
-      if (now - att.heard > GONE_AFTER) { try { ws.close(1000, 'quiet'); } catch { /* already */ } continue; }
+      if (now - att.heard > QUIET_AFTER) { try { ws.close(1000, 'quiet'); } catch { /* already */ } await this.away(att.id); continue; }
       live.add(att.id);
     }
     for (const p of [...this.players.values()]) {
       if (p.bot) continue;
       if (!live.has(p.id)) {
+        await this.away(p.id);
         p.lostAt ??= now;
         if (now - p.lostAt > GONE_AFTER) await this.remove(p.id);
       } else delete p.lostAt;

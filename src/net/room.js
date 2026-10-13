@@ -16,7 +16,8 @@ const SERVER = (import.meta.env?.VITE_ROOM_SERVER || 'wss://rooms.threewood.app'
 const LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ'; // no I or O: they read as digits
 export const MAX_PLAYERS = 8;
 const PING_EVERY = 5000;     // keep the socket (and the server's quiet-sweep) fed
-const RECONNECT_FOR = 25000; // a phone put away comes back and picks up its seat
+const RECONNECT_FOR = 170000; // a phone put away comes back and picks up its seat (the server keeps it 3 min)
+const DEAD_AFTER = 12000;    // nothing heard for this long (the server answers every ping): the socket is dead
 
 export const cleanCode = (text) => String(text || '').toUpperCase().replace(/[^A-Z]/g, '').replace(/[IO]/g, '').slice(0, 4);
 
@@ -34,7 +35,25 @@ export class Room {
     this.closed = false;
     this.ws = null;
     this.outbox = [];
+    this.lastSeq = 0;     // the last numbered message heard (a reconnect asks for what came after)
+    this.heardAt = Date.now();
     this.pulse = setInterval(() => this.beat(), PING_EVERY);
+    // A socket can die without closing (a phone switching network, or put
+    // away): the server answers every ping, so silence means it is gone
+    this.watch = setInterval(() => {
+      if (this.closed || !this.code || this.ws?.readyState !== 1) return;
+      if (Date.now() - this.heardAt > DEAD_AFTER) this.reconnect();
+    }, 2000);
+  }
+
+  /** Drop this socket and get back in (the seat is kept; what was missed is sent). */
+  reconnect() {
+    const old = this.ws;
+    this.ws = null;
+    try { old?.close(4100, 'stale'); } catch { /* already */ }
+    this.lostAt ??= Date.now();
+    this.on.status?.('reconnecting');
+    this.connect();
   }
 
   get isHost() { return !!this.me.id && this.me.id === this.hostId; }
@@ -44,7 +63,11 @@ export class Room {
   /** Back from the pocket: make sure the socket is alive, reconnect if not. */
   wake() {
     if (this.closed || !this.code) return;
-    if (this.ws?.readyState === 1) this.beat(); else this.connect();
+    if (this.ws?.readyState === 1) {
+      // (it may have died while the phone was away: a ping must be answered soon)
+      this.beat();
+      this.heardAt = Math.min(this.heardAt, Date.now() - DEAD_AFTER + 4000);
+    } else this.connect();
   }
 
   /** Make a room and wait for friends. */
@@ -74,24 +97,34 @@ export class Room {
     this.ws = ws;
     this.lostAt = this.lostAt ?? null;
     ws.onopen = () => {
-      this.lostAt = null;
       // Say who we are (again, after a reconnect: the server gives the seat back by id)
-      ws.send(JSON.stringify({ t: 'hello', look: this.me.look, build: this.me.build, id: this.me.id || undefined }));
+      this.heardAt = Date.now();
+      ws.send(JSON.stringify({ t: 'hello', look: this.me.look, build: this.me.build, id: this.me.id || undefined, since: this.me.id ? this.lastSeq : undefined }));
     };
     ws.onmessage = (ev) => {
       let msg;
       try { msg = JSON.parse(ev.data); } catch { return; }
       if (!msg || typeof msg !== 'object') return;
+      if (this.ws !== ws) return; // (a socket we have already given up on)
+      this.heardAt = Date.now();
+      if (Number.isFinite(msg.seq)) {
+        if (msg.seq <= this.lastSeq && msg.from) return; // (already had it)
+        if (msg.from) this.lastSeq = msg.seq;
+      }
       switch (msg.t) {
         case 'welcome': {
           const first = !this.me.id;
+          if (first && Number.isFinite(msg.seq)) this.lastSeq = msg.seq; // (a newcomer starts from now)
           this.me.id = msg.id;
           this.hostId = msg.hostId ?? this.hostId;
           this.me.host = this.me.id === this.hostId;
           if (first) this.on.open?.(this.code);
+          else { this.lostAt = null; this.on.status?.('back'); }
           for (const m of this.outbox.splice(0)) this.send(m);
           return;
         }
+        case 'pong': return;
+        case 'gap': this.on.status?.('gap'); return;
         case 'roster':
           this.players = Array.isArray(msg.players) ? msg.players : [];
           if (msg.hostId) this.hostId = msg.hostId;
@@ -118,7 +151,8 @@ export class Room {
       // Try to get back in for a while before giving up
       this.lostAt ??= Date.now();
       if (Date.now() - this.lostAt > RECONNECT_FOR) { this.fail('Lost the room.'); return; }
-      setTimeout(() => this.connect(), 1500);
+      this.on.status?.('reconnecting');
+      setTimeout(() => { if (!this.closed && (this.ws === ws || !this.ws)) this.connect(); }, 1500);
     };
     ws.onerror = () => { /* onclose follows */ };
   }
@@ -148,6 +182,7 @@ export class Room {
   leave() {
     this.closed = true;
     clearInterval(this.pulse);
+    clearInterval(this.watch);
     try { this.ws?.close(1000, 'bye'); } catch { /* already gone */ }
   }
 }
