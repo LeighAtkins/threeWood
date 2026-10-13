@@ -74,6 +74,7 @@ export class RoomObject {
         }
       },
       seatOf: (id) => Math.max(0, [...room.players.keys()].indexOf(id)),
+      humans: () => [...room.players.values()].filter((p) => !p.bot).map((p) => p.id),
     };
     this.bots = new Bots(net);
     Object.defineProperty(this.bots, 'game', { get: () => net.g });

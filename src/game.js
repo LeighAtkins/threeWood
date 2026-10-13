@@ -670,6 +670,8 @@ export class Game {
   }
 
   setState(state) {
+    // (the 'tap to speed it up' hint belongs to a flight only)
+    if (this.state === 'flight' && state !== 'flight' && this.shot?.ffHinted) this.hud.hint('');
     if (state !== 'fishing' && this.fishing?.active) this.fishing.stop();
     const atFire = state === 'summary' || state === 'nabe';
     if (state !== 'cook' && !atFire && this.grill?.active) { this.grill.stop(); this.cookHud.hide(); }
@@ -1462,7 +1464,11 @@ export class Game {
     const cupDist = Math.hypot(world.cup.x - ball.x, world.cup.z - ball.z);
     if (shot.putt && (plan.holed || plan.lipout) && cupDist < 1.6 && cupDist > 0.2) scale = 0.4;
     else if (this.fastForward && ball.mode === 'roll') scale = 3;
+    // A long roll speeds itself up: nobody should stand watching a ball crawl
+    else if (ball.mode === 'roll' && ball.time > 6) scale = 2.5;
     this.timeScale += (scale - this.timeScale) * Math.min(1, dt * 10);
+    // ...and a long flight says it can be hurried
+    if (this.stateTime > 4 && !shot.ffHinted && !this.fastForward) { shot.ffHinted = true; this.hud.hint('Tap to speed it up ⏩'); }
 
     // (a pure strike holds the ball on the face for a moment first)
     if (this.hitStop > 0) { this.hitStop -= dt; return; }

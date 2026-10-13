@@ -272,7 +272,9 @@ export class Others {
       else if (focus && !o.camp && o.id !== focusId && this.blocks(camera.position, focus, g.position)) { g.visible = false; o.tag.style.display = 'none'; }
       if (o.camp) { o.ball.visible = false; o.camper.update(dt, o.camp); this.tagAt(o, 1.75, camera); continue; }
       if (o.flying) {
-        o.acc += dt; o.flyT += dt;
+        // (double speed while the bots hurry: the server shortens their flights to match)
+        const fdt = dt * (this.replaySpeed || 1);
+        o.acc += fdt; o.flyT += fdt;
         while (o.acc >= SIM_DT && o.flying) {
           o.acc -= SIM_DT;
           events.length = 0;

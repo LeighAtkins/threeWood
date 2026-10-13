@@ -85,6 +85,8 @@ export function placeBall(ball, world, x, z) {
 
 function beginShot(ball) {
   ball.time = 0;
+  ball.onRail = 0;
+  ball.stillT = 0;
   ball.bounces = 0;
   ball.landed = false;
   ball.cupLock = false;
@@ -310,16 +312,21 @@ function laneWalls(ball, lane, events) {
     if (vn > 0.4) events.push({ type: 'wall', x: ball.x, y: ball.y, z: ball.z, speed: vn });
   };
   // The side rails
+  let touching = false;
   if (best > R) {
     ball.x -= nx * (best - R); ball.z -= nz * (best - R);
     bounce(nx, nz);
+    touching = true;
   }
   // The end rails, square across
   if (end && beyond > E) {
     const ox = ux * end, oz = uz * end;
     ball.x -= ox * (beyond - E); ball.z -= oz * (beyond - E);
     bounce(ox, oz);
+    touching = true;
   }
+  // How long a slow ball has been leaning on a rail (stepRoll lets it rest)
+  ball.onRail = touching && Math.hypot(ball.vx, ball.vz) < 0.3 ? (ball.onRail || 0) + SIM_DT : 0;
 }
 
 function hitTrees(ball, world, events) {
@@ -415,7 +422,13 @@ function stepRoll(ball, world, dt, events) {
 
   const mu = S.mu0 + S.mu1 * speed;
 
-  if (speed < 0.07 && slopeAcc < S.mu0) {
+  // A slow ball going nowhere (rocking in a crease of the turf, or leaning on
+  // a crazy-golf rail) has stopped, whatever the slope under it says
+  if (speed < 0.15) {
+    if (!(ball.stillT > 0) || Math.hypot(ball.x - ball.stillX, ball.z - ball.stillZ) > 0.06) { ball.stillT = 1e-6; ball.stillX = ball.x; ball.stillZ = ball.z; }
+    else ball.stillT += dt;
+  } else ball.stillT = 0;
+  if (speed < 0.07 && (slopeAcc < S.mu0 || ball.onRail > 0.3) || ball.stillT > 1.5) {
     ball.vx = ball.vz = ball.vy = 0;
     ball.mode = 'rest';
     events.push({ type: 'rest', x: ball.x, y: ball.y, z: ball.z, surface });

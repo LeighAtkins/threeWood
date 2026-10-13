@@ -129,7 +129,9 @@ export function buildWorld(spec) {
     const info = pathInfo(channel.pts, x, z);
     const wall = 1.0 * smoothstep(rails.side + 0.15, rails.side + 1.2, info.dist);
     const u = (info.along - shape.at * totalLen) / 3.2;
-    return wall + shape.hump * Math.exp(-u * u) * (1 - smoothstep(rails.side - 0.4, rails.side, info.dist));
+    // (full height right to the rails, fading only under the bank outside them: a
+    // hump that sloped off sideways at the rail pinned balls against it, rolling for ever)
+    return wall + shape.hump * Math.exp(-u * u) * (1 - smoothstep(rails.side + 0.2, rails.side + 1.2, info.dist));
   };
   const greenSurface = (x, z) =>
     greenY + tiltX * (x - green.x) + tiltZ * (z - green.z) +

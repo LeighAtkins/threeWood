@@ -462,7 +462,7 @@ export class Hud {
           ${mergeBonuses(bonuses).map((b, i) => `<div class="bonus" style="animation-delay:${0.25 + i * 0.12}s"><span>${b.label}</span><b>+${b.points}</b></div>`).join('')}
           <div class="total-line"><span>HOLE POINTS</span><span class="gold">★ ${holePoints.toLocaleString()}</span></div>
         </div>
-        ${board ? '<div class="spect hidden"></div>' : ''}
+        ${board ? '<div class="spect hidden"></div><div class="wait-note hidden"></div>' : ''}
         ${cards ? `<div class="hand"><div class="hand-head"><span class="hand-title">KEEP A CARD FOR THE NEXT HOLE</span><button class="reroll" data-a="reroll" ${acorns < 1 ? 'disabled' : ''}>⟳ 🌰<b>${acorns}</b></button></div><div class="hand-row">${cardsHtml(cards)}</div></div>` : ''}
         ${board ? `<div class="board live">${boardHtml(board)}</div>` : ''}
         ${scorecardHtml(card, true)}
@@ -496,10 +496,17 @@ export class Hud {
     this.layer.appendChild(node);
   }
 
+  /** A line on the result card: who is still playing, or when the next hole starts. */
+  setResultNote(text) {
+    const el = this.layer.querySelector('.card.result .wait-note');
+    if (el && el.textContent !== text) { el.textContent = text; el.classList.toggle('hidden', !text); }
+  }
+
   /** The result card tucked down to a strip (true) while watching `name` play on. */
   miniResult(mini, name = null) {
     const card = this.layer.querySelector('.card.result');
     if (!card) return;
+    requestAnimationFrame(() => this.boardToMe(card.querySelector('.board.live')));
     card.parentElement.classList.toggle('watch', mini);
     card.classList.toggle('mini', mini);
     const sp = card.querySelector('.spect');
@@ -512,7 +519,14 @@ export class Hud {
   /** A friend finished the hole after the card came up: the board on it catches up. */
   updateBoard(rows) {
     const node = this.layer.querySelector('.board.live');
-    if (node && rows) node.innerHTML = boardHtml(rows);
+    if (node && rows) { node.innerHTML = boardHtml(rows); this.boardToMe(node); }
+  }
+
+  /** Keep my own row in view on a board that scrolls. */
+  boardToMe(node) {
+    const me = node?.querySelector('.me');
+    if (!me || node.scrollHeight <= node.clientHeight) return;
+    node.scrollTop = Math.max(0, me.offsetTop - node.offsetTop - node.clientHeight / 2 + me.offsetHeight / 2);
   }
 
   showSummary({ total, par, strokes, points, stats, card, best, seed, outfits = [], board = null, awards = null, onAgain, onShare, onCamp, onNabe = null, onRoom = null }) {

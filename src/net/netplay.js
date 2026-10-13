@@ -26,7 +26,8 @@ import { contestFor, judgeContest, perkFor } from '../core/contests.js';
 import { HAPPENINGS, quipText, awards } from '../core/happenings.js';
 import { CARDS, deal, combine, targetFor } from '../core/cards.js';
 
-const WAIT_LIMIT = 30;  // seconds the ready players wait for the rest
+const WAIT_LIMIT = 20;  // seconds the ready players wait for someone still lining up
+const MOVING_LIMIT = 5; // ...and for someone whose ball is still rolling (they join the next volley)
 const NEXT_DELAY = 8;   // seconds on the result card once everyone has finished
 
 const KINDS = ['wood', 'iron', 'putter'];
@@ -51,6 +52,11 @@ export class NetPlay {
     this.feed = document.createElement('div');
     this.feed.className = 'net-feed hidden';
     root.insertBefore(this.feed, layer);
+    // What the room is waiting for, in a line under the action button
+    this.waitEl = document.createElement('div');
+    this.waitEl.className = 'net-wait hidden';
+    root.insertBefore(this.waitEl, layer);
+    this.waitTick = 0;
     this.haps = new Map();     // id -> { kind: count } this round (for the awards)
     this.hand = null;          // cards dealt to me after this hole: [id, id, id]
     this.acorns = 0;           // 🌰 mine: earned by birdies, contests, mushrooms and misfortune; a reroll costs one
@@ -492,6 +498,7 @@ export class NetPlay {
     const { round, world } = this.g;
     // The hole being played (round.index moves on the moment I finish it)
     this.holeIdx = round.index;
+    this.nextClock = null;
     for (const p of this.players) this.status.set(p.id, 'aim');
     this.cleared = false;
     this.waitT = this.nextT = null;
@@ -964,14 +971,58 @@ export class NetPlay {
   }
 
   /** Host: is it time to say GO, or to move everyone on? */
+  /** Every person has finished the hole: only bots are left, and they hurry (bots.js). */
+  get hurry() {
+    const people = this.players.filter((p) => !p.bot);
+    return this.active && people.length > 0 && people.every((p) => this.status.get(p.id) === 'done');
+  }
+
   judge() {
     if (!this.active || !this.room.isHost) return;
     const playing = this.players.filter((p) => this.status.get(p.id) !== 'done');
     const ready = playing.filter((p) => this.status.get(p.id) === 'ready');
     if (!ready.length) { this.waitT = null; }
+    else if (this.hurry) this.sayGo(ready.map((p) => p.id)); // (no volleys among bots: off they go)
     else if (ready.length === playing.length) this.sayGo(ready.map((p) => p.id));
     else if (this.waitT === null) this.waitT = 0;
     if (this.players.length && !playing.length) { if (this.nextT === null) this.nextT = 0; } else this.nextT = null;
+  }
+
+  /**
+   * How long the ready wait for the rest: a few seconds if all that is left
+   * is balls still rolling (no one should stand watching a bot's ball crawl),
+   * longer for someone still lining up their shot.
+   */
+  goLimit() {
+    const waiting = this.players.filter((p) => !['ready', 'done'].includes(this.status.get(p.id)));
+    return waiting.length && waiting.every((p) => this.status.get(p.id) === 'busy') ? MOVING_LIMIT : WAIT_LIMIT;
+  }
+
+  /**
+   * One line saying what the room is waiting for, under the action button:
+   * who, why, and when it will go anyway. (Called a few times a second.)
+   */
+  waitLine() {
+    const g = this.g;
+    if (!this.active || this.players.length < 2) return '';
+    const name = (p) => (p.id === this.myId ? 'you' : this.nameOf(p.id));
+    const list = (ps) => (ps.length > 2 ? `${ps.slice(0, 2).map(name).join(', ')} +${ps.length - 2}` : ps.map(name).join(' & '));
+    if (g.state === 'aim' && this.status.get(this.myId) === 'ready' && !this.cleared) {
+      const waiting = this.players.filter((p) => !['ready', 'done'].includes(this.status.get(p.id)));
+      if (!waiting.length) return 'GO…';
+      const rolling = waiting.every((p) => this.status.get(p.id) === 'busy');
+      const left = this.waitT === null ? null : Math.ceil(this.goLimit() - this.waitT);
+      return `Waiting for ${list(waiting)}${rolling ? ' (ball still moving)' : ''}${left !== null && left <= 10 && this.room.isHost ? ` · GO in ${Math.max(0, left)}` : ''}`;
+    }
+    if (g.state === 'result') {
+      const out = this.players.filter((p) => this.status.get(p.id) !== 'done');
+      if (out.length) this.nextClock = null;
+      if (out.length) return this.hurry ? `⏩ Bots finishing up (${out.length} left)` : `${out.length === 1 ? `${name(out[0])} is` : `${out.length} are`} still playing`;
+      this.nextClock ??= performance.now();
+      const left = Math.ceil(NEXT_DELAY - (performance.now() - this.nextClock) / 1000);
+      return left > 0 ? `Next hole in ${left}` : 'Next hole…';
+    }
+    return '';
   }
 
   sayGo(ids) {
@@ -1184,6 +1235,7 @@ export class NetPlay {
     const lining = ['aim', 'swing', 'flight', 'settle', 'holed'].includes(g.state) && g.rig?.mode !== 'gallery' && !this.watching;
     const watched = g.state === 'result' && this.spectId ? this.others.map.get(this.spectId) : null;
     const focus = lining ? g.ball : watched ? (watched.flying ? watched.sim : watched.ball.position) : null;
+    this.others.replaySpeed = this.hurry ? 2 : 1;
     if (g.world) this.others.update(dt, g.world, g.env, g.camera, show, focus, watched?.id);
     if (this.active) {
       // Remember whose ball flew last, so a swipe just after it lands still finds it
@@ -1203,10 +1255,21 @@ export class NetPlay {
         if (this.poseT > 2) { this.poseT = 0; this.room.send({ t: 'pose', p: this.myPose }); }
       }
     }
+    // The waiting line (a few times a second): on the course under the button,
+    // on the result card in its own line
+    this.waitTick -= dt;
+    if (this.waitTick <= 0) {
+      this.waitTick = 0.25;
+      const line = this.waitLine();
+      const onCard = g.state === 'result';
+      const text = onCard ? '' : line;
+      if (text !== this.waitShown) { this.waitShown = text; this.waitEl.textContent = text; this.waitEl.classList.toggle('hidden', !text); }
+      g.hud.setResultNote?.(onCard ? line : '');
+    }
     if (!this.active || !this.room.isHost) return;
     if (this.waitT !== null) {
       this.waitT += dt;
-      if (this.waitT > WAIT_LIMIT) this.sayGo(this.players.filter((p) => this.status.get(p.id) === 'ready').map((p) => p.id));
+      if (this.waitT > this.goLimit()) this.sayGo(this.players.filter((p) => this.status.get(p.id) === 'ready').map((p) => p.id));
     }
     if (this.nextT !== null && g.state === 'result') {
       this.nextT += dt;

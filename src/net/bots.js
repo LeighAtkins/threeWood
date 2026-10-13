@@ -77,6 +77,7 @@ export class Bots {
   atHole(finished = new Set()) {
     const { world, round } = this.game;
     // Each bot tees up on its own seat's spot, like everyone else
+    this.peopleDone = new Set(); // (who among the people has finished this hole)
     this.list.forEach((b) => {
       if (finished.has(b.id)) { b.state = 'finished'; return; }
       b.strokes = 0; b.putts = 0; b.drive = 0; b.pin = null; b.near = null; b.holed = false;
@@ -89,10 +90,21 @@ export class Bots {
     });
   }
 
+  /**
+   * Everyone real has finished the hole: nobody is playing alongside the bots
+   * any more, only waiting on them, so they hurry (quick thinks, quick walks,
+   * their shots played at double speed; the phones replay them at double
+   * speed too, from the same rule).
+   */
+  get hurry() {
+    const people = this.net.humans?.() || [];
+    return people.length > 0 && people.every((id) => this.peopleDone?.has(id));
+  }
+
   /** They are at their ball: say so, then get ready after a think. */
   arrive(b, delay) {
     const { round } = this.game;
-    b.state = 'arriving'; b.t = delay;
+    b.state = 'arriving'; b.t = delay * (this.hurry ? 0.3 : 1);
     // On the walk over, now and then, a mushroom (the room hears about it)
     if (Math.random() < 0.09) {
       const r = Math.random();
@@ -104,7 +116,7 @@ export class Bots {
 
   /** GO for these ids: the named bots swing. */
   go(ids) {
-    for (const b of this.list) if (ids.includes(b.id) && b.state === 'ready') { b.state = 'swinging'; b.t = 0.9 + Math.random() * 0.6; }
+    for (const b of this.list) if (ids.includes(b.id) && b.state === 'ready') { b.state = 'swinging'; b.t = (0.9 + Math.random() * 0.6) * (this.hurry ? 0.4 : 1); }
   }
 
   /** Plan and play one shot. Returns the message describing it. */
@@ -316,6 +328,7 @@ export class Bots {
     // The board, as the bots know it: everyone's total from their 'done'
     this.totals ||= new Map();
     if (msg.t === 'done' && Number.isFinite(+msg.total)) this.totals.set(from, +msg.total);
+    if (msg.t === 'done' && !this.get(from)) (this.peopleDone ||= new Set()).add(from);
     // Where people's balls lie (for a bot's ball to run into): from their 'at', gone once they hit
     this.lies ||= new Map();
     if (msg.t === 'at' && Number.isFinite(+msg.x) && Number.isFinite(+msg.z) && !this.get(from)) this.lies.set(from, { x: +msg.x, z: +msg.z, hole: msg.hole });
@@ -413,7 +426,7 @@ export class Bots {
       const lvl = BOT_LEVELS[b.level] || BOT_LEVELS.par;
       if (b.state === 'arriving' && b.t <= 0) {
         // Line up for a while, then READY
-        b.state = 'thinking'; b.t = lvl.think[0] + Math.random() * (lvl.think[1] - lvl.think[0]);
+        b.state = 'thinking'; b.t = (lvl.think[0] + Math.random() * (lvl.think[1] - lvl.think[0])) * (this.hurry ? 0.3 : 1);
         b.read = null; b.reading = null;
         const target = world.spec.green.channel || lieFor(b.ball.surface).id === 'green' || lieFor(b.ball.surface).id === 'fringe' ? world.cup : aimTarget(world, b.ball.x, b.ball.z);
         b.aim = Math.atan2(target.z - b.ball.z, target.x - b.ball.x);
@@ -437,7 +450,7 @@ export class Bots {
       } else if (b.state === 'striking' && b.t <= 0) {
         const msg = this.shot(b);
         this.net.deliverBot(b.id, msg);
-        b.state = 'flying'; b.t = b.flightTime + 0.6;
+        b.state = 'flying'; b.t = this.hurry ? b.flightTime / 2 + 0.3 : b.flightTime + 0.6;
       } else if (b.state === 'flying' && b.t <= 0) {
         this.landed(b);
       } else if (b.state === 'done' && b.t <= 0) {
