@@ -13,7 +13,7 @@ import { Camper, GRIP } from './camper.js';
 import { ClubRig, CAMPER_CLUB_SIZE, CAMPER_SCALE } from './club.js';
 import { teeSlot } from '../course/courseWorld.js';
 import { cleanLook } from '../core/camp.js';
-import { createBall, placeBall, launchBall, puttBall, stepBall, SIM_DT } from '../core/ballSim.js';
+import { createBall, placeBall, launchBall, puttBall, stepBall, SIM_DT, BALL_R } from '../core/ballSim.js';
 
 const SCALE = CAMPER_SCALE;
 const TAG_TOP = 64;  // px: the hole and score panels along the top of the screen
@@ -27,7 +27,8 @@ export class Others {
     root.insertBefore(this.tags, before);
     this.map = new Map();
     this._v = new THREE.Vector3();
-    this.ballGeo = new THREE.SphereGeometry(0.05, 12, 8);
+    // (the real ball's size, drawn bigger with distance exactly as mine is)
+    this.ballGeo = new THREE.SphereGeometry(BALL_R, 12, 8);
     // Friends get a soft blob shadow instead of casting real ones: seven
     // campers in the shadow pass doubled the cost of a frame on a phone
     this.blobGeo = new THREE.CircleGeometry(1, 20).rotateX(-Math.PI / 2);
@@ -282,8 +283,12 @@ export class Others {
         o.ball.position.set(o.sim.x, o.sim.y, o.sim.z);
       }
       // Big enough to follow from where we stand
+      // (the same rule as my own ball: 1.4× close up, never past 4×, and
+      // resting on the turf rather than sunk into it)
       const far = camera.position.distanceTo(o.ball.position);
-      o.ball.scale.setScalar(Math.max(1.4, Math.min(10, far / 9)));
+      const bs = Math.max(1.4, Math.min(4, far / (window.innerHeight > window.innerWidth ? 8.5 : 11)));
+      o.ball.scale.setScalar(bs);
+      o.ball.position.y = Math.max(o.sim.y, world.heightAt(o.sim.x, o.sim.z) + BALL_R * bs);
 
       // At the ball with a club: lining up (ready), taking it back (swing), hitting (through)
       const atBall = (o.status === 'ready' || o.status === 'swing' || o.swing) && o.aim !== null && !o.camp;
