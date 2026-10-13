@@ -99,6 +99,7 @@ export class Camper {
     const fit = outfitById(this.look.outfit);
     const girl = body === 'girl';
     const skinMat = toon(SKINS[skin]);
+    skinMat.userData.glow = 0.35; // (after dark: faces and hands glow less than clothes, so they stay apart)
     const hairMat = toon(HAIR_COLORS[hairColor]);
     const jacket = toon(fit.jacket, { side: THREE.DoubleSide });
     const trim = toon(fit.trim);

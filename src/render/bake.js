@@ -14,7 +14,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
-const ATTRS = ['position', 'normal', 'uv', 'color'];
+const ATTRS = ['position', 'normal', 'uv', 'color', 'aGlow'];
 const NEEDED = ['position', 'normal', 'uv'];
 
 // ---- One material for many colours ----------------------------------------------
@@ -39,8 +39,15 @@ function sharedFor(m) {
     else mat = new THREE.MeshLambertMaterial({ ...opts, flatShading: m.flatShading });
     if (kind !== 'basic') {
       // Glow after dark in each piece's own colour: emissive x vertex colour
+      // Each piece glows by its own amount too (aGlow): skin less than clothes,
+      // or a cream hoodie and pale skin glow alike after dark and read as one
       mat.onBeforeCompile = (shader) => {
-        shader.fragmentShader = shader.fragmentShader.replace('vec3 totalEmissiveRadiance = emissive;', 'vec3 totalEmissiveRadiance = emissive * vColor.rgb;');
+        shader.vertexShader = shader.vertexShader
+          .replace('#include <common>', '#include <common>\nattribute float aGlow;\nvarying float vGlow;')
+          .replace('#include <begin_vertex>', '#include <begin_vertex>\nvGlow = aGlow;');
+        shader.fragmentShader = shader.fragmentShader
+          .replace('#include <common>', '#include <common>\nvarying float vGlow;')
+          .replace('vec3 totalEmissiveRadiance = emissive;', 'vec3 totalEmissiveRadiance = emissive * vColor.rgb * vGlow;');
       };
     }
     mat.userData.shared = true;
@@ -64,6 +71,7 @@ export function unifyMaterials(root) {
     const n = geo.attributes.position.count, c = new Float32Array(n * 3);
     for (let i = 0; i < n; i++) { c[i * 3] = m.color.r; c[i * 3 + 1] = m.color.g; c[i * 3 + 2] = m.color.b; }
     geo.setAttribute('color', new THREE.BufferAttribute(c, 3));
+    geo.setAttribute('aGlow', new THREE.BufferAttribute(new Float32Array(n).fill(m.userData.glow ?? 1), 1));
     o.geometry = geo;
     o.material = mat;
   });
