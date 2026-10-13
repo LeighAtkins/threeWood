@@ -123,3 +123,40 @@ test('room events: seeded, never on the first hole or crazy golf, and moon gravi
   };
   assert.ok(carry(9.81 * 0.55) > carry(0) * 1.3, 'a moon drive carries much further');
 });
+
+import { createBall as cb, placeBall as pb, puttBall as putt, simulate as run } from '../src/core/ballSim.js';
+import { pathInfo as pinfo } from '../src/course/shapes.js';
+
+test('crazy golf is a billiard table: no putt, however hard or wild, leaves the lane', () => {
+  let lanes = 0, bounced = 0;
+  for (const seed of ['LANE-A', 'LANE-B', 'LANE-C', 'LANE-D']) {
+    for (const n of rh(18)) {
+      const spec = dh(seed, n);
+      if (!spec.green.channel) continue;
+      const w = buildWorld(spec);
+      lanes += 1;
+      const L = w.lane, p = L.pts;
+      let rng = 1;
+      const r = () => ((rng = (rng * 16807) % 2147483647) / 2147483647);
+      for (let k = 0; k < 60; k++) {
+        const b = cb();
+        pb(b, w, w.tee.x + (r() - 0.5) * 2, w.tee.z + (r() - 0.5) * 2);
+        const a = r() * Math.PI * 2, speed = 2 + r() * 16;
+        putt(b, { speed, dirX: Math.cos(a), dirZ: Math.sin(a) });
+        const res = run(b, w, null, { maxTime: 25, onStep: (ball) => {
+          const d = pinfo(p, ball.x, ball.z);
+          // inside the side rails (on the nearest leg) and not past either end rail
+          const s0 = { x: p[1].x - p[0].x, z: p[1].z - p[0].z }, l0 = Math.hypot(s0.x, s0.z);
+          const back = -((ball.x - p[0].x) * s0.x + (ball.z - p[0].z) * s0.z) / l0;
+          const m = p.length - 1, s1 = { x: p[m].x - p[m - 1].x, z: p[m].z - p[m - 1].z }, l1 = Math.hypot(s1.x, s1.z);
+          const past = ((ball.x - p[m].x) * s1.x + (ball.z - p[m].z) * s1.z) / l1;
+          assert.ok(back < L.end + 0.01 && past < L.end + 0.01, `${seed} hole ${n}: past an end rail (${back.toFixed(2)}, ${past.toFixed(2)})`);
+          if (back <= 0 && past <= 0) assert.ok(d.dist < L.side + 0.01, `${seed} hole ${n}: over a side rail (${d.dist.toFixed(2)})`);
+        } });
+        if (res.events.some((e) => e.type === 'wall')) bounced += 1;
+      }
+    }
+  }
+  assert.ok(lanes >= 4, `crazy-golf holes found (${lanes})`);
+  assert.ok(bounced > 20, `balls bounce off the rails (${bounced})`);
+});

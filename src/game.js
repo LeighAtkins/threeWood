@@ -4,6 +4,8 @@ import {
   createBall, copyBall, placeBall, launchBall, puttBall, stepBall, SIM_DT, BALL_R, CUP_R,
 } from './core/ballSim.js';
 import { classify } from './core/happenings.js';
+// (a mouse: a PC, with a keyboard to aim with)
+const FINE_POINTER = typeof matchMedia === 'function' && matchMedia('(pointer: fine)').matches;
 import { eventFor, withEvent } from './core/events.js';
 import { CLUBS, PUTTER, autoSelectClub, clubAllowed, distanceAt, lieFor, powerFor } from './core/clubs.js';
 import {
@@ -337,6 +339,9 @@ export class Game {
 
     this.keys = {};
     window.addEventListener('keydown', (e) => {
+      // (typing a room code is not aiming)
+      if (e.target?.closest?.('input, textarea')) return;
+      if (['KeyW', 'KeyA', 'KeyS', 'KeyD'].includes(e.code) && this.state === 'aim') e.preventDefault();
       if (e.repeat) return;
       this.keys[e.code] = true;
       this.audio.unlock();
@@ -347,6 +352,8 @@ export class Game {
       else if (e.code === 'ArrowDown') this.cycleClub(1);
       else if (e.code === 'Escape') { if (this.paused) this.closeMenu(); else this.openMenu(); }
     });
+    // (a key let go in another window must not keep the aim turning)
+    window.addEventListener('blur', () => { for (const k of Object.keys(this.keys)) this.keys[k] = false; });
     window.addEventListener('keyup', (e) => {
       this.keys[e.code] = false;
       if (e.code === 'Space' || e.code === 'Enter') this.swingUp();
@@ -1163,10 +1170,10 @@ export class Game {
   showHint() {
     if (this.putting) {
       this.hud.demo(this.hints.putt < 3 ? 'drag' : null, { high: true });
-      this.hud.hint(this.hints.putt < 3 ? 'Drag ← → to aim · ↑ ↓ for pace' : '');
+      this.hud.hint(this.hints.putt < 3 ? (FINE_POINTER ? 'A D to aim · W S for pace' : 'Drag ← → to aim · ↑ ↓ for pace') : '');
     } else {
       this.hud.demo(this.hints.swing < 3 ? 'drag' : null);
-      this.hud.hint(this.hints.swing < 3 ? 'Drag ← → to aim · ↑ ↓ for distance' : '');
+      this.hud.hint(this.hints.swing < 3 ? (FINE_POINTER ? 'A D to aim · W S for distance' : 'Drag ← → to aim · ↑ ↓ for distance') : '');
     }
   }
 
@@ -1594,6 +1601,10 @@ export class Game {
         this.audio.tree();
         fx.puff(e.x, e.y, e.z, 'rough', 1.2);
         if (!this.shot.treeCalled) { this.hud.callout('TIMBER!', 'bad small'); this.shot.treeCalled = true; }
+        break;
+      case 'wall':
+        // Off the rail: a crazy-golf clack
+        this.audio.bounce(Math.min(8, e.speed * 2), 'tee');
         break;
       case 'lipout':
         this.audio.lipOut();
@@ -2312,8 +2323,18 @@ export class Game {
         break;
       }
       case 'aim': {
-        const turn = (this.keys.ArrowRight ? 1 : 0) - (this.keys.ArrowLeft ? 1 : 0);
-        if (turn) { this.aimAngle += turn * dt * (this.putting ? 0.12 : 0.7); this.planDirty = true; }
+        // Keys on a PC: A D (or ← →) to aim, W S for distance (pace on a putt).
+        // Held longer, the turn speeds up; Shift for the fine adjustments.
+        const k = this.keys;
+        const turn = (k.ArrowRight || k.KeyD ? 1 : 0) - (k.ArrowLeft || k.KeyA ? 1 : 0);
+        this.turnHeld = turn ? (this.turnHeld || 0) + dt : 0;
+        if (turn) {
+          const ramp = Math.min(3, 1 + this.turnHeld * 1.5) * (k.ShiftLeft || k.ShiftRight ? 0.25 : 1);
+          this.aimAngle += turn * dt * (this.putting ? 0.12 : 0.7) * ramp;
+          this.planDirty = true;
+        }
+        const reach = (k.KeyW ? 1 : 0) - (k.KeyS ? 1 : 0);
+        if (reach) this.adjustLength(-reach * dt * (this.putting ? 90 : 220) * (k.ShiftLeft || k.ShiftRight ? 0.3 : 1));
         if (this.planDirty) this.updatePlan();
         this.aimCamera();
         break;

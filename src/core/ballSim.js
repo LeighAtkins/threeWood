@@ -175,6 +175,7 @@ function stepAir(ball, world, env, dt, events) {
 
   ball.vx += ax * dt; ball.vy += ay * dt; ball.vz += az * dt;
   ball.x += ball.vx * dt; ball.y += ball.vy * dt; ball.z += ball.vz * dt;
+  if (world.lane) laneWalls(ball, world.lane, events);
   ball.back *= 1 - 0.06 * dt;
   ball.side *= 1 - 0.10 * dt;
 
@@ -257,6 +258,54 @@ function stepAir(ball, world, env, dt, events) {
   ball.bounces += 1;
   ball.y = h + BALL_R + 0.002;
   events.push({ type: 'bounce', x: ball.x, y: h, z: ball.z, surface, speed: impact });
+}
+
+/**
+ * Crazy golf: the lane is a billiard table. Rails along both sides (lane.side
+ * from the centre line) and square across both ends (lane.end past them):
+ * the ball bounces off, losing a little, and can never leave. At a bend the
+ * nearest leg of the lane decides, so the inside of a corner is open table.
+ */
+const CUSHION = 0.72; // how much of the speed into a rail comes back off it
+function laneWalls(ball, lane, events) {
+  const p = lane.pts, n = p.length;
+  const R = lane.side - BALL_R, E = lane.end - BALL_R;
+  // The nearest leg; past either end of the lane, the end leg carries on straight
+  let best = Infinity, nx = 0, nz = 0, ux = 0, uz = 0, beyond = 0, end = 0;
+  for (let i = 1; i < n; i++) {
+    const ax = p[i - 1].x, az = p[i - 1].z;
+    const dx = p[i].x - ax, dz = p[i].z - az, len = Math.hypot(dx, dz);
+    if (!len) continue;
+    const tx = dx / len, tz = dz / len;
+    const px = ball.x - ax, pz = ball.z - az;
+    let t = px * tx + pz * tz;
+    let over = 0, cap = 0;
+    // (the extension only reaches a little past the end rail: no further)
+    if (t < 0) { if (i === 1 && -t < E + 1.5) { over = -t; cap = -1; } else t = 0; }
+    if (t > len) { if (i === n - 1 && t - len < E + 1.5) { over = t - len; cap = 1; } else t = len; }
+    const qx = ax + tx * t, qz = az + tz * t;
+    const d = Math.hypot(ball.x - qx, ball.z - qz);
+    if (d < best) { best = d; nx = (ball.x - qx) / (d || 1); nz = (ball.z - qz) / (d || 1); ux = tx; uz = tz; beyond = over; end = cap; }
+  }
+  const bounce = (ox, oz) => {
+    const vn = ball.vx * ox + ball.vz * oz;
+    if (vn <= 0) return;
+    ball.vx -= (1 + CUSHION) * vn * ox;
+    ball.vz -= (1 + CUSHION) * vn * oz;
+    ball.side = 0;
+    if (vn > 0.4) events.push({ type: 'wall', x: ball.x, y: ball.y, z: ball.z, speed: vn });
+  };
+  // The side rails
+  if (best > R) {
+    ball.x -= nx * (best - R); ball.z -= nz * (best - R);
+    bounce(nx, nz);
+  }
+  // The end rails, square across
+  if (end && beyond > E) {
+    const ox = ux * end, oz = uz * end;
+    ball.x -= ox * (beyond - E); ball.z -= oz * (beyond - E);
+    bounce(ox, oz);
+  }
 }
 
 function hitTrees(ball, world, events) {
@@ -369,6 +418,7 @@ function stepRoll(ball, world, dt, events) {
 
   ball.x += ball.vx * dt;
   ball.z += ball.vz * dt;
+  if (world.lane) laneWalls(ball, world.lane, events);
   const h = world.heightAt(ball.x, ball.z);
   ball.y = h + BALL_R;
 

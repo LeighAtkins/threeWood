@@ -579,8 +579,8 @@ export class Hud {
     const node = el('div', 'overlay dim', `
       <div class="card">
         <h2>HOW TO PLAY</h2>
-        ${row(glyph('drag'), 'Aim', 'Drag left or right')}
-        ${row(glyph('drag'), 'Distance', 'Drag up or down (or scroll): the line shows where it stops')}
+        ${row(glyph('drag'), 'Aim', 'Drag left or right (or A D on a keyboard)')}
+        ${row(glyph('drag'), 'Distance', 'Drag up or down (or scroll, or W S): the line shows where it stops')}
         ${row(glyph('tap') + pips(0), 'Swing', 'Tap 3 times: start, power, hit')}
         ${row(glyph('tap') + pips(0, 3, true), 'Long shot', 'MAX power fills itself: tap 2 times')}
         ${row(glyph('shape'), 'Curve', 'Good hit? Swipe while it flies')}

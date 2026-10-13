@@ -103,9 +103,19 @@ export function blobCovers(shape, x, z, margin = 0) {
  */
 export const FRINGE_EDGE = 1.13;
 
+/**
+ * Crazy golf: where the kerb rails stand (the ball bounces off them; they
+ * are walls, not decoration). Side rails `side` m from the lane's centre
+ * line, end rails `end` m past each end; both are the rail's inner face.
+ */
+export function laneRails(channel) {
+  return { side: channel.half + 1.64, end: channel.half + 0.49 };
+}
+
 export function greenDistance(green, x, z) {
   // Crazy golf: the putting surface is a lane along a winding path
-  if (green.channel) return pathInfo(green.channel.pts, x, z).dist / green.channel.w;
+  // (all of it, right up to the rails, is green)
+  if (green.channel) return pathInfo(green.channel.pts, x, z).dist / (laneRails(green.channel).side + 0.15);
   const dx = x - green.x, dz = z - green.z;
   const c = Math.cos(-green.angle), s = Math.sin(-green.angle);
   const lx = dx * c - dz * s;

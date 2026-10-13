@@ -1,6 +1,6 @@
 import { createGameRng } from '../core/rng.js';
 import { BIOMES, biomeForHole } from './biomes.js';
-import { pathLength, pointAlongPath, pathInfo, blobCovers, greenDistance } from './shapes.js';
+import { pathLength, pointAlongPath, pathInfo, blobCovers, greenDistance, laneRails } from './shapes.js';
 import { courseTuning } from '../core/progression.js';
 
 /**
@@ -350,9 +350,14 @@ function layoutHole(rng, plan) {
   if (!water.length && par > 3 && rng.rng() < 0.85) {
     const side = rng.sign();
     const r = rng.range(9, 12);
-    const spot = offPath(totalLen * rng.range(0.3, 0.62), side * (fairwayHalf + 10 + r));
+    const at = totalLen * rng.range(0.3, 0.62);
+    let spot = offPath(at, side * (fairwayHalf + 10 + r));
+    // (crazy golf: the lane winds, so walk the pond out until it clears every
+    // leg of the table with room to spare: the rails are walls, not a bank)
+    const clear = (p) => !green.channel || pathInfo(green.channel.pts, p.x, p.z).dist - r * 1.7 > laneRails(green.channel).side + 2;
+    for (let k = 1; k < 8 && !clear(spot); k++) spot = offPath(at, side * (fairwayHalf + 10 + r + k * 5));
     const pond = { x: spot.x, z: spot.z, r, wobble: 0.8, phase: rng.range(0, 6.28), fishing: true };
-    if (!bunkers.some((b) => Math.hypot(b.x - pond.x, b.z - pond.z) < b.r + r + 4)) {
+    if (clear(spot) && !bunkers.some((b) => Math.hypot(b.x - pond.x, b.z - pond.z) < b.r + r + 4)) {
       water.push(pond);
       fishing = { x: pond.x, z: pond.z, r, side };
     }

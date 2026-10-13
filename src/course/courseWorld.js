@@ -2,7 +2,7 @@ import { createGameRng } from '../core/rng.js';
 import { BIOMES } from './biomes.js';
 import { TILE_HALF, PLAY_HALF } from './holeDesigner.js';
 import {
-  smoothstep, lerp, pathLength, pathInfo, blobRadius, blobCovers, greenDistance, FRINGE_EDGE,
+  smoothstep, lerp, pathLength, pathInfo, blobRadius, blobCovers, greenDistance, FRINGE_EDGE, laneRails,
 } from './shapes.js';
 
 /**
@@ -110,19 +110,24 @@ export function buildWorld(spec) {
     return l + d * lerp(1, 0.2, w) + lift(info, x, z);
   };
 
-  const ponds = spec.water.map((w) => {
+  // (crazy golf: no pond may reach the table; the lane is all rails and turf)
+  const tableClear = (w) => !green.channel || pathInfo(green.channel.pts, w.x, w.z).dist - w.r * 1.7 > laneRails(green.channel).side + 1;
+  const ponds = spec.water.filter(tableClear).map((w) => {
     const info = pathInfo(path, w.x, w.z);
     return { ...w, level: Math.min(ground(w.x, w.z, info), low(w.x, w.z)) - 0.55 };
   });
   const bunkers = spec.bunkers.map((b) => ({ ...b }));
 
-  // Crazy golf: banked walls either side of the lane, and a hump to roll over
+  // Crazy golf: a flat table right up to the rails (which are real walls:
+  // see ballSim), the ground rising only outside them, and a hump across the
+  // whole width to roll over
   const channel = green.channel;
+  const rails = channel ? laneRails(channel) : null;
   const lane = (x, z) => {
     const info = pathInfo(channel.pts, x, z);
-    const wall = 1.0 * smoothstep(channel.half, channel.half + 1.1, info.dist);
+    const wall = 1.0 * smoothstep(rails.side + 0.15, rails.side + 1.2, info.dist);
     const u = (info.along - shape.at * totalLen) / 3.2;
-    return wall + shape.hump * Math.exp(-u * u) * (1 - smoothstep(channel.half * 0.6, channel.half, info.dist));
+    return wall + shape.hump * Math.exp(-u * u) * (1 - smoothstep(rails.side - 0.4, rails.side, info.dist));
   };
   const greenSurface = (x, z) =>
     greenY + tiltX * (x - green.x) + tiltZ * (z - green.z) +
@@ -308,6 +313,7 @@ export function buildWorld(spec) {
     xs, zs, nx, nz, heights, types,
     heightAt, gradAt, surfaceAt, waterLevelAt,
     gravity: spec.gravity || 0, // (0: the usual; a room event can lower it)
+    lane: channel ? { pts: channel.pts, ...rails } : null, // (crazy golf: the rails the ball bounces off)
     cup, tee, trees, ponds, bunkers,
     half: PLAY_HALF,
     tileHalf: TILE_HALF,

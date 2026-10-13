@@ -6,7 +6,7 @@
  */
 
 import * as THREE from 'three';
-import { pathLength, pointAlongPath, pathInfo } from '../course/shapes.js';
+import { pathLength, pointAlongPath, pathInfo, laneRails } from '../course/shapes.js';
 import { bakeStatic } from './bake.js';
 
 const lambert = (color, extra = {}) => new THREE.MeshLambertMaterial({ color, ...extra });
@@ -17,6 +17,7 @@ export function buildDressing(world) {
   const channel = spec.green.channel;
   if (channel) {
     const pts = channel.pts, len = pathLength(pts);
+    const wall = laneRails(channel);
     const rail = lambert(0xf3e7cf), post = lambert(0xc9573f);
     // Kerbs: short white rails end to end along both walls, a red post at each join
     const railGeo = new THREE.BoxGeometry(1.5, 0.16, 0.22);
@@ -25,10 +26,10 @@ export function buildDressing(world) {
     for (const side of [1, -1]) {
       for (let d = 0.6; d < len; d += 1.5) {
         const p = pointAlongPath(pts, d);
-        const across = channel.half + 1.75;
+        const across = wall.side + 0.11; // (the rail's middle: its inner face is the wall)
         const x = p.x - p.dirZ * across * side, z = p.z + p.dirX * across * side;
         // Skip where the wall of another leg of the lane is closer (inside of a bend)
-        if (pathInfo(pts, x, z).dist < channel.half + 1.2) continue;
+        if (pathInfo(pts, x, z).dist < wall.side - 0.3) continue;
         const y = world.heightAt(x, z);
         rails.push({ x, y: y + 0.1, z, yaw: Math.atan2(-p.dirZ, p.dirX) });
         posts.push({ x, y: y + 0.21, z });
@@ -37,8 +38,8 @@ export function buildDressing(world) {
     // ...and across both ends of the lane
     for (const [d, back] of [[0, -1], [len, 1]]) {
       const p = pointAlongPath(pts, d);
-      for (let k = -2; k <= 2; k++) {
-        const x = p.x + p.dirX * back * (channel.half + 0.6) - p.dirZ * k * 1.5, z = p.z + p.dirZ * back * (channel.half + 0.6) + p.dirX * k * 1.5;
+      for (let k = -3; k <= 3; k++) {
+        const x = p.x + p.dirX * back * (wall.end + 0.11) - p.dirZ * k * 1.5, z = p.z + p.dirZ * back * (wall.end + 0.11) + p.dirX * k * 1.5;
         const y = world.heightAt(x, z);
         rails.push({ x, y: y + 0.1, z, yaw: Math.atan2(-p.dirZ, p.dirX) + Math.PI / 2 });
         posts.push({ x, y: y + 0.21, z });
