@@ -15,7 +15,7 @@ import {
   createSwing, startSwing, swingClick, swingStep, strikeFromTiming, describeStrike, markerToPercent, SWING,
 } from './core/swing.js';
 import {
-  buildLaunch, powerForRest, previewShot, previewPutt, puttSpeedFor, puttMeterMax, puttSpeedAt, slopeAlong,
+  buildLaunch, powerForRest, powerForCarry, carryPoint, previewShot, previewPutt, puttSpeedFor, puttMeterMax, puttSpeedAt, slopeAlong,
 } from './core/shotPlanner.js';
 import { designHole, roundHoles, ARCHETYPES, ROUND_PLAN, GIMMICKS } from './course/holeDesigner.js';
 import { buildWorld, aimTarget, teeSlot } from './course/courseWorld.js';
@@ -1194,6 +1194,14 @@ export class Game {
     const dirX = Math.cos(this.aimAngle), dirZ = Math.sin(this.aimAngle);
     this.dirX = dirX; this.dirZ = dirZ;
 
+    // A bounce mushroom near the line, and in reach: the shot locks on to it
+    // (direction and distance), until the aim is swung well away again
+    let lock = this.putting ? null : this.padLock();
+    if (lock) { this.solveLock(lock); if (lock.power == null) { lock = null; this.dirX = dirX; this.dirZ = dirZ; } } // (out of reach after all)
+    if (!!lock !== !!this.locked) {
+      if (lock && this.state === 'aim') { this.hud.callout('🍄 LOCKED ON', 'small'); this.audio.tap(); }
+      this.locked = lock;
+    } else this.locked = lock;
     if (this.putting) {
       // Pace for the cup, or (crazy golf) for the bend the putt is played to
       const to = this.target && !this.target.isPin ? this.target : world.cup;
@@ -1230,7 +1238,8 @@ export class Game {
       this.hud.setMeterSteps(null);
     } else {
       const reach = distanceAt(this.club, 100, this.lie.speedFactor);
-      const aimDist = this.wantDist ?? this.targetDist;
+      const aimDist = lock ? lock.dist : this.wantDist ?? this.targetDist;
+      const dirX = this.dirX, dirZ = this.dirZ; // (the locked line, if a mushroom has it)
       this.slope = slopeAlong(world, ball, dirX, dirZ);
       // The power at which a perfect swing STOPS the ball at the target (or at
       // the length dragged), worked out by test shots in still air: the wind
@@ -1238,18 +1247,20 @@ export class Game {
       // length or line changes; while the aim is being swung round, the last
       // answer stands and it is solved again once the aim settles.
       const book = reach >= aimDist ? powerFor(this.club, aimDist, this.lie.speedFactor) : null;
-      const key = `${this.club.id}|${Math.round(aimDist * 2)}|${this.lie.id}|${ball.x.toFixed(1)},${ball.z.toFixed(1)}`;
+      const key = `${this.club.id}|${Math.round(aimDist * 2)}|${this.lie.id}|${ball.x.toFixed(1)},${ball.z.toFixed(1)}|${lock ? 'pad' : ''}`;
       const now = performance.now();
       const turned = this.cal && Math.abs(Math.atan2(Math.sin(this.aimAngle - this.cal.angle), Math.cos(this.aimAngle - this.cal.angle))) > 0.015;
       if (!this.cal || this.cal.key !== key || (turned && now - this.cal.at > 220)) {
-        const solved = powerForRest(world, ball, { club: this.club, lie: this.lie, dirX, dirZ, slope: this.slope, want: aimDist, book });
+        // (locked on a mushroom: solveLock has worked out the shot, wind and all)
+        const solved = lock ? lock.power : powerForRest(world, ball, { club: this.club, lie: this.lie, dirX, dirZ, slope: this.slope, want: aimDist, book });
         this.cal = { key, angle: this.aimAngle, at: now, power: solved };
         this.calStale = false;
       } else if (turned) this.calStale = true; // (solved again once the aim settles: see update)
       const want = this.cal.power;
       // Near enough to everything the club has counts as a full shot: asking
       // for a tap a hair before the bar tops out is a trap, not a skill
-      this.idealPower = want && want < 96 ? want : null;
+      // (locked on a mushroom, the exact power is shown however near the top it is)
+      this.idealPower = want && (want < 96 || lock) ? want : null;
       const launch = buildLaunch({
         club: this.club, power: this.idealPower ?? 100, dirX, dirZ, lie: this.lie, slope: this.slope,
       });
@@ -1491,6 +1502,9 @@ export class Game {
     this.plan = this.planShot();
     this.shot.chase = this.plan.landTime > 2.1;
     // A decent strike can be worked in the air
+    this.shot.strike = strike;
+    this.shot.lockPad = this.locked?.pad || null; // (a locked shot homes in on its mushroom: see updateFlight)
+    this.shot.power = this.swing.power;
     this.shot.shapeable = strike.grade === 'pure' || strike.grade === 'good';
     if (this.shot.shapeable && this.shot.chase && this.hints.spin < 4) {
       this.hud.demo('shape', { low: true }); // (below the ball, not over it)
@@ -1556,6 +1570,59 @@ export class Game {
     this.hud.root.classList.toggle('wobbly', !!mods.wobble);
   }
 
+  /**
+   * The bounce mushroom the shot should lock on to, if any: ahead, within a
+   * few metres of the line the player is aiming, and within the club's reach
+   * (with a little spare). { angle, dist, pad } or null.
+   */
+  padLock() {
+    const pads = this.gimmicks?.pads;
+    if (!pads?.length) return null;
+    if (this.state === 'swing') return this.locked || null; // (held through the swing)
+    const { ball } = this;
+    const reach = distanceAt(this.club, 100, this.lie.speedFactor) * 1.15;
+    let best = null;
+    for (const p of pads) {
+      const dx = p.x - ball.x, dz = p.z - ball.z, d = Math.hypot(dx, dz);
+      if (d < 12 || d > reach) continue;
+      const a = Math.atan2(dz, dx);
+      const off = Math.abs(Math.atan2(Math.sin(a - this.aimAngle), Math.cos(a - this.aimAngle)));
+      // within about 4.5 m of the aim line at the mushroom (more while already locked: it is sticky)
+      if (Math.sin(Math.min(off, 1.5)) * d > (this.locked?.pad === p ? 7 : 4.5) || off > 0.6) continue;
+      if (!best || off < best.off) best = { angle: a, dist: d, pad: p, off };
+    }
+    return best;
+  }
+
+  /**
+   * A locked shot really lands on the mushroom: the power that brings it down
+   * through the cap's height at the mushroom, and the line turned into the
+   * wind so the drift carries it on. Kept until the club, lie or ball moves.
+   */
+  solveLock(lock) {
+    const { ball, world } = this;
+    const key = `${lock.pad.x},${lock.pad.z}|${this.club.id}|${this.lie.id}|${ball.x.toFixed(1)},${ball.z.toFixed(1)}`;
+    if (this.lockSolve?.key !== key) {
+      let angle = lock.angle, power = null;
+      const atY = lock.pad.top + 0.2;
+      for (let i = 0; i < 3; i++) {
+        const dx = Math.cos(angle), dz = Math.sin(angle);
+        const slope = slopeAlong(world, ball, dx, dz);
+        const o = { club: this.club, lie: this.lie, dirX: dx, dirZ: dz, slope, env: this.env, atY };
+        power = powerForCarry(world, ball, { ...o, want: lock.dist, book: powerFor(this.club, lock.dist, this.lie.speedFactor) });
+        if (power === null) break;
+        const at = carryPoint(world, ball, { ...o, power });
+        // sideways miss (+ left of the line to the mushroom), turned back the other way
+        const ux = Math.cos(lock.angle), uz = Math.sin(lock.angle);
+        const side = (at.x - lock.pad.x) * -uz + (at.z - lock.pad.z) * ux;
+        angle -= Math.atan2(side, lock.dist);
+      }
+      this.lockSolve = { key, angle, power };
+    }
+    lock.power = this.lockSolve.power;
+    this.dirX = Math.cos(this.lockSolve.angle); this.dirZ = Math.sin(this.lockSolve.angle);
+  }
+
   /** This hole's cards and perk, applied to a lie: rough and sand may cost half. */
   perkLie(lie) {
     const p = this.mods;
@@ -1603,6 +1670,28 @@ export class Game {
       // Off a friend's head, or into a friend's ball: a new flight, so a new plan
       if (this.net.bonkCheck(ball, null, null, this.shot.putt)) { this.plan = this.planShot(); this.shot.events.push('bonk'); }
       if (this.net.knockCheck(ball)) { this.plan = this.planShot(); this.shot.events.push('knock'); }
+      // A shot locked on a mushroom homes in as it comes down near it: a near
+      // miss (a tap a hair early or late on the meter) still finds the cap
+      const lp = this.shot.lockPad;
+      if (lp && ball.mode === 'air' && ball.vy < 0 && ball.y > lp.top) {
+        const hx = lp.x - ball.x, hz = lp.z - ball.z, hd = Math.hypot(hx, hz);
+        if (hd < 12 && hd > 0.2) {
+          // sideways only (across the ball's path): pulled along it, a short
+          // ball would speed up and sail over the cap
+          const vh = Math.hypot(ball.vx, ball.vz) || 1, px = -ball.vz / vh, pz = ball.vx / vh;
+          const side = hx * px + hz * pz;
+          const pull = Math.sign(side) * Math.min(Math.abs(side), 2.5) * 12 * SIM_DT;
+          ball.vx += px * pull;
+          ball.vz += pz * pull;
+        }
+      }
+      // A ball coming down onto a mushroom's cap springs off it there (not on the grass beneath)
+      if (ball.mode === 'air' && ball.vy < 0 && this.gimmicks.pads.length && !this.shot.putt) {
+        const pad = this.gimmicks.padAt(ball.x, ball.z);
+        // (a shot locked on this one is caught a little above the cap: the lock-on is generous)
+        const catchAt = pad === this.shot.lockPad ? 1.6 : 0.15;
+        if (pad && ball.y <= pad.top + catchAt && ball.y > pad.top - 1.2) { this.boing({ type: 'land' }); this.plan = this.planShot(); }
+      }
       this.simAccumulator -= SIM_DT;
       steps++;
       if (this.gimmicks.rings.length) this.checkRings(); // every step: a fast ball must not skip a hoop

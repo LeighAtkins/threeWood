@@ -1,4 +1,4 @@
-import { createBall, copyBall, launchBall, puttBall, simulate, BALL_R, CUP_R } from './ballSim.js';
+import { createBall, copyBall, launchBall, puttBall, simulate, stepBall, SIM_DT, BALL_R, CUP_R } from './ballSim.js';
 import { speedAt } from './clubs.js';
 
 /**
@@ -84,6 +84,47 @@ export function powerForRest(world, ball, { club, lie, dirX, dirZ, slope, want, 
     d1 = restAt(p1);
   }
   return p1;
+}
+
+/**
+ * The power at which a pure strike in still air first comes DOWN at
+ * (tx, tz)'s distance (its carry, not where it stops): for landing on a
+ * mushroom. Null if full power cannot reach it.
+ */
+export function powerForCarry(world, ball, { club, lie, dirX, dirZ, slope, want, book, env = null, atY = null }) {
+  // (atY: where it comes down through that height, e.g. a mushroom's cap)
+  const carryAt = (power) => {
+    const b = copyBall(ball);
+    launchBall(b, buildLaunch({ club, power, dirX, dirZ, lie, slope }));
+    for (let t = 0; t < 14 && b.mode === 'air' && !b.landed; t += SIM_DT) {
+      stepBall(b, world, env, SIM_DT, []);
+      if (atY !== null && b.vy < 0 && b.y <= atY) break;
+    }
+    return Math.hypot(b.x - ball.x, b.z - ball.z);
+  };
+  if (carryAt(100) < want) return null;
+  let p0 = Math.max(5, Math.min(100, book ?? 60)), d0 = carryAt(p0);
+  let p1 = Math.max(4, Math.min(100, p0 * Math.sqrt(want / Math.max(1, d0)))), d1 = carryAt(p1);
+  for (let i = 0; i < 5 && Math.abs(d1 - want) > 0.4; i++) {
+    const k = (d1 - d0) / (p1 - p0 || 1e-6);
+    const next = Math.abs(k) > 1e-4 ? p1 + (want - d1) / k : p1 * Math.sqrt(want / Math.max(1, d1));
+    p0 = p1; d0 = d1; p1 = Math.max(3, Math.min(100, next)); d1 = carryAt(p1);
+  }
+  return p1;
+}
+
+/**
+ * Where a pure strike at `power` along (dirX, dirZ) comes down through
+ * height atY (or lands), with the wind: for steering a locked shot.
+ */
+export function carryPoint(world, ball, { club, lie, dirX, dirZ, slope, power, env = null, atY = null }) {
+  const b = copyBall(ball);
+  launchBall(b, buildLaunch({ club, power, dirX, dirZ, lie, slope }));
+  for (let t = 0; t < 14 && b.mode === 'air' && !b.landed; t += SIM_DT) {
+    stepBall(b, world, env, SIM_DT, []);
+    if (atY !== null && b.vy < 0 && b.y <= atY) break;
+  }
+  return { x: b.x, z: b.z };
 }
 
 /** Full roll-out of a putt along a line (cup included). */
