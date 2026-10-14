@@ -1120,3 +1120,9 @@ button { font: inherit; color: inherit; border: 0; background: none; padding: 0;
 .card.result.mini .camp-card span { display: block; font-size: 9.5px; }
 .card.result.mini .camp-card { padding: 6px 3px 7px; }
 @media (orientation: landscape) and (max-height: 500px) { .card.result.mini { height: calc(100vh - 24px); } }
+/* Camper creator on a short landscape screen: the panel down the right side,
+   scrolling if it must, and the camper in the open space on the left */
+@media (orientation: landscape) and (max-height: 500px) {
+  .camper-ui { justify-content: flex-end; align-items: center; }
+  .camper-ui .panel { width: min(430px, 56vw); max-height: calc(100vh - 16px); overflow-y: auto; margin: 8px calc(var(--sar) + 8px) 8px 0; }
+}

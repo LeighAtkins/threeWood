@@ -881,12 +881,58 @@ export class Game {
     }
   }
 
+  /**
+   * The creator's camera: the whole camper, feet to hair, in the space ABOVE
+   * the panel (on an upright phone the panel is most of the screen). The
+   * panel's top is measured now and then, and the camera worked out to fit.
+   */
+  frameCreator(dt) {
+    const v = this.creatorView;
+    this.creatorMeasure = (this.creatorMeasure || 0) - dt;
+    if (this.creatorMeasure <= 0 || this.creatorTop == null) {
+      this.creatorMeasure = 0.4;
+      const panel = document.querySelector('.camper-ui .panel');
+      const r = panel ? panel.getBoundingClientRect() : null;
+      // Beside the panel (landscape: it runs down the right) or above it
+      this.creatorSide = !!r && r.left > window.innerWidth * 0.3;
+      this.creatorLeft = r ? r.left : window.innerWidth;
+      const top = r && !this.creatorSide ? r.top : window.innerHeight;
+      this.creatorTop = Math.max(window.innerHeight * 0.18, Math.min(window.innerHeight, top));
+    }
+    // The band to fill, in screen units (-1 bottom .. 1 top), with a little room
+    const hi = 1 - 2 * (Math.max(this.creatorSide ? 30 : 70, window.innerHeight * 0.09) / window.innerHeight);
+    const lo = 1 - 2 * (this.creatorTop / window.innerHeight) + 0.06;
+    // ...and across: the middle of the space left of the panel
+    const wantX = this.creatorSide ? (-1 + (2 * this.creatorLeft / window.innerWidth - 1)) / 2 : 0;
+    const s = this.camper.group.scale.x;
+    const feet = v.y, head = v.y + 1.08 * s;
+    let r = this.creatorR || 2.6, lookY = this.creatorLookY ?? v.y + 0.45, side = this.creatorShift || 0;
+    const tanHalf = Math.tan((this.camera.fov * Math.PI) / 360);
+    // (sideways: the camera's right, as it looks in at the camper)
+    const rx = Math.sin(v.angle), rz = -Math.cos(v.angle);
+    // (beside a landscape panel the camper is off to one side of the picture:
+    // a level camera there, or looking down at them they lean like a tower)
+    const place = () => this.rig.orbit(v.x + rx * side, lookY - 0.3, v.z + rz * side, r, this.creatorSide ? 0.3 : (lookY - v.y) + 0.35, v.angle);
+    for (let i = 0; i < 6; i++) {
+      place();
+      const a = this.rig.ndc(v.x, feet, v.z), ay = a.y, ax = a.x, b = this.rig.ndc(v.x, head, v.z).y;
+      const span = b - ay, want = (hi - lo) * (this.creatorSide ? 0.72 : 0.92);
+      if (span > 0.01) r = Math.max(1.6, Math.min(14, r * span / want));
+      const mid = (ay + b) / 2, wantMid = (hi + lo) / 2;
+      lookY += (mid - wantMid) * tanHalf * r;
+      side += (ax - wantX) * tanHalf * this.camera.aspect * r;
+    }
+    this.creatorR = r; this.creatorLookY = lookY; this.creatorShift = side;
+    place();
+  }
+
   /** The camper creator: build your golfer, try on what you have earned. */
   openCreator() {
     const { world } = this;
     const spot = Grill.place(world, this.scenery.placed);
     const y = world.heightAt(spot.x, spot.z);
     this.creatorView = { x: spot.x, y, z: spot.z, angle: Math.atan2(world.cup.z - spot.z, world.cup.x - spot.x) };
+    this.creatorR = null; this.creatorLookY = null; this.creatorTop = null; this.creatorShift = 0;
     this.hud.clearLayer();
     this.setState('creator');
     const g = this.camper.group;
@@ -2357,8 +2403,7 @@ export class Game {
 
     switch (this.state) {
       case 'creator': {
-        const v = this.creatorView;
-        this.rig.orbit(v.x, v.y + 0.45, v.z, 2.6, 0.95, v.angle); // head and shoulders above the panel
+        this.frameCreator(dt);
         break;
       }
       case 'summary': {
