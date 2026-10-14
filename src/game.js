@@ -2675,7 +2675,7 @@ export class Game {
 
     this.updateClub(dt);
     if (this.dressing) {
-      this.dressing.visible = this.state !== 'title'; // no beacon behind the logo
+      this.dressing.visible = this.state !== 'title' && this.state !== 'creator'; // no beacon behind the logo, or in front of the camper
       // The bucket's beam finds the cup from the tee; up close it would fill the screen
       const beacon = this.dressing.userData.beacon;
       if (beacon) {
@@ -2708,6 +2708,11 @@ export class Game {
     for (const o of this.net.others.map.values()) o.camper.setGlow(night);
     const onGreen = this.round && (this.putting || ball.surface === 'green') && this.state !== 'intro' && this.state !== 'title';
     updateFlag(this.scenery.flag, this.time, onGreen && this.state !== 'holed' && this.state !== 'result', camera);
+    // Trying on outfits, nothing of the course may stand in front of the camper
+    // (an upright phone pulls the camera back past the pin: the flagpole filled the view)
+    const creator = this.state === 'creator';
+    this.scenery.flag.visible = !creator;
+    if (creator && this.nightGlow) this.nightGlow.visible = false;
     this.effects.update(dt, this.time);
 
     if (!this.round) return;
