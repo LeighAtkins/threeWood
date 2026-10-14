@@ -15,7 +15,62 @@ import { courseTuning } from '../core/progression.js';
  * laid out heading +X from the origin, then rotated and centred in the tile.
  */
 
-export const TILE_HALF = 240;   // half-width of the terrain tile
+export const TILE_HALF = 240;
+
+/**
+ * Crazy golf: a long winding lane (90-130 m) of six to eight legs that snake
+ * left and right, now and then doubling back, every bend rounded off. No
+ * leg comes near another (the rails of two legs never touch), so the ball
+ * can only bank round the way the lane goes. Null if no good one is found.
+ */
+function lanePath(rng) {
+  const CLEAR = 12; // metres between the centre lines of any two legs that are not neighbours
+  const segDist = (a, b, c, d) => {
+    // shortest distance between segments ab and cd (sampled: legs are short)
+    let m = Infinity;
+    for (let i = 0; i <= 12; i++) {
+      const t = i / 12, px = a.x + (b.x - a.x) * t, pz = a.z + (b.z - a.z) * t;
+      const dx = d.x - c.x, dz = d.z - c.z, l2 = dx * dx + dz * dz || 1;
+      const u = Math.max(0, Math.min(1, ((px - c.x) * dx + (pz - c.z) * dz) / l2));
+      m = Math.min(m, Math.hypot(px - c.x - dx * u, pz - c.z - dz * u));
+    }
+    return m;
+  };
+  for (let tries = 0; tries < 80; tries++) {
+    const n = 6 + Math.floor(rng.rng() * 3);
+    const pts = [{ x: 0, z: 0 }];
+    let heading = 0, side = rng.sign(), total = 0, ok = true;
+    for (let i = 0; i < n && ok; i++) {
+      if (i > 0) {
+        // Mostly the other way each time (a snake); sometimes the same way again (a hairpin)
+        if (rng.rng() < 0.72) side = -side;
+        heading += side * (rng.range(38, 92) * Math.PI) / 180;
+      }
+      const len = i === 0 ? rng.range(13, 17) : rng.range(10, 18);
+      const p = pts[pts.length - 1];
+      const q = { x: p.x + Math.cos(heading) * len, z: p.z + Math.sin(heading) * len };
+      for (let j = 0; j < pts.length - 2 && ok; j++) if (segDist(p, q, pts[j], pts[j + 1]) < CLEAR) ok = false;
+      pts.push(q);
+      total += len;
+    }
+    if (!ok || total < 88 || total > 135) continue;
+    // Round every bend: the corner becomes a short chamfer either side of it
+    const out = [pts[0]];
+    for (let i = 1; i < pts.length - 1; i++) {
+      const a = pts[i - 1], b = pts[i], c = pts[i + 1];
+      const l1 = Math.hypot(b.x - a.x, b.z - a.z), l2 = Math.hypot(c.x - b.x, c.z - b.z);
+      const r = Math.min(4.5, l1 / 3, l2 / 3);
+      out.push({ x: b.x - ((b.x - a.x) / l1) * r, z: b.z - ((b.z - a.z) / l1) * r });
+      // (and a point on the curve between, so it reads as a bend, not a cut corner)
+      const mx = (b.x - ((b.x - a.x) / l1) * r + b.x + ((c.x - b.x) / l2) * r) / 2, mz = (b.z - ((b.z - a.z) / l1) * r + b.z + ((c.z - b.z) / l2) * r) / 2;
+      out.push({ x: (mx + b.x) / 2, z: (mz + b.z) / 2 });
+      out.push({ x: b.x + ((c.x - b.x) / l2) * r, z: b.z + ((c.z - b.z) / l2) * r });
+    }
+    out.push(pts[pts.length - 1]);
+    return out;
+  }
+  return null;
+}   // half-width of the terrain tile
 export const PLAY_HALF = 228;   // beyond this is out of bounds
 const FEATURE_BOUND = 205;      // tee/green/hazards must sit inside this
 
@@ -74,7 +129,7 @@ export const PAR_BANDS = { 3: [100, 165], 4: [250, 330], 5: [425, 475] };
 // bots at three skills (docs/course-design.md).
 export const ROUND_PLAN = [
   { par: 4, archetypes: ['skiJump'], gimmick: 'rings' },          // 1  downhill, confidence
-  { par: 3, archetypes: ['minigolf'] },                           // 2  putting, the walls
+  { par: 4, archetypes: ['minigolf'] },                           // 2  putting, the walls (a long winding lane)
   { par: 4, archetypes: ['doglegR', 'doglegL'] },                 // 3  cut the corner over water?
   { par: 5, archetypes: ['halfpipe'], gimmick: 'boing' },         // 4  long, forgiving sides
   { par: 3, archetypes: ['lookout'] },                            // 5  cliff-top, judge the drop
@@ -82,7 +137,7 @@ export const ROUND_PLAN = [
   { par: 4, archetypes: ['bottleneck'] },                         // 7  thread the gate
   { par: 5, archetypes: ['terraces'] },                           // 8  land on a shelf
   { par: 4, archetypes: ['hogsback'], gimmick: 'bullseye' },      // 9  hold the ridge
-  { par: 4, archetypes: ['dunes'] },                              // 10 bunkers all the way home
+  { par: 3, archetypes: ['dunes'] },                              // 10 bunkers all the way home (short: keeps the round par 72)
   { par: 4, archetypes: ['doglegL', 'doglegR'], gimmick: 'boing' }, // 11 the other dogleg
   { par: 5, archetypes: ['cape'] },                               // 12 bite off the lake
   { par: 4, archetypes: ['gorge'] },                              // 13 carry the creek, or lay up
@@ -126,10 +181,11 @@ function layoutHole(rng, plan) {
   let path;
   let dogleg = null;
   if (mini) {
-    // A lane that turns twice and comes back on itself: three putts, or two good ones
-    const s = rng.sign(), a = rng.range(16, 20), b = rng.range(11, 15), c = rng.range(14, 18);
-    const kink = rng.range(-3, 3);
-    path = [tee, { x: a, z: 0 }, { x: a + 10, z: s * b }, { x: a + 10 + c, z: s * (b + kink) }, { x: a + 18 + c, z: s * 2.5 }];
+    path = lanePath(rng) || (() => {
+      // (the old lane, should the winding one never come right)
+      const s = rng.sign(), a = rng.range(16, 20), b = rng.range(11, 15), c = rng.range(14, 18);
+      return [tee, { x: a, z: 0 }, { x: a + 10, z: s * b }, { x: a + 10 + c, z: s * (b + rng.range(-3, 3)) }, { x: a + 18 + c, z: s * 2.5 }];
+    })();
   } else if (archetype === 'doglegL' || archetype === 'doglegR' || archetype === 'cape') {
     const side = archetype === 'doglegL' ? 1 : archetype === 'doglegR' ? -1 : rng.sign();
     const angle = rad(rng.range(26, 44)) * side;

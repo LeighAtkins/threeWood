@@ -121,7 +121,7 @@ const C = {
 };
 
 // Holes that play like something else ask for something else
-const SPECIAL = { minigolf: ['par', 'inTwoShots'] };
+const SPECIAL = { minigolf: ['par', 'birdie'] };
 
 // What is asked of each hole in turn, by par: early entries are the gentle
 // ones, and each list is walked as the round goes on.

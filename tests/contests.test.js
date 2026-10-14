@@ -144,15 +144,18 @@ test('crazy golf is a billiard table: no putt, however hard or wild, leaves the 
         pb(b, w, w.tee.x + (r() - 0.5) * 2, w.tee.z + (r() - 0.5) * 2);
         const a = r() * Math.PI * 2, speed = 2 + r() * 16;
         putt(b, { speed, dirX: Math.cos(a), dirZ: Math.sin(a) });
+        const total = p.reduce((t, q, i) => (i ? t + Math.hypot(q.x - p[i - 1].x, q.z - p[i - 1].z) : 0), 0);
         const res = run(b, w, null, { maxTime: 25, onStep: (ball) => {
+          // judged against the stretch of lane it is on: inside the side rails,
+          // and (off either end) not past the end rail
           const d = pinfo(p, ball.x, ball.z);
-          // inside the side rails (on the nearest leg) and not past either end rail
-          const s0 = { x: p[1].x - p[0].x, z: p[1].z - p[0].z }, l0 = Math.hypot(s0.x, s0.z);
-          const back = -((ball.x - p[0].x) * s0.x + (ball.z - p[0].z) * s0.z) / l0;
-          const m = p.length - 1, s1 = { x: p[m].x - p[m - 1].x, z: p[m].z - p[m - 1].z }, l1 = Math.hypot(s1.x, s1.z);
-          const past = ((ball.x - p[m].x) * s1.x + (ball.z - p[m].z) * s1.z) / l1;
-          assert.ok(back < L.end + 0.01 && past < L.end + 0.01, `${seed} hole ${n}: past an end rail (${back.toFixed(2)}, ${past.toFixed(2)})`);
-          if (back <= 0 && past <= 0) assert.ok(d.dist < L.side + 0.01, `${seed} hole ${n}: over a side rail (${d.dist.toFixed(2)})`);
+          if (d.along > 0.01 && d.along < total - 0.01) assert.ok(d.dist < L.side + 0.01, `${seed} hole ${n}: over a side rail (${d.dist.toFixed(2)})`);
+          else {
+            const [a, c] = d.along <= 0.01 ? [p[1], p[0]] : [p[p.length - 2], p[p.length - 1]];
+            const ux = c.x - a.x, uz = c.z - a.z, ul = Math.hypot(ux, uz);
+            const past = ((ball.x - c.x) * ux + (ball.z - c.z) * uz) / ul;
+            assert.ok(past < L.end + 0.01, `${seed} hole ${n}: past an end rail (${past.toFixed(2)})`);
+          }
         } });
         if (res.events.some((e) => e.type === 'wall')) bounced += 1;
       }

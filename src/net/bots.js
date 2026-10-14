@@ -284,9 +284,10 @@ export class Bots {
         if (!r.cands) {
           const here = pathInfo(pts, ball.x, ball.z).along;
           const pts2 = [world.cup, r.to];
-          for (const L of [6, 10, 15, 21]) if (here + L < total - 1) pts2.push(pointAlongPath(pts, here + L));
+          for (const L of [6, 10, 15, 21, 30, 40]) if (here + L < total - 1) pts2.push(pointAlongPath(pts, here + L));
           r.cands = [];
-          for (const p of pts2) for (const mult of [1, 1.18]) r.cands.push({ x: p.x, z: p.z, mult });
+          // (harder ones too: a firm putt banked off the rails can get round a bend or two)
+          for (const p of pts2) for (const mult of [1, 1.25, 1.6]) r.cands.push({ x: p.x, z: p.z, mult });
         }
         const c = r.cands.shift();
         if (c) {

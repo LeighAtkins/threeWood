@@ -218,8 +218,10 @@ export function buildWorld(spec) {
     return Float32Array.from(out);
   };
   const teeR = TEE_STEP.depth + 3;
-  const xs = axis([band(green.x, green.size * 1.75, FINE), band(spec.tee.x, teeR, TEE_FINE)]);
-  const zs = axis([band(green.z, green.size * 1.75, FINE), band(spec.tee.z, teeR, TEE_FINE)]);
+  // (a crazy-golf lane is flat felt between rails: it needs no 0.5 m grid, and is big)
+  const greenStep = green.channel ? 1.25 : FINE;
+  const xs = axis([band(green.x, green.size * 1.75, greenStep), band(spec.tee.x, teeR, TEE_FINE)]);
+  const zs = axis([band(green.z, green.size * 1.75, greenStep), band(spec.tee.z, teeR, TEE_FINE)]);
   const nx = xs.length, nz = zs.length;
 
   // Bucket lookup: world coord -> cell index in O(1)
@@ -345,7 +347,8 @@ export function buildWorld(spec) {
     heightAt, gradAt, surfaceAt, waterLevelAt,
     gravity: spec.gravity || 0, // (0: the usual; a room event can lower it)
     ceilingAt, // (a cave's roof, or null under the open sky)
-    slick: spec.slick || 1, // (the Rain Cloud card: wet turf runs further)
+    // (the Rain Cloud card: wet turf runs further; a crazy-golf lane is felt: it runs too)
+    slick: (spec.slick || 1) * (channel ? 1.6 : 1),
     lane: channel ? { pts: channel.pts, ...rails } : null, // (crazy golf: the rails the ball bounces off)
     cup, tee, trees, ponds, bunkers,
     half: PLAY_HALF,

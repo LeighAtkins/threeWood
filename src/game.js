@@ -1,9 +1,10 @@
 import * as THREE from 'three';
 import { createGameRng, getSeedFromUrl, generateSeed, cleanSeed } from './core/rng.js';
 import {
-  createBall, copyBall, placeBall, launchBall, puttBall, stepBall, SIM_DT, BALL_R, CUP_R,
+  createBall, copyBall, placeBall, launchBall, puttBall, stepBall, SIM_DT, BALL_R, CUP_R, flatWorld,
 } from './core/ballSim.js';
 import { classify } from './core/happenings.js';
+import { pathLength, pathInfo } from './course/shapes.js';
 import { buildCave, updateCave } from './render/cave.js';
 import { makeRainCloud, updateRainCloud } from './render/gags.js';
 // (a mouse: a PC, with a keyboard to aim with)
@@ -1198,7 +1199,17 @@ export class Game {
       const to = this.target && !this.target.isPin ? this.target : world.cup;
       const dist = Math.hypot(to.x - ball.x, to.z - ball.z);
       this.readSpeed = puttSpeedFor(world, ball, dirX, dirZ, dist);
-      if (!this.puttMax) this.puttMax = puttMeterMax(this.readSpeed);
+      if (!this.puttMax) {
+        this.puttMax = puttMeterMax(this.readSpeed);
+        // Crazy golf: a full putt should be a real smash, one that could roll
+        // the whole rest of the lane on the flat and bank round the walls
+        if (world.lane) {
+          const pts = world.lane.pts, left = pathLength(pts) - pathInfo(pts, ball.x, ball.z).along;
+          const flat = { ...flatWorld('green'), slick: world.slick };
+          const smash = puttSpeedFor(flat, createBall(0, BALL_R, 0), 1, 0, Math.max(8, left * 1.05), 0);
+          this.puttMax = Math.max(this.puttMax, smash);
+        }
+      }
       // The caddie's read is the pace to start from; a vertical drag sets your own
       this.readPct = Math.min(96, (this.readSpeed / this.puttMax) * 100);
       this.idealPct = this.puttPct ?? this.readPct;
