@@ -123,6 +123,30 @@ export class CameraRig {
     }
   }
 
+  /**
+   * Crazy golf, lining up a putt: a bird's-eye view of the lane, high above
+   * and a little behind, framing the ball and the whole roll it will take
+   * (rebounds and all), so a bank can be planned off the rails.
+   */
+  birdseye(ball, dirX, dirZ, points) {
+    this.mode = 'birdseye';
+    this.stiffness = 3.5;
+    let cx = ball.x, cz = ball.z, n = 1;
+    for (let i = 0; i < points.length; i += 9) { cx += points[i]; cz += points[i + 2]; n++; }
+    cx /= n; cz /= n;
+    let h = 14;
+    for (let k = 0; k < 10; k++) {
+      this.wantPos.set(cx - dirX * h * 0.32, ball.y + h, cz - dirZ * h * 0.32);
+      this.wantLook.set(cx + dirX * h * 0.06, ball.y, cz + dirZ * h * 0.06);
+      let ok = true;
+      const test = (x, y, z) => { const v = this.ndc(x, y, z); return v.z < 1 && Math.abs(v.x) < 0.86 && v.y > -0.5 && v.y < 0.8; };
+      if (!test(ball.x, ball.y, ball.z)) ok = false;
+      for (let i = 0; ok && i < points.length; i += 9) if (!test(points[i], points[i + 1], points[i + 2])) ok = false;
+      if (ok) break;
+      h *= 1.18;
+    }
+  }
+
   /** `placed`: big set pieces from the scenery, which can block a camera just as a tree can. */
   setWorld(world, placed = []) {
     this.world = world;

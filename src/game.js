@@ -1220,6 +1220,10 @@ export class Game {
       }
       // The caddie's read is the pace to start from; a vertical drag sets your own
       this.readPct = Math.min(96, (this.readSpeed / this.puttMax) * 100);
+      // Crazy golf: the caddie's pace is for the next bend, which is timid on
+      // a lane made for banking. Along the line being aimed, try firmer paces
+      // and start from the one that gets furthest round (or in)
+      if (world.lane && this.puttPct == null) this.readPct = this.lanePace(dirX, dirZ, this.readPct);
       this.idealPct = this.puttPct ?? this.readPct;
       this.idealSpeed = puttSpeedAt(this.puttMax, this.idealPct);
       const preview = previewPutt(world, ball, dirX, dirZ, this.idealSpeed);
@@ -1290,7 +1294,9 @@ export class Game {
   showHint() {
     if (this.putting) {
       this.hud.demo(this.hints.putt < 3 ? 'drag' : null, { high: true });
-      this.hud.hint(this.hints.putt < 3 ? (FINE_POINTER ? 'A D to aim · W S for pace' : 'Drag ← → to aim · ↑ ↓ for pace') : '');
+      // (crazy golf: say it out loud, a few putts a round: this lane is for smashing)
+      if (this.world.lane && (this.round?.laneHints || 0) < 3) this.hud.hint('💥 Hit it hard: bank it off the rails');
+      else this.hud.hint(this.hints.putt < 3 ? (FINE_POINTER ? 'A D to aim · W S for pace' : 'Drag ← → to aim · ↑ ↓ for pace') : '');
     } else {
       this.hud.demo(this.hints.swing < 3 ? 'drag' : null);
       this.hud.hint(this.hints.swing < 3 ? (FINE_POINTER ? 'A D to aim · W S for distance' : 'Drag ← → to aim · ↑ ↓ for distance') : '');
@@ -1538,6 +1544,7 @@ export class Game {
   }
 
   hitPutt(power) {
+    if (this.world.lane && this.round) this.round.laneHints = (this.round.laneHints || 0) + 1;
     const speed = puttSpeedAt(this.puttMax, power);
     this.beginFlight(true);
     this.putts += 1;
@@ -1621,6 +1628,24 @@ export class Game {
     }
     lock.power = this.lockSolve.power;
     this.dirX = Math.cos(this.lockSolve.angle); this.dirZ = Math.sin(this.lockSolve.angle);
+  }
+
+  /** The meter reading along (dirX, dirZ) that gets the ball furthest round the lane (or in). */
+  lanePace(dirX, dirZ, read) {
+    const { ball, world } = this;
+    const key = `${ball.x.toFixed(1)},${ball.z.toFixed(1)}|${Math.round(this.aimAngle * 40)}`;
+    if (this.paceCache?.key === key) return this.paceCache.pct;
+    const pts = world.lane.pts, total = pathLength(pts);
+    let best = null;
+    for (const k of [1, 1.35, 1.75, 2.3, 3]) {
+      const pct = Math.min(96, read * k);
+      const pv = previewPutt(world, ball, dirX, dirZ, puttSpeedAt(this.puttMax, pct));
+      const left = pv.holed ? -1 : total - pathInfo(pts, pv.endX, pv.endZ).along + Math.hypot(pv.endX - world.cup.x, pv.endZ - world.cup.z) * 0.3;
+      if (!best || left < best.left - 0.5) best = { pct, left };
+      if (pct >= 96) break;
+    }
+    this.paceCache = { key, pct: best.pct };
+    return best.pct;
   }
 
   /** This hole's cards and perk, applied to a lie: rough and sand may cost half. */
@@ -2699,6 +2724,8 @@ export class Game {
       const spots = this.net.teeSpots();
       if (spots.length) { this.rig.gallery(ball, dirX, dirZ, spots); return; }
     }
+    // Crazy golf: from above, to line up the rebounds
+    if (this.putting && this.world.lane && this.previewPts?.length >= 6) { this.rig.birdseye(ball, dirX, dirZ, this.previewPts); return; }
     if (this.putting) {
       this.rig.putt(ball, dirX, dirZ, this.targetDist);
     } else {

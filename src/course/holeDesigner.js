@@ -98,7 +98,7 @@ export const ARCHETYPES = {
   gorge:         { label: 'The Gorge',     blurb: 'A creek at the bottom of a ravine. Carry it, or lay up short.' },
   punchbowl:     { label: 'The Punchbowl', blurb: 'Hit the bowl and it feeds to the flag.' },
   // Holes that play like something else entirely
-  minigolf:      { label: 'Crazy Golf',    blurb: 'Putter only. Bank it off the walls, roll it over the hump.' },
+  minigolf:      { label: 'Crazy Golf',    blurb: 'Putter only, and you can hit it HARD: bank it off the rails, round the bends, over the hump.' },
 };
 
 /** Toys on the hole: something to aim at besides the flag (render/gimmicks.js). */
