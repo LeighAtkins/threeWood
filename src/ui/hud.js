@@ -425,8 +425,8 @@ export class Hud {
     this.layer.appendChild(node);
   }
 
-  showIntro({ index, total, name, par, yards, blurb, biome, pips = 1, wind = 0, tip, challenge, toy = null, pond = null, crown = null, event = null }) {
-    const cards = crown?.cards || [];
+  showIntro({ index, total, name, par, yards, blurb, biome, pips = 1, wind = 0, tip, challenge, toy = null, pond = null, crown = null, event = null, bought = [] }) {
+    const cards = [...(crown?.cards || []), ...bought];
     this.clearLayer();
     const dots = '●'.repeat(pips) + '○'.repeat(5 - pips);
     const node = el('div', 'overlay pass', `
@@ -450,7 +450,7 @@ export class Hud {
     this.layer.appendChild(node);
   }
 
-  showResult({ title, kind, strokes, par, bonuses, holePoints, challenge, card, last, board = null, cards = null, acorns = 0, onCard = null, onReroll = null, onNext, onToggle = null }) {
+  showResult({ title, kind, strokes, par, bonuses, holePoints, challenge, card, last, board = null, cards = null, acorns = 0, onCard = null, onReroll = null, onNext, onToggle = null, onShop = null, points = 0 }) {
     this.clearLayer();
     const node = el('div', 'overlay', `
       <div class="card result">
@@ -466,9 +466,11 @@ export class Hud {
         ${cards ? `<div class="hand"><div class="hand-head"><span class="hand-title">KEEP A CARD FOR THE NEXT HOLE</span><button class="reroll" data-a="reroll" ${acorns < 1 ? 'disabled' : ''}>⟳ 🌰<b>${acorns}</b></button></div><div class="hand-row">${cardsHtml(cards)}</div></div>` : ''}
         ${board ? `<div class="board live">${boardHtml(board)}</div>` : ''}
         ${scorecardHtml(card, true)}
+        ${onShop ? `<button class="shop-btn" data-a="shop">🦝 TABI'S SHOP <b>★ ${points.toLocaleString()}</b></button>` : ''}
         <button class="btn" data-a="next">${last ? 'FINISH ROUND' : 'NEXT HOLE'}<span class="auto"></span></button>
       </div>`);
     node.querySelector('[data-a="next"]').addEventListener('click', onNext);
+    node.querySelector('[data-a="shop"]')?.addEventListener('click', (e) => { e.stopPropagation(); onShop(); });
     const hand = node.querySelector('.hand');
     hand?.addEventListener('click', (e) => {
       const b = e.target.closest('[data-card]');
@@ -511,6 +513,60 @@ export class Hud {
     card.classList.toggle('mini', mini);
     const sp = card.querySelector('.spect');
     if (sp) { sp.classList.toggle('hidden', !name); sp.textContent = name ? `👀 WATCHING ${name.toUpperCase()}` : ''; }
+  }
+
+  /** The Mulligan button (shown while one is in hand and there is a shot to take back). */
+  setMulligan(show, onTap = null) {
+    if (!this.mulliganBtn) {
+      this.mulliganBtn = el('button', 'mulligan-btn hidden', '↩️ MULLIGAN');
+      this.root.insertBefore(this.mulliganBtn, this.layer);
+      this.mulliganBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); this.onMulligan?.(); });
+    }
+    if (onTap) this.onMulligan = onTap;
+    this.mulliganBtn.classList.toggle('hidden', !show);
+  }
+
+  /**
+   * Tabi the tanuki's shop: things to buy with ★ points, for the next hole.
+   * items: [{ id, e, label, blurb, kind, price }]; targets: [{ id, name, rank }]
+   * (who mischief can go to). onBuy(id, to) returns true if it was bought.
+   */
+  showShop({ points, items, targets, onBuy, onClose }) {
+    const SAYS = ['Psst. Fresh mischief, cheap!', 'No refunds. Tanuki honour.', 'Something for you… or for THEM?', 'Ooh, a big spender!', 'Everything must go!'];
+    let money = points, pending = null;
+    const node = el('div', 'overlay shop-wrap', '');
+    const paint = (say) => {
+      node.innerHTML = `
+        <div class="card shop">
+          <div class="shop-head"><i>🦝</i><div><b>TABI'S SHOP</b><span>${esc(say)}</span></div><em>★ ${money.toLocaleString()}</em></div>
+          <div class="shop-note">Works on your next hole</div>
+          <div class="shop-list">${items.map((it) => `
+            <div class="shop-item ${it.kind}${it.price > money ? ' poor' : ''}">
+              <i>${it.e}</i><div><b>${esc(it.label)}</b><span>${esc(it.blurb)}</span></div>
+              <button data-buy="${it.id}" ${it.price > money ? 'disabled' : ''}>★ ${it.price}</button>
+            </div>
+            ${pending === it.id ? `<div class="shop-to"><span>FOR WHO?</span>${targets.map((t) => `<button data-to="${esc(t.id)}">${t.rank}. ${esc(t.name)}</button>`).join('')}</div>` : ''}`).join('')}
+          </div>
+          <button class="btn ghost" data-a="close">BACK</button>
+        </div>`;
+    };
+    paint(SAYS[Math.floor(Math.random() * SAYS.length)]);
+    node.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const buy = e.target.closest('[data-buy]')?.dataset.buy, to = e.target.closest('[data-to]')?.dataset.to;
+      if (e.target.closest('[data-a="close"]')) { node.remove(); onClose?.(); return; }
+      if (buy) {
+        const it = items.find((x) => x.id === buy);
+        if (it.kind === 'mischief') { pending = pending === buy ? null : buy; paint('Who gets it? Hehe.'); return; }
+        if (onBuy(buy, null)) { money -= it.price; paint(`${it.e} ${it.label}! Good choice.`); }
+        return;
+      }
+      if (to && pending) {
+        const it = items.find((x) => x.id === pending);
+        if (onBuy(pending, to)) { money -= it.price; const who = targets.find((t) => t.id === to)?.name || 'them'; pending = null; paint(`${it.e} On its way to ${who}. Hehehe.`); }
+      }
+    });
+    this.layer.appendChild(node);
   }
 
   /** My acorns changed: a little pop by the points. */

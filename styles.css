@@ -1126,3 +1126,32 @@ button { font: inherit; color: inherit; border: 0; background: none; padding: 0;
   .camper-ui { justify-content: flex-end; align-items: center; }
   .camper-ui .panel { width: min(430px, 56vw); max-height: calc(100vh - 16px); overflow-y: auto; margin: 8px calc(var(--sar) + 8px) 8px 0; }
 }
+
+.mulligan-btn { position: absolute; right: calc(var(--sar) + 14px); bottom: calc(var(--sab) + 150px); pointer-events: auto !important; font: inherit; font-size: 13px; font-weight: 800; letter-spacing: 1px; padding: 9px 14px; border: 0; border-radius: 14px; background: #fff3c4; color: #4a3200; box-shadow: 0 4px 0 rgba(0,0,0,0.25); cursor: pointer; animation: finalPulse 1.6s ease-in-out infinite; }
+#hud.swinging .mulligan-btn { display: none; }
+
+/* Tabi's shop */
+.card.result .shop-btn { display: block; width: 100%; margin: 6px 0 0; padding: 9px; border: 0; border-radius: 12px; font: inherit; font-size: 13px; font-weight: 800; letter-spacing: 1px; color: #3a2800; background: linear-gradient(90deg, #ffd96a, #ffb84a); cursor: pointer; }
+.card.result .shop-btn b { margin-left: 6px; opacity: 0.8; }
+.overlay.shop-wrap { z-index: 5; background: rgba(8, 20, 14, 0.55); }
+.card.shop { width: min(440px, 94vw); max-height: calc(100vh - 30px); overflow-y: auto; text-align: left; }
+.shop-head { display: flex; align-items: center; gap: 10px; }
+.shop-head i { font-style: normal; font-size: 44px; line-height: 1; animation: tabiBob 1.8s ease-in-out infinite; }
+.shop-head b { display: block; color: var(--gold); letter-spacing: 1.5px; }
+.shop-head span { display: block; font-size: 13px; opacity: 0.85; }
+.shop-head em { margin-left: auto; font-style: normal; font-weight: 800; color: var(--gold); white-space: nowrap; }
+@keyframes tabiBob { 50% { transform: translateY(-3px) rotate(-4deg); } }
+.shop-note { font-size: 11px; letter-spacing: 1px; opacity: 0.65; margin: 6px 0; text-align: center; }
+.shop-list { display: grid; gap: 6px; }
+.shop-item { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 12px; background: rgba(255, 255, 255, 0.08); }
+.shop-item.mischief { background: rgba(255, 110, 90, 0.16); }
+.shop-item.poor { opacity: 0.5; }
+.shop-item > i { font-style: normal; font-size: 26px; }
+.shop-item > div { flex: 1; min-width: 0; }
+.shop-item b { display: block; font-size: 14px; }
+.shop-item span { display: block; font-size: 11px; opacity: 0.75; }
+.shop-item button, .shop-to button { font: inherit; font-weight: 800; border: 0; border-radius: 10px; padding: 7px 10px; background: var(--gold); color: #3a2800; cursor: pointer; white-space: nowrap; }
+.shop-item button:disabled { background: rgba(255, 255, 255, 0.15); color: var(--cream); cursor: default; }
+.shop-to { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 2px 4px 6px 46px; }
+.shop-to span { font-size: 10px; letter-spacing: 1.5px; opacity: 0.7; margin-right: 4px; }
+.shop-to button { background: #ff8a6a; color: #3a0d06; font-size: 12px; padding: 6px 9px; }

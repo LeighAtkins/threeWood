@@ -4,6 +4,7 @@ import {
   createBall, copyBall, placeBall, launchBall, puttBall, stepBall, SIM_DT, BALL_R, CUP_R, flatWorld,
 } from './core/ballSim.js';
 import { classify } from './core/happenings.js';
+import { CARDS } from './core/cards.js';
 import { pathLength, pathInfo } from './course/shapes.js';
 import { buildCave, updateCave } from './render/cave.js';
 import { makeRainCloud, updateRainCloud } from './render/gags.js';
@@ -295,7 +296,7 @@ export class Game {
         // Putts need a jeweller's touch; full shots a quicker turn
         const base = (this.putting ? 0.0011 : 0.003) * (this.steady ? 0.6 : 1);
         if (this.steady && Math.abs(dx) < 2) return; // a bump, not a drag
-        this.aimAngle += dx * base * (420 / Math.max(320, Math.min(window.innerWidth, 900)));
+        this.aimAngle += dx * base * (420 / Math.max(320, Math.min(window.innerWidth, 900))) * (this.mods?.backwards ? -1 : 1); // (Backwards Day!)
         this.planDirty = true;
         if (drag.moved > 14) this.hud.demo(null); // they have got it
       } else if (this.state === 'flight' && !this.paused) {
@@ -558,14 +559,20 @@ export class Game {
     // The crown passes first, and the cards are played: they can shape the
     // hole (a wider cup, a breeze) for me alone
     this.net.passCrown();
+    // What was bought from Tabi after the last hole comes into play now
+    if (round.shopFor !== round.index) { round.shopNow = round.shopNext || []; round.shopNext = []; round.shopFor = round.index; }
     const mods = this.net.holeMods();
     let spec = designHole(round.seed, number);
     // A room event shapes the hole for everyone (the same one on every phone)
     this.roomEvent = this.net.active && this.net.players.length > 1 ? eventFor(round.seed, round.index, spec) : null;
     spec = withEvent(spec, this.roomEvent);
     if (mods.cup !== 1) spec = { ...spec, cupR: (spec.cupR || CUP_R) * mods.cup };
+    if (mods.gravity !== 1) spec = { ...spec, gravity: (spec.gravity || 9.81) * mods.gravity };
+    if (mods.bouncy !== 1) spec = { ...spec, bouncy: mods.bouncy };
     this.loadWorld(spec);
     this.mods = mods;
+    this.mulligans = mods.mulligan || 0;
+    this.lastFrom = null;
     if (mods.slick !== 1) this.world.slick = mods.slick;
     this.gags(mods);
     if (mods.wind) {
@@ -640,6 +647,7 @@ export class Game {
       toy: spec.gimmick ? GIMMICKS[spec.gimmick.kind] : null,
       pond: spec.fishing ? this.pondSide(spec.fishing) : null,
       crown: this.net.crownCard(),
+      bought: (round.shopNow || []).map((id) => ({ ...CARDS[id], mine: true })),
       event: this.roomEvent,
     };
   }
@@ -1095,6 +1103,7 @@ export class Game {
     this.walkIn = { t: 0, dur: 1.0 };
     this.cheerSpot = null;
     this.net.atAim();
+    this.hud.setMulligan(this.mulligans > 0 && !!this.lastFrom, () => this.takeMulligan());
     this.forage.atAim();
     this.showHint();
   }
@@ -1448,6 +1457,9 @@ export class Game {
 
   beginFlight(wasPutt) {
     const { ball } = this;
+    // (where it was, for a Mulligan: the stroke count before this shot, penalties and all)
+    this.lastFrom = { x: ball.x, z: ball.z, strokes: this.strokes, putts: this.putts };
+    this.hud.setMulligan(false);
     this.shot = {
       putt: wasPutt,
       fromX: ball.x, fromZ: ball.z,
@@ -1575,6 +1587,7 @@ export class Game {
     }
     this.camper.wobbly = !!mods.wobble;
     this.hud.root.classList.toggle('wobbly', !!mods.wobble);
+    this.sky.fogBank = mods.fog ? 1 : 0;
   }
 
   /**
@@ -1651,8 +1664,11 @@ export class Game {
   /** This hole's cards and perk, applied to a lie: rough and sand may cost half. */
   perkLie(lie) {
     const p = this.mods;
-    if (!p?.lieHalf || lie.speedFactor >= 1) return lie;
-    return { ...lie, speedFactor: 1 - (1 - lie.speedFactor) * 0.5 };
+    if (!p) return lie;
+    let sf = lie.speedFactor;
+    if (p.lieHalf && sf < 1) sf = 1 - (1 - sf) * 0.5;
+    if (p.power && p.power !== 1) sf *= p.power; // (the Rocket Ball)
+    return sf === lie.speedFactor ? lie : { ...lie, speedFactor: sf };
   }
 
   /** Add points; `now` pops it on screen immediately. */
@@ -1917,6 +1933,33 @@ export class Game {
     this.camper.feel('oops', 2);
     this.audio.bounce(6, 'green');
     return true;
+  }
+
+  /** Tabi's shop, over the result card. */
+  openShop() {
+    const { items, targets } = this.net.shopStock();
+    this.cardOpen = true; // (keep the result card from tucking away under it)
+    this.hud.showShop({
+      points: this.round.points, items, targets,
+      onBuy: (id, to) => this.net.buy(id, to),
+      onClose: () => { const btn = this.hud.layer.querySelector('.shop-btn b'); if (btn) btn.textContent = `★ ${this.round.points.toLocaleString()}`; },
+    });
+    this.audio.tap();
+  }
+
+  /** A Mulligan (from Tabi's shop): the last shot never happened. */
+  takeMulligan() {
+    const f = this.lastFrom;
+    if (this.state !== 'aim' || !f || !(this.mulligans > 0)) return;
+    this.mulligans -= 1;
+    this.lastFrom = null;
+    this.strokes = f.strokes;
+    this.putts = f.putts;
+    placeBall(this.ball, this.world, f.x, f.z);
+    this.hud.callout('↩️ MULLIGAN!', 'small');
+    this.audio.whoosh();
+    this.updateScoreHud();
+    this.beginAim();
   }
 
   /** Tell the room what my shot did, if it was anything worth hearing (once a shot). */
@@ -2284,6 +2327,8 @@ export class Game {
       onCard: (id) => this.net.keep(id),
       onReroll: () => this.net.reroll(),
       onNext: () => this.pressNext(),
+      onShop: last ? null : () => this.openShop(),
+      points: round.points,
       onToggle: () => { this.cardOpen = !this.cardOpen; this.hud.miniResult(!!this.spectName && !this.cardOpen, this.spectName); },
     });
   }
@@ -2583,7 +2628,7 @@ export class Game {
         this.turnHeld = turn ? (this.turnHeld || 0) + dt : 0;
         if (turn) {
           const ramp = Math.min(3, 1 + this.turnHeld * 1.5) * (k.ShiftLeft || k.ShiftRight ? 0.25 : 1);
-          this.aimAngle += turn * dt * (this.putting ? 0.12 : 0.7) * ramp;
+          this.aimAngle += turn * dt * (this.putting ? 0.12 : 0.7) * ramp * (this.mods?.backwards ? -1 : 1);
           this.planDirty = true;
         }
         const reach = (k.KeyW ? 1 : 0) - (k.KeyS ? 1 : 0);

@@ -24,7 +24,7 @@ import { generateSeed, cleanSeed } from '../core/rng.js';
 import { BUILD, isStale, reloadFresh } from './fresh.js';
 import { contestFor, judgeContest, perkFor } from '../core/contests.js';
 import { HAPPENINGS, quipText, awards } from '../core/happenings.js';
-import { CARDS, deal, combine, targetFor } from '../core/cards.js';
+import { CARDS, SHOP, deal, combine, targetFor } from '../core/cards.js';
 
 const WAIT_LIMIT = 20;  // seconds the ready players wait for someone still lining up
 const MOVING_LIMIT = 5; // ...and for someone whose ball is still rolling (they join the next volley)
@@ -545,9 +545,37 @@ export class NetPlay {
 
   /** Everything shaping my hole: the crown's perk if I wear it, my card, mischief on me. */
   holeMods() {
-    if (!this.active) return combine([]);
-    const ids = [this.cardsNow.mine, ...this.cardsNow.hit.map((h) => h.id)].filter(Boolean);
+    const shop = this.g.round?.shopNow || []; // (what I bought from Tabi for this hole; solo too)
+    if (!this.active) return combine(shop);
+    const ids = [this.cardsNow.mine, ...this.cardsNow.hit.map((h) => h.id), ...shop].filter(Boolean);
     return combine(ids, this.myPerk);
+  }
+
+  /** Tabi's shop: what is for sale here (mischief only in a room), and who it could go to. */
+  shopStock() {
+    const room = this.active && this.players.length > 1;
+    return {
+      items: SHOP.filter((s) => room || CARDS[s.id].kind === 'self').map((s) => ({ ...s, ...CARDS[s.id] })),
+      targets: room ? this.board().filter((r) => !r.me).map((r) => ({ id: r.id, name: r.name, rank: r.rank })) : [],
+    };
+  }
+
+  /** Buy item `id` (for `to`, if it is mischief). Points are spent; it works on the next hole. */
+  buy(id, to = null) {
+    const g = this.g, round = g.round, item = SHOP.find((s) => s.id === id), c = CARDS[id];
+    if (!round || !item || !c || (round.points || 0) < item.price) return false;
+    if (c.kind === 'mischief') {
+      if (!this.active || !to || to === this.myId || !this.players.some((p) => p.id === to)) return false;
+      this.room.send({ t: 'card', id, to });
+      this.onCard(this.myId, id, to);
+    } else {
+      (round.shopNext ||= []).push(id);
+      if (this.active) this.addFeed(`🦝 You bought ${c.e} ${c.label}`, 'react');
+    }
+    round.points -= item.price;
+    g.hud.setPoints(round.points);
+    g.audio.reward(2);
+    return true;
   }
 
   /** The perk I play this hole with, if I wear the crown. */

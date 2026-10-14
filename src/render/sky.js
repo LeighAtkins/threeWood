@@ -451,6 +451,13 @@ export class Sky {
     this.tint.setRGB(1, 1, 1).lerp(look.hemi, this.night * 0.8).multiplyScalar(look.dim);
 
     if (this.cave) this.caveLight();
+    // A Fog Bank: thick grey air close in (the aim line still shows the way)
+    if (this.fogBank > 0) {
+      this.scene.fog.color.lerp(this._a.setHex(0xb8c0c8), 0.8);
+      this.scene.fog.near = 3;
+      this.scene.fog.far = Math.min(this.scene.fog.far, 55);
+      for (const f of ['zenith', 'mid', 'horizon']) this.look[f].lerp(this._b.setHex(0xb8c0c8), 0.85);
+    }
     // Under a rain cloud: duller light, greyer air
     if (this.gloom > 0) {
       const grey = this._b.setHex(0x7a8490);

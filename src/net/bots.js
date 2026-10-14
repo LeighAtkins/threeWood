@@ -407,6 +407,12 @@ export class Bots {
     if (CARDS[id].kind === 'self') b.nextMod = (b.nextMod || 1) * 0.85;
     this.pending ||= [];
     this.pending.push({ id: b.id, t: 2 + Math.random() * 3, msg: CARDS[id].kind === 'mischief' ? { t: 'card', id, to } : { t: 'card', id } });
+    // Now and then, a mean one goes shopping: something silly for whoever leads (a blue shell)
+    const leader = ids[0];
+    if (this.mischief !== false && leader && leader !== b.id && Math.random() < personaOf(b).mean * 0.3) {
+      const pick = ['fog', 'bouncy', 'backwards'][Math.floor(Math.random() * 3)];
+      this.pending.push({ id: b.id, t: 4 + Math.random() * 3, msg: { t: 'card', id: pick, to: leader } });
+    }
   }
 
   update(dt) {

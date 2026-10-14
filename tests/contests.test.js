@@ -92,7 +92,8 @@ test('camp cards: the leader gets no mischief, last place gets two; effects comb
     assert.equal(deal(rng, 8, 8).filter((id) => CARDS[id].kind === 'mischief').length, 2);
     assert.equal(deal(rng, 3, 8).filter((id) => CARDS[id].kind === 'mischief').length, 1);
   }
-  assert.deepEqual(combine([]), { wind: 0, cup: 1, lieHalf: false, tight: 1, slick: 1, rain: false, wobble: false });
+  assert.deepEqual(combine([]), { wind: 0, cup: 1, lieHalf: false, tight: 1, slick: 1, rain: false, wobble: false, power: 1, gravity: 1, mulligan: 0, fog: false, bouncy: 1, backwards: false });
+  for (let i = 0; i < 40; i++) assert.ok(deal(mulberry32(i), 8, 8).every((id) => !CARDS[id].shop), 'shop items are never dealt');
   assert.ok(combine(['rain']).rain && combine(['rain']).slick > 1 && combine(['wobble']).wobble);
   const m = combine(['tailwind', 'rain', 'tiny'], { cup: 1.5 });
   assert.equal(m.wind, 4);

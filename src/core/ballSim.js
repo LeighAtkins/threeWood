@@ -251,7 +251,8 @@ function stepAir(ball, world, env, dt, events) {
   const tSpeed = Math.hypot(tx, ty, tz);
   const impact = -vn;
 
-  if (impact < 1.3 || ball.bounces >= 6) {
+  const bouncy = world.bouncy || 1; // (the Rubber Ball: it bounces and bounces)
+  if (impact < 1.3 / bouncy || ball.bounces >= (bouncy > 1 ? 14 : 6)) {
     // Too soft to bounce: settle into a roll
     ball.vx = tx * 0.92; ball.vz = tz * 0.92; ball.vy = 0;
     ball.mode = 'roll';
@@ -260,7 +261,7 @@ function stepAir(ball, world, env, dt, events) {
   }
 
   // Bounce. Hard impacts lose proportionally more energy (turf gives).
-  const e = S.e * Math.max(0.3, Math.min(1, 1 - impact / 45));
+  const e = Math.min(0.92, S.e * bouncy * Math.max(0.3, Math.min(1, 1 - impact / 45)));
   // Backspin checks the ball; on short grass a spinny wedge can zip back.
   let keep = tSpeed * S.ft - ball.back * S.bite * 3.2;
   const canSpinBack = surface === 'green' || surface === 'fringe';

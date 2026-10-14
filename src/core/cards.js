@@ -22,10 +22,25 @@ export const CARDS = {
   rain:     { e: '🌧️', label: 'Rain Cloud', blurb: 'It rains on them: wet, slippery turf and a headwind', kind: 'mischief', wind: -4, slick: 1.7, rain: true },
   tiny:     { e: '🤏', label: 'Tiny Cup', blurb: 'Their cup shrinks to a thimble', kind: 'mischief', cup: 0.72 },
   wobble:   { e: '🫨', label: 'The Wobbles', blurb: 'They sway about and their swing meter shakes', kind: 'mischief', tight: 1.5, wobble: true },
+  // Only in Tabi's shop (never dealt)
+  rocket:    { e: '🚀', label: 'Rocket Ball', blurb: 'Your full shots fly 12% further', kind: 'self', shop: true, power: 1.12 },
+  moon:      { e: '🌙', label: 'Moon Ball', blurb: 'Your ball floats like it is on the moon', kind: 'self', shop: true, gravity: 0.6 },
+  magnet:    { e: '🧲', label: 'Cup Magnet', blurb: 'Your cup is a bucket', kind: 'self', shop: true, cup: 1.45 },
+  mulligan:  { e: '↩️', label: 'Mulligan', blurb: 'Take back one shot, no stroke', kind: 'self', shop: true, mulligan: 1 },
+  fog:       { e: '🌫️', label: 'Fog Bank', blurb: 'Their course vanishes into thick fog', kind: 'mischief', shop: true, fog: true },
+  bouncy:    { e: '🏀', label: 'Rubber Ball', blurb: 'Their ball bounces about like rubber', kind: 'mischief', shop: true, bouncy: 1.55 },
+  backwards: { e: '🔄', label: 'Backwards Day', blurb: 'Their aiming goes the wrong way round', kind: 'mischief', shop: true, backwards: true },
 };
 
-const SELF = Object.keys(CARDS).filter((k) => CARDS[k].kind === 'self');
-const MISCHIEF = Object.keys(CARDS).filter((k) => CARDS[k].kind === 'mischief');
+/** Tabi the tanuki's stock and prices (★ points). Mischief only sells in a room. */
+export const SHOP = [
+  { id: 'rocket', price: 600 }, { id: 'moon', price: 500 }, { id: 'magnet', price: 700 }, { id: 'mulligan', price: 800 },
+  { id: 'fog', price: 450 }, { id: 'bouncy', price: 400 }, { id: 'backwards', price: 600 },
+  { id: 'rain', price: 400 }, { id: 'tiny', price: 500 }, { id: 'wobble', price: 400 },
+];
+
+const SELF = Object.keys(CARDS).filter((k) => CARDS[k].kind === 'self' && !CARDS[k].shop);
+const MISCHIEF = Object.keys(CARDS).filter((k) => CARDS[k].kind === 'mischief' && !CARDS[k].shop);
 
 /**
  * Three cards for someone placed `rank` (1 = leading) of `of` players.
@@ -46,7 +61,7 @@ export function deal(rng, rank, of, mischief = true) {
 
 /** The combined effect of a list of card ids (plus a crown perk, if any) for one hole. */
 export function combine(ids, perk = null) {
-  const out = { wind: 0, cup: 1, lieHalf: false, tight: 1, slick: 1, rain: false, wobble: false };
+  const out = { wind: 0, cup: 1, lieHalf: false, tight: 1, slick: 1, rain: false, wobble: false, power: 1, gravity: 1, mulligan: 0, fog: false, bouncy: 1, backwards: false };
   for (const c of [...ids.map((id) => CARDS[id]).filter(Boolean), perk].filter(Boolean)) {
     out.wind += c.wind || 0;
     out.cup *= c.cup || 1;
@@ -55,6 +70,12 @@ export function combine(ids, perk = null) {
     out.slick *= c.slick || 1;
     out.rain ||= !!c.rain;
     out.wobble ||= !!c.wobble;
+    out.power *= c.power || 1;
+    out.gravity *= c.gravity || 1;
+    out.mulligan += c.mulligan || 0;
+    out.fog ||= !!c.fog;
+    out.bouncy *= c.bouncy || 1;
+    out.backwards ||= !!c.backwards;
   }
   out.cup = Math.max(0.6, Math.min(2, out.cup));
   out.tight = Math.max(0.4, Math.min(2, out.tight));
