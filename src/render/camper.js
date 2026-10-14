@@ -68,6 +68,9 @@ const IDENTITY = new THREE.Quaternion();
 export class Camper {
   constructor(look) {
     this.group = new THREE.Group();
+    this.group.rotation.order = 'YXZ'; // (yaw first: a tumble tips over in the camper's own frame)
+    this.fallT = 0;     // seconds into a tumble (knockOver), 0 when on their feet
+    this.wobbly = false; // The Wobbles card: they sway
     this.t = Math.random() * 10;
     this.cur = [...POSES.idle];
     this.pose = 'idle';
@@ -625,6 +628,7 @@ export class Camper {
     }
     this.armRig.getWorldPosition(this.shoulderWorld);
     this.face(dt, pose);
+    this.tumble(dt);
   }
 
   /**
@@ -637,6 +641,30 @@ export class Camper {
     this.far = far;
     for (const m of this.faceParts) m.visible = !far;
     if (far) for (const m of Object.values(this.mouths)) m.visible = false;
+  }
+
+  /** Hit by a ball: over they go (backwards), a moment flat out, and up again. */
+  knockOver() {
+    if (this.fallT > 0) return;
+    this.fallT = 1e-6;
+    this.feel('oops', 3);
+  }
+
+  /** The tumble and the wobble, laid over whatever pose they are in. */
+  tumble(dt) {
+    let tip = 0;
+    if (this.fallT > 0) {
+      this.fallT += dt;
+      const t = this.fallT;
+      // over in a third of a second (with a little bounce), lie there, get up
+      if (t < 0.35) tip = (t / 0.35) ** 2 * 1.5;
+      else if (t < 0.5) tip = 1.5 - Math.sin(((t - 0.35) / 0.15) * Math.PI) * 0.12;
+      else if (t < 2.0) tip = 1.5;
+      else if (t < 2.6) tip = 1.5 * (1 - (t - 2.0) / 0.6);
+      else { this.fallT = 0; tip = 0; }
+    }
+    this.group.rotation.x = -tip;
+    this.group.rotation.z = this.wobbly && !tip ? Math.sin(this.t * 4.2) * 0.12 + Math.sin(this.t * 7.3) * 0.04 : 0;
   }
 
   /** A passing feeling for a few seconds: joy | oops | focus | calm | cheeky */

@@ -348,14 +348,18 @@ const AMBIENT = {
   spores: { count: 170, size: 0.15, fall: -0.25, sway: 0.9, wind: 0.2, glow: true },
   pollen: { count: 90, size: 0.09, fall: 0.15, sway: 0.8, wind: 0.3, glow: false },
   dust:   { count: 170, size: 0.1, fall: 0.1, sway: 0.6, wind: 1.4, glow: false },
+  rain:   { count: 1500, size: 0.2, fall: 16, sway: 0.05, wind: 0.4, glow: false },
 };
 const AMBIENT_BOX = 64;
 const ambientShared = { uTime: { value: 0 }, uScale: { value: 300 }, uTint: { value: new THREE.Color(0xffffff) } };
 
 /** Snow, petals, leaves, embers: a box of drifting specks that travels with the camera. */
-function buildAmbient(world, lowDetail) {
-  if (!world.biome.ambient) return null;
-  const [kind, colours] = world.biome.ambient;
+/** Rain (the Rain Cloud card) on top of whatever the biome has drifting about. */
+export function buildRain(world, lowDetail) { return buildAmbient(world, lowDetail, ['rain', [0xe8f4ff, 0xc8e2ff]]); }
+
+function buildAmbient(world, lowDetail, kindColours = world.biome.ambient) {
+  if (!kindColours) return null;
+  const [kind, colours] = kindColours;
   const cfg = AMBIENT[kind];
   const count = Math.round(cfg.count * (lowDetail ? 0.6 : 1));
   const rng = createGameRng(`ambient-${kind}`).rng;

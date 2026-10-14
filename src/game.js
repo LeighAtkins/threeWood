@@ -5,6 +5,7 @@ import {
 } from './core/ballSim.js';
 import { classify } from './core/happenings.js';
 import { buildCave, updateCave } from './render/cave.js';
+import { makeRainCloud, updateRainCloud } from './render/gags.js';
 // (a mouse: a PC, with a keyboard to aim with)
 const FINE_POINTER = typeof matchMedia === 'function' && matchMedia('(pointer: fine)').matches;
 import { eventFor, withEvent } from './core/events.js';
@@ -13,13 +14,13 @@ import {
   createSwing, startSwing, swingClick, swingStep, strikeFromTiming, describeStrike, markerToPercent, SWING,
 } from './core/swing.js';
 import {
-  buildLaunch, previewShot, previewPutt, puttSpeedFor, puttMeterMax, puttSpeedAt, slopeAlong,
+  buildLaunch, powerForRest, previewShot, previewPutt, puttSpeedFor, puttMeterMax, puttSpeedAt, slopeAlong,
 } from './core/shotPlanner.js';
 import { designHole, roundHoles, ARCHETYPES, ROUND_PLAN, GIMMICKS } from './course/holeDesigner.js';
 import { buildWorld, aimTarget, teeSlot } from './course/courseWorld.js';
 import { BIOMES } from './course/biomes.js';
 import { buildTerrainMesh } from './render/terrainMesh.js';
-import { buildScenery, updateScenery, updateFlag, disposeGroup, setSceneryViewport } from './render/scenery.js';
+import { buildScenery, updateScenery, updateFlag, disposeGroup, setSceneryViewport, buildRain } from './render/scenery.js';
 import { Effects } from './render/effects.js';
 import { Sky } from './render/sky.js';
 import { CameraRig } from './render/cameraRig.js';
@@ -564,6 +565,8 @@ export class Game {
     if (mods.cup !== 1) spec = { ...spec, cupR: (spec.cupR || CUP_R) * mods.cup };
     this.loadWorld(spec);
     this.mods = mods;
+    if (mods.slick !== 1) this.world.slick = mods.slick;
+    this.gags(mods);
     if (mods.wind) {
       // Along the hole, tee to pin, on top of the day's wind (+ at my back)
       const dx = spec.pin.x - spec.tee.x, dz = spec.pin.z - spec.tee.z, d = Math.hypot(dx, dz) || 1;
@@ -670,6 +673,8 @@ export class Game {
   }
 
   setState(state) {
+    // (while lining up and swinging, the screen keeps out of the way of the shot: see styles)
+    this.hud.root.classList.toggle('aiming', state === 'aim' || state === 'swing');
     // (the 'tap to speed it up' hint belongs to a flight only)
     if (this.state === 'flight' && state !== 'flight' && this.shot?.ffHinted) this.hud.hint('');
     if (state !== 'fishing' && this.fishing?.active) this.fishing.stop();
@@ -931,6 +936,34 @@ export class Game {
     this.audio.tap();
   }
 
+  /**
+   * The camp photo's camera: a little wider and higher than the fireside view,
+   * stepped back until everyone round the fire (and Kuri) is in the picture,
+   * feet to heads, whatever the screen's shape (an upright phone is narrow).
+   */
+  photoFrameCamp(v) {
+    const pts = [this.camper.group.position];
+    for (const o of this.net.others.map.values()) if (o.camp && o.camper.group.visible) pts.push(o.camper.group.position);
+    if (this.dog?.group?.visible) pts.push(this.dog.group.position);
+    let cx = 0, cz = 0;
+    for (const p of pts) { cx += p.x; cz += p.z; }
+    cx = (cx / pts.length + v.x) / 2; cz = (cz / pts.length + v.z) / 2;
+    let r = 5.2;
+    for (let i = 0; i < 12; i++) {
+      this.rig.orbit(cx, v.y + 0.85, cz, r, 1.5 + (r - 5.2) * 0.25, v.angle - 0.3);
+      let fits = true;
+      for (const p of pts) {
+        for (const up of [0.05, 2.0]) {
+          const n = this.rig.ndc(p.x, p.y + up, p.z);
+          if (n.z >= 1 || Math.abs(n.x) > 0.9 || n.y < -0.9 || n.y > 0.85) { fits = false; break; }
+        }
+        if (!fits) break;
+      }
+      if (fits) break;
+      r *= 1.12;
+    }
+  }
+
   /** Runs after the frame is drawn: counts down, then grabs the canvas. */
   photoFrame(dt) {
     const p = this.photo;
@@ -1141,11 +1174,25 @@ export class Game {
     } else {
       const reach = distanceAt(this.club, 100, this.lie.speedFactor);
       const aimDist = this.wantDist ?? this.targetDist;
+      this.slope = slopeAlong(world, ball, dirX, dirZ);
+      // The power at which a perfect swing STOPS the ball at the target (or at
+      // the length dragged), worked out by test shots in still air: the wind
+      // is the player's to allow for, nothing else. Re-solved when the club,
+      // length or line changes; while the aim is being swung round, the last
+      // answer stands and it is solved again once the aim settles.
+      const book = reach >= aimDist ? powerFor(this.club, aimDist, this.lie.speedFactor) : null;
+      const key = `${this.club.id}|${Math.round(aimDist * 2)}|${this.lie.id}|${ball.x.toFixed(1)},${ball.z.toFixed(1)}`;
+      const now = performance.now();
+      const turned = this.cal && Math.abs(Math.atan2(Math.sin(this.aimAngle - this.cal.angle), Math.cos(this.aimAngle - this.cal.angle))) > 0.015;
+      if (!this.cal || this.cal.key !== key || (turned && now - this.cal.at > 220)) {
+        const solved = powerForRest(world, ball, { club: this.club, lie: this.lie, dirX, dirZ, slope: this.slope, want: aimDist, book });
+        this.cal = { key, angle: this.aimAngle, at: now, power: solved };
+        this.calStale = false;
+      } else if (turned) this.calStale = true; // (solved again once the aim settles: see update)
+      const want = this.cal.power;
       // Near enough to everything the club has counts as a full shot: asking
       // for a tap a hair before the bar tops out is a trap, not a skill
-      const want = reach >= aimDist ? powerFor(this.club, aimDist, this.lie.speedFactor) : null;
       this.idealPower = want && want < 96 ? want : null;
-      this.slope = slopeAlong(world, ball, dirX, dirZ);
       const launch = buildLaunch({
         club: this.club, power: this.idealPower ?? 100, dirX, dirZ, lie: this.lie, slope: this.slope,
       });
@@ -1431,6 +1478,25 @@ export class Game {
     const off = (power - this.idealPct) / this.idealPct;
     if (Math.abs(off) < 0.06) this.hud.callout('PERFECT PACE', 'gold small');
     if (this.hints.putt < 3) { this.hints.putt += 1; store.set(HINT_KEY, this.hints); }
+  }
+
+  /**
+   * The mischief made visible: rain falling on my screen and a cloud over my
+   * head (Rain Cloud), my camper swaying and my swing meter shaking (The
+   * Wobbles). Cleared at the next hole.
+   */
+  gags(mods) {
+    if (this.rainFx) { this.scene.remove(this.rainFx); this.rainFx.geometry.dispose(); this.rainFx = null; }
+    if (this.myCloud) { this.scene.remove(this.myCloud); this.myCloud = null; }
+    this.sky.gloom = mods.rain ? 1 : 0;
+    if (mods.rain) {
+      this.rainFx = buildRain(this.world, this.coarse);
+      if (this.rainFx) this.scene.add(this.rainFx);
+      this.myCloud = makeRainCloud();
+      this.scene.add(this.myCloud);
+    }
+    this.camper.wobbly = !!mods.wobble;
+    this.hud.root.classList.toggle('wobbly', !!mods.wobble);
   }
 
   /** This hole's cards and perk, applied to a lie: rough and sand may cost half. */
@@ -2299,7 +2365,7 @@ export class Game {
         const v = this.campView;
         if (v) {
           // For the photo: a little wider and higher, with the friends in frame
-          if (this.photo) this.rig.orbit(v.x, v.y + 0.85, v.z, 5.2, 1.5, v.angle - 0.3);
+          if (this.photo) this.photoFrameCamp(v);
           else this.rig.orbit(v.x, v.y + 0.95, v.z, 4.3, 0.42, v.angle + Math.sin(this.time * 0.25) * 0.22);
           this.grill.update(dt);
         }
@@ -2338,6 +2404,8 @@ export class Game {
         break;
       }
       case 'aim': {
+        // (the aim has settled after a swing round: work the power out again for the new line)
+        if (this.calStale && performance.now() - this.cal.at > 220) { this.cal.at = 0; this.planDirty = true; }
         // Keys on a PC: A D (or ← →) to aim, W S for distance (pace on a putt).
         // Held longer, the turn speeds up; Shift for the fine adjustments.
         const k = this.keys;
@@ -2582,6 +2650,7 @@ export class Game {
     this.audio.ambience(dt, { night: this.sky.night, wind: this.world?.spec.wind.speed || 0, level: busy ? 0.15 : this.state === 'title' ? 0.6 : 1 });
     updateScenery(this.scenery, this.time, dt, this.sky);
     updateCave(this.cave, this.time);
+    if (this.myCloud) { const p = this.camper.group.position; this.myCloud.visible = this.camper.group.visible; updateRainCloud(this.myCloud, dt, p.x, p.y, p.z, this.camper.group.scale.x, this.time, this.camera); }
     // After dark: the course, the ball and the campers carry their own light
     const night = this.sky.night;
     updateNightGlow(this.nightGlow, night, this.time, camera);

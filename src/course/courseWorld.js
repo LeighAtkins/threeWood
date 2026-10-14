@@ -345,6 +345,7 @@ export function buildWorld(spec) {
     heightAt, gradAt, surfaceAt, waterLevelAt,
     gravity: spec.gravity || 0, // (0: the usual; a room event can lower it)
     ceilingAt, // (a cave's roof, or null under the open sky)
+    slick: spec.slick || 1, // (the Rain Cloud card: wet turf runs further)
     lane: channel ? { pts: channel.pts, ...rails } : null, // (crazy golf: the rails the ball bounces off)
     cup, tee, trees, ponds, bunkers,
     half: PLAY_HALF,

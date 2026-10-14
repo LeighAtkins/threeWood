@@ -510,6 +510,7 @@ export class NetPlay {
     this.mischief = mischief !== false; // (the host's choice for the round: mischief cards, or only boosts)
     this.acorns = 0;
     this.hand = this.kept = null; this.incoming = []; this.cardsNow = { mine: null, hit: [] };
+    this.hats = new Map(); this.nextHats = new Map();
     this.inRound = true;
     this.scores.clear();
     this.haps.clear();
@@ -535,6 +536,9 @@ export class NetPlay {
     this.contestNow = null; // (needs the hole's par: set in atHole)
     // The cards kept and the mischief received after the last hole are played now
     this.cardsNow = { mine: this.kept, hit: this.incoming };
+    // (and who everyone else is playing under, to show it on them)
+    this.hats = this.nextHats || new Map();
+    this.nextHats = new Map();
     this.kept = null; this.incoming = []; this.hand = null; this.picked = false;
     return this.crown === this.myId ? this.perk : null;
   }
@@ -564,7 +568,7 @@ export class NetPlay {
     this.others.toTee(world, (id) => this.seatOf(id));
     this.contestNow = this.players.length > 1 ? contestFor(round.seed, round.index, world.spec.par, world.spec.archetype) : null;
     this.g.camper.setCrown(this.crown === this.myId);
-    for (const o of this.others.map.values()) o.camper.setCrown(o.id === this.crown);
+    for (const o of this.others.map.values()) { o.camper.setCrown(o.id === this.crown); this.others.setHat(o.id, this.hats?.get(o.id) || null); }
     if (this.crownNews) { const news = this.crownNews; this.crownNews = null; setTimeout(() => this.g.hud.callout(news, 'gold small'), 900); }
     this.paint();
   }
@@ -710,7 +714,8 @@ export class NetPlay {
       const dx = ball.x - p.x, dz = ball.z - p.z;
       // A ball dropping on them (not one rolling through their feet, nor one
       // climbing away over the front row from the back of the tee)
-      const dropping = ball.mode === 'air' && ball.vy <= 0 && ball.y - p.y >= 0.3 && ball.y - p.y < 1.7;
+      // In the air at body height (rising or falling), or running along the ground at pace
+      const dropping = ball.mode === 'air' && ball.y - p.y >= 0.1 && ball.y - p.y < 1.7 && Math.hypot(ball.vx, ball.vy, ball.vz) > 3;
       const running = !putt && ball.mode === 'roll' && ball.vx * ball.vx + ball.vz * ball.vz > 16;
       if (dx * dx + dz * dz > 0.36 || !(dropping || running)) continue;
       const key = `${owner}>${o.id}`;
@@ -789,8 +794,9 @@ export class NetPlay {
     this.addFeed(`💫 ${shooter} bonked ${who === this.myId ? 'you' : victim}`, 'lol', by === this.myId ? null : by);
     this.g.audio.bonk();
     this.g.audio.giggle(2);
-    if (who === this.myId) { this.g.camper.feel('oops', 2.2); this.g.hud.callout('BONK!', 'bad'); this.g.rig.addShake?.(0.06); }
-    else { this.others.say(who, '💫'); this.others.react(who, 'oops'); }
+    // ...and over they go
+    if (who === this.myId) { this.g.camper.knockOver(); this.g.hud.callout('BONK!', 'bad'); this.g.rig.addShake?.(0.06); }
+    else this.others.knockOver(who);
     // Someone else's ball, bounced off someone: put the replay on the same new flight
     if (s && from !== this.myId) this.others.resync(by, s);
   }
@@ -852,6 +858,7 @@ export class NetPlay {
     if (!this.inRound || !c) return;
     if (c.kind === 'self') return; // (only mischief is news; my own keep is shown when I pick it)
     if (!to) return;
+    if (id === 'rain' || id === 'wobble') (this.nextHats ||= new Map()).set(to, id);
     const who = to === this.myId ? 'you' : this.nameOf(to);
     const by = from === this.myId ? 'You' : this.nameOf(from);
     this.addFeed(`${c.e} ${by} gave ${who} ${c.label}`, 'lol', to === this.myId || from === this.myId ? null : to);
@@ -1237,10 +1244,14 @@ export class NetPlay {
       head.textContent = `👑 ${this.contestNow.label}`;
       this.pill.appendChild(head);
     }
-    // (a short landscape screen has room for the top three and me, not all eight)
+    // (lining up a shot, or on a short landscape screen, the board keeps to
+    // the top two and me: eight rows in the middle of the screen hide the
+    // shot. A tap on '+N more' opens it until the shot is played)
     const all = this.board();
-    const short = window.innerHeight < 500 && all.length > 5;
-    const rows = short ? all.filter((r, i) => i < 3 || r.me) : all;
+    const aiming = ['aim', 'swing'].includes(this.g.state);
+    if (!aiming) this.pillOpen = false;
+    const short = !this.pillOpen && all.length > 4 && (aiming || window.innerHeight < 500);
+    const rows = short ? all.filter((r, i) => i < 2 || r.me) : all;
     for (const r of rows) {
       const row = document.createElement('div');
       row.className = `who ${this.away.has(r.id) ? 'away' : this.status.get(r.id) || 'aim'}`;
@@ -1251,9 +1262,10 @@ export class NetPlay {
       this.pill.appendChild(row);
     }
     if (short) {
-      const more = document.createElement('div');
+      const more = document.createElement('button');
       more.className = 'more';
       more.textContent = `+${all.length - rows.length} more`;
+      more.addEventListener('pointerdown', (ev) => { ev.preventDefault(); ev.stopPropagation(); this.pillOpen = true; this.paintNow(); });
       this.pill.appendChild(more);
     }
     // Things to say, folded away behind one small button so the pill stays small

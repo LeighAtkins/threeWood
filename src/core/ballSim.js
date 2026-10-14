@@ -420,7 +420,9 @@ function stepRoll(ball, world, dt, events) {
     }
   }
 
-  const mu = S.mu0 + S.mu1 * speed;
+  // (a rained-on course is slick: it runs further)
+  const slick = world.slick || 1;
+  const mu = (S.mu0 + S.mu1 * speed) / slick;
 
   // A slow ball going nowhere (rocking in a crease of the turf, or leaning on
   // a crazy-golf rail) has stopped, whatever the slope under it says
@@ -428,7 +430,7 @@ function stepRoll(ball, world, dt, events) {
     if (!(ball.stillT > 0) || Math.hypot(ball.x - ball.stillX, ball.z - ball.stillZ) > 0.06) { ball.stillT = 1e-6; ball.stillX = ball.x; ball.stillZ = ball.z; }
     else ball.stillT += dt;
   } else ball.stillT = 0;
-  if (speed < 0.07 && (slopeAcc < S.mu0 || ball.onRail > 0.3) || ball.stillT > 1.5) {
+  if (speed < 0.07 && (slopeAcc < S.mu0 / slick || ball.onRail > 0.3) || ball.stillT > 1.5) {
     ball.vx = ball.vz = ball.vy = 0;
     ball.mode = 'rest';
     events.push({ type: 'rest', x: ball.x, y: ball.y, z: ball.z, surface });

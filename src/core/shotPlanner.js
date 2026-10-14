@@ -58,6 +58,34 @@ export function previewShot(world, ball, launch) {
   };
 }
 
+/**
+ * The power (0-100) at which a pure strike in still air comes to REST
+ * `want` away: book distances are for flat turf, and slopes, bounces, the
+ * roll on this grass and a green up or down the hill all move where a ball
+ * really stops. A few test shots, secant-stepped from the book's guess.
+ * Returns null if even full power stops short. Pure; ~4 simulations.
+ */
+export function powerForRest(world, ball, { club, lie, dirX, dirZ, slope, want, book }) {
+  const restAt = (power) => {
+    const b = copyBall(ball);
+    launchBall(b, buildLaunch({ club, power, dirX, dirZ, lie, slope }));
+    simulate(b, world, null, { maxTime: 22 });
+    return Math.hypot(b.x - ball.x, b.z - ball.z);
+  };
+  const full = restAt(100);
+  if (full < want) return null;
+  let p0 = Math.max(5, Math.min(100, book ?? 60)), d0 = restAt(p0);
+  let p1 = Math.max(4, Math.min(100, p0 * Math.sqrt(want / Math.max(1, d0)))), d1 = restAt(p1);
+  for (let i = 0; i < 4 && Math.abs(d1 - want) > 0.6; i++) {
+    const slopeD = (d1 - d0) / (p1 - p0 || 1e-6);
+    const next = Math.abs(slopeD) > 1e-4 ? p1 + (want - d1) / slopeD : p1 * Math.sqrt(want / Math.max(1, d1));
+    p0 = p1; d0 = d1;
+    p1 = Math.max(3, Math.min(100, next));
+    d1 = restAt(p1);
+  }
+  return p1;
+}
+
 /** Full roll-out of a putt along a line (cup included). */
 export function previewPutt(world, ball, dirX, dirZ, speed) {
   const b = copyBall(ball);

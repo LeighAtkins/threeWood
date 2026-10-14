@@ -13,6 +13,7 @@ import { Camper, GRIP } from './camper.js';
 import { ClubRig, CAMPER_CLUB_SIZE, CAMPER_SCALE } from './club.js';
 import { teeSlot } from '../course/courseWorld.js';
 import { cleanLook } from '../core/camp.js';
+import { makeRainCloud, updateRainCloud } from './gags.js';
 import { createBall, placeBall, launchBall, puttBall, stepBall, SIM_DT, BALL_R } from '../core/ballSim.js';
 
 const SCALE = CAMPER_SCALE;
@@ -67,7 +68,20 @@ export class Others {
     }
   }
 
+  /** The mischief they are playing this hole under, shown on them: 'rain' (a cloud overhead), 'wobble' (they sway). */
+  setHat(id, kind) {
+    const o = this.map.get(id);
+    if (!o) return;
+    if (o.cloud && kind !== 'rain') { this.scene.remove(o.cloud); o.cloud = null; }
+    if (kind === 'rain' && !o.cloud) { o.cloud = makeRainCloud(); this.scene.add(o.cloud); }
+    o.camper.wobbly = kind === 'wobble';
+  }
+
+  /** Hit by a ball: over they go. */
+  knockOver(id) { const o = this.map.get(id); if (o) { o.camper.knockOver(); o.bubble = { text: '💫', t: 2.6 }; } }
+
   remove(id, o) {
+    if (o.cloud) this.scene.remove(o.cloud);
     this.scene.remove(o.camper.group, o.ball, o.club.group, o.blob);
     o.club.group.traverse((m) => { if (m.isMesh) m.geometry.dispose(); });
     o.camper.dispose();
@@ -349,6 +363,13 @@ export class Others {
       this.tagAt(o, SCALE, camera);
     }
     this.placeTags();
+    this.time = (this.time || 0) + dt;
+    for (const o of this.map.values()) {
+      if (!o.cloud) continue;
+      const g = o.camper.group;
+      o.cloud.visible = g.visible;
+      if (g.visible) updateRainCloud(o.cloud, dt, g.position.x, g.position.y, g.position.z, g.scale.x, this.time, camera);
+    }
     // Blob shadows under whoever is showing
     for (const o of this.map.values()) {
       const g = o.camper.group;

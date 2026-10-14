@@ -19,9 +19,9 @@ export const CARDS = {
   bigcup:   { e: '🕳️', label: 'Bucket Cup', blurb: 'Your cup is half again as wide', kind: 'self', cup: 1.5 },
   boots:    { e: '🥾', label: 'Good Boots', blurb: 'Rough and sand cost half', kind: 'self', lieHalf: true },
   steady:   { e: '🧘', label: 'Steady Hands', blurb: 'An easier swing', kind: 'self', tight: 0.6 },
-  rain:     { e: '🌧️', label: 'Rain Cloud', blurb: 'A headwind for them', kind: 'mischief', wind: -7 },
-  tiny:     { e: '🤏', label: 'Tiny Cup', blurb: 'Their cup shrinks', kind: 'mischief', cup: 0.72 },
-  wobble:   { e: '🫨', label: 'The Wobbles', blurb: 'Their swing gets twitchy', kind: 'mischief', tight: 1.5 },
+  rain:     { e: '🌧️', label: 'Rain Cloud', blurb: 'It rains on them: wet, slippery turf and a headwind', kind: 'mischief', wind: -4, slick: 1.7, rain: true },
+  tiny:     { e: '🤏', label: 'Tiny Cup', blurb: 'Their cup shrinks to a thimble', kind: 'mischief', cup: 0.72 },
+  wobble:   { e: '🫨', label: 'The Wobbles', blurb: 'They sway about and their swing meter shakes', kind: 'mischief', tight: 1.5, wobble: true },
 };
 
 const SELF = Object.keys(CARDS).filter((k) => CARDS[k].kind === 'self');
@@ -46,12 +46,15 @@ export function deal(rng, rank, of, mischief = true) {
 
 /** The combined effect of a list of card ids (plus a crown perk, if any) for one hole. */
 export function combine(ids, perk = null) {
-  const out = { wind: 0, cup: 1, lieHalf: false, tight: 1 };
+  const out = { wind: 0, cup: 1, lieHalf: false, tight: 1, slick: 1, rain: false, wobble: false };
   for (const c of [...ids.map((id) => CARDS[id]).filter(Boolean), perk].filter(Boolean)) {
     out.wind += c.wind || 0;
     out.cup *= c.cup || 1;
     out.lieHalf ||= !!c.lieHalf;
     out.tight *= c.tight || 1;
+    out.slick *= c.slick || 1;
+    out.rain ||= !!c.rain;
+    out.wobble ||= !!c.wobble;
   }
   out.cup = Math.max(0.6, Math.min(2, out.cup));
   out.tight = Math.max(0.4, Math.min(2, out.tight));

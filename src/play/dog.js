@@ -348,11 +348,21 @@ export class Dog {
     const cg = g.camper.group, a = (g.aimAngle ?? 0) + Math.PI + (Math.random() - 0.5) * 1.6;
     st.x = cg.position.x + Math.cos(a) * 9;
     st.z = cg.position.z + Math.sin(a) * 9;
-    // Dropped where the camera can see it: behind the ball, on her side of it
+    // Dropped where the camera can see it, and clear of the swing button and
+    // the meter (bottom of the screen, and its right side): a stick under the
+    // thumb that swings is a stick thrown by mistake, or a swing missed
     const { ball } = g, ax = Math.cos(g.aimAngle ?? 0), az = Math.sin(g.aimAngle ?? 0);
     const back = g.putting ? 1.6 : 2.4;
-    st.dropX = ball.x - ax * back - az * 0.9;
-    st.dropZ = ball.z - az * back + ax * 0.9;
+    const tries = [[-back, 0.9], [-back, -0.9], [1.4, 1.8], [1.4, -1.8], [3, 2.4], [3, -2.4]];
+    let pick = null;
+    for (const [along, side] of tries) {
+      const x = ball.x + ax * along - az * side, z = ball.z + az * along + ax * side;
+      const sc = this.toScreen(x, g.world.heightAt(x, z) + 0.2, z);
+      if (sc && !this.inThumbZone(sc.x, sc.y, 40)) { pick = { x, z }; break; }
+    }
+    if (!pick) return; // (nowhere clear on screen this time: no stick)
+    st.dropX = pick.x;
+    st.dropZ = pick.z;
     st.phase = 'seek';
     st.t = 0;
   }
@@ -365,6 +375,20 @@ export class Dog {
     if (this.sayText && /TUG/.test(this.sayText)) this.say(null);
   }
 
+  /** World point to screen px (null if behind or off screen). */
+  toScreen(x, y, z) {
+    const v = this._v.set(x, y, z).project(this.g.camera);
+    if (v.z > 1 || Math.abs(v.x) > 0.92 || Math.abs(v.y) > 0.92) return null;
+    return { x: (v.x * 0.5 + 0.5) * window.innerWidth, y: (-v.y * 0.5 + 0.5) * window.innerHeight };
+  }
+
+  /** Is (x, y) on or near the swing button, or down among the meter and club pill? */
+  inThumbZone(x, y, pad = 0) {
+    const btn = this.g.hud.swingBtn?.getBoundingClientRect?.();
+    if (btn && btn.width && x > btn.left - pad && x < btn.right + pad && y > btn.top - pad && y < btn.bottom + pad) return true;
+    return y > window.innerHeight * 0.74;
+  }
+
   stickScreen() {
     const st = this.stick, g = this.g;
     const v = this._v.set(st.x, st.y + 0.2, st.z).project(g.camera);
@@ -375,6 +399,8 @@ export class Dog {
   /** A finger down on the stick (so the drag throws it rather than turning the aim). */
   grabStick(x, y) {
     if (this.stick.phase !== 'ground' || this.g.state !== 'aim') return false;
+    // (a press on the swing button is a swing, whatever lies under it)
+    if (this.inThumbZone(x, y, 6) && this.g.hud.swingBtn?.contains?.(document.elementFromPoint?.(x, y))) return false;
     const s = this.stickScreen();
     return !!s && Math.hypot(s.x - x, s.y - y) < 70;
   }

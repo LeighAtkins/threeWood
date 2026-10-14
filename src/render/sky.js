@@ -451,6 +451,16 @@ export class Sky {
     this.tint.setRGB(1, 1, 1).lerp(look.hemi, this.night * 0.8).multiplyScalar(look.dim);
 
     if (this.cave) this.caveLight();
+    // Under a rain cloud: duller light, greyer air
+    if (this.gloom > 0) {
+      const grey = this._b.setHex(0x7a8490);
+      for (const f of ['zenith', 'mid', 'horizon']) this.look[f].lerp(grey, 0.6 * this.gloom);
+      this.uniforms.uCover.value = Math.max(this.uniforms.uCover.value, 0.85);
+      this.sun.intensity *= 1 - 0.45 * this.gloom;
+      this.renderer.toneMappingExposure *= 1 - 0.12 * this.gloom;
+      this.scene.fog.color.lerp(this._a.setHex(0x6a7480), 0.5 * this.gloom);
+      this.scene.fog.far *= 1 - 0.35 * this.gloom;
+    }
 
     // Dome
     const u = this.uniforms;
