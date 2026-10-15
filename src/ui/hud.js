@@ -221,7 +221,8 @@ export class Hud {
     tag.classList.toggle('hidden', !visible);
     if (!visible) return;
     if (tag.textContent !== text) tag.textContent = text;
-    tag.style.transform = `translate(${x}px, ${y}px) translate(-50%, ${tag === this.landTag ? '8px' : '-100%'})`;
+    // (beside its spot, never on it: the aim line and where it lands stay in plain sight)
+    tag.style.transform = `translate(${x}px, ${y}px) translate(12px, ${tag === this.landTag ? '-20%' : '-80%'})`;
   }
 
   /**

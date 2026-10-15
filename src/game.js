@@ -1206,11 +1206,14 @@ export class Game {
     // A bounce mushroom near the line, and in reach: the shot locks on to it
     // (direction and distance), until the aim is swung well away again
     let lock = this.putting ? null : this.padLock();
-    if (lock) { this.solveLock(lock); if (lock.power == null) { lock = null; this.dirX = dirX; this.dirZ = dirZ; } } // (out of reach after all)
+    if (lock) { this.solveLock(lock); if (lock.power == null) { lock = null; this.padFar = true; this.dirX = dirX; this.dirZ = dirZ; } } // (out of reach after all)
+    if (this.padFar && !lock && this.state === 'aim' && !this.farSaid) { this.farSaid = true; this.hud.callout('🍄 TOO FAR TO REACH FROM HERE', 'small'); }
+    if (!this.padFar) this.farSaid = false;
     if (!!lock !== !!this.locked) {
       if (lock && this.state === 'aim') { this.hud.callout('🍄 LOCKED ON', 'small'); this.audio.tap(); }
       this.locked = lock;
     } else this.locked = lock;
+    this.gimmicks.lockedPad = lock?.pad || null;
     if (this.putting) {
       // Pace for the cup, or (crazy golf) for the bend the putt is played to
       const to = this.target && !this.target.isPin ? this.target : world.cup;
@@ -1509,10 +1512,15 @@ export class Game {
     const { ball } = this;
     // Later in the round the same miss costs more
     const tight = (this.coach ? 1 : this.assists.tight * (this.mods?.tight ?? 1)) * (this.steady ? 0.55 : 1);
-    const strike = strikeFromTiming(Math.max(-1, Math.min(1, timing * tight)), this.club.loft, this.rng);
+    let strike = strikeFromTiming(Math.max(-1, Math.min(1, timing * tight)), this.club.loft, this.rng);
+    // Locked on a mushroom, the meter is forgiving: a tap near the flag counts
+    // as on it, and only a truly mistimed strike pushes the ball off the line
+    let power = this.swing.power;
+    if (this.locked && this.idealPower && Math.abs(power - this.idealPower) <= 10) power = this.idealPower;
+    if (this.locked && strike.grade !== 'terrible') strike = { ...strike, yawDeg: 0, sidespinAdd: 0, speedFactor: 1, loftDelta: 0 };
     const launch = buildLaunch({
-      club: this.club, power: this.swing.power, dirX: this.dirX, dirZ: this.dirZ,
-      lie: this.lie, strike, scatter: this.rng() * 2 - 1, slope: this.slope,
+      club: this.club, power, dirX: this.dirX, dirZ: this.dirZ,
+      lie: this.lie, strike, scatter: this.locked ? 0 : this.rng() * 2 - 1, slope: this.slope,
     });
     this.beginFlight(false);
     launchBall(ball, launch);
@@ -1602,13 +1610,16 @@ export class Game {
     const { ball } = this;
     const reach = distanceAt(this.club, 100, this.lie.speedFactor) * 1.15;
     let best = null;
+    this.padFar = false;
     for (const p of pads) {
       const dx = p.x - ball.x, dz = p.z - ball.z, d = Math.hypot(dx, dz);
-      if (d < 12 || d > reach) continue;
       const a = Math.atan2(dz, dx);
       const off = Math.abs(Math.atan2(Math.sin(a - this.aimAngle), Math.cos(a - this.aimAngle)));
+      // (aimed at, but the club cannot get there: say so, rather than nothing happening)
+      if (d > reach && off < 0.6 && Math.sin(Math.min(off, 1.5)) * d < 7) this.padFar = true;
+      if (d < 12 || d > reach) continue;
       // within about 4.5 m of the aim line at the mushroom (more while already locked: it is sticky)
-      if (Math.sin(Math.min(off, 1.5)) * d > (this.locked?.pad === p ? 7 : 4.5) || off > 0.6) continue;
+      if (Math.sin(Math.min(off, 1.5)) * d > (this.locked?.pad === p ? 10 : 7) || off > 0.6) continue;
       if (!best || off < best.off) best = { angle: a, dist: d, pad: p, off };
     }
     return best;
@@ -2902,12 +2913,14 @@ export class Game {
     }
     if (showTag && this.landing) {
       // Where the shot finishes (ball at rest), with how far that is
-      const at = this.rest || this.landing;
+      // (locked on a mushroom: the tag is on its cap, and says so)
+      const lp = this.locked?.pad;
+      const at = lp || this.rest || this.landing;
       this._v2 = this._v2 || new THREE.Vector3();
-      this._v2.set(at.x, world.heightAt(at.x, at.z) + 0.2, at.z).project(camera);
+      this._v2.set(at.x, lp ? lp.top + 0.3 : world.heightAt(at.x, at.z) + 0.2, at.z).project(camera);
       const visible = this._v2.z < 1 && Math.abs(this._v2.x) < 1.05 && Math.abs(this._v2.y) < 1.05;
       const d = Math.hypot(at.x - ball.x, at.z - ball.z);
-      this.hud.setLandTag(`${Math.round(d)}y`, (this._v2.x * 0.5 + 0.5) * window.innerWidth, (-this._v2.y * 0.5 + 0.5) * window.innerHeight, visible);
+      this.hud.setLandTag(lp ? `🍄 BOING · ${Math.round(d)}y` : `${Math.round(d)}y`, (this._v2.x * 0.5 + 0.5) * window.innerWidth, (-this._v2.y * 0.5 + 0.5) * window.innerHeight, visible);
     } else {
       this.hud.setLandTag('', 0, 0, false);
     }

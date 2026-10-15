@@ -312,7 +312,8 @@ export class Gimmicks {
       pad.cool = Math.max(0, pad.cool - dt);
       pad.squash = Math.max(0, pad.squash - dt * 3);
       // A boing squashes and wobbles back; at rest it breathes, ever so slightly
-      const s = pad.squash * Math.cos(pad.squash * 14) * 0.35 + Math.sin(time * 2.2 + pad.x) * 0.012;
+      // (and the one a shot is locked on to pulses, so you can see which)
+      const s = pad.squash * Math.cos(pad.squash * 14) * 0.35 + Math.sin(time * 2.2 + pad.x) * 0.012 + (pad === this.lockedPad ? Math.abs(Math.sin(time * 6)) * 0.12 : 0);
       pad.mesh.scale.set(1 + s * 0.5, 1 - s, 1 + s * 0.5);
     }
   }
