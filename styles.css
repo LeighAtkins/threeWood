@@ -1160,3 +1160,39 @@ button { font: inherit; color: inherit; border: 0; background: none; padding: 0;
 .pin-tag { font-size: 12px; padding: 2px 7px; opacity: 0.92; }
 .pin-tag::after, .pin-tag.land::after { left: -5px; top: 50%; bottom: auto; margin: -5px 0 0; border: 5px solid transparent; border-left: 0; border-right-color: var(--cream); }
 .pin-tag.land::after { border-right-color: var(--ink); border-bottom-color: transparent; }
+
+/* ---- Result card, tidied: a room's card is compact; shop and next share a row ---- */
+.card.result .res-actions { display: flex; gap: 8px; align-items: stretch; margin-top: 8px; position: sticky; bottom: 0; }
+.card.result .res-actions .btn { flex: 1; margin: 0; position: static; }
+.card.result .res-actions .shop-btn { flex: none; width: auto; margin: 0; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 6px 12px; line-height: 1.1; }
+.card.result .res-actions .shop-btn b { margin: 2px 0 0; font-size: 11px; }
+.card.result.room { display: flex; flex-direction: column; max-height: calc(100vh - 24px); }
+.card.result.room > * { flex: none; }
+.card.result.room .board { flex: 1 1 auto; min-height: 60px; max-height: none; overflow-y: auto; }
+.card.result.room h1 { margin: 0; }
+.card.result.mini .res-actions { margin-top: 6px; }
+
+/* ---- Tabi's shop, compact: tabs, a grid of tiles, one detail bar ---- */
+.card.shop { display: flex; flex-direction: column; max-height: calc(100vh - 24px); overflow: hidden; }
+.card.shop > * { flex: none; }
+.shop-tabs { display: flex; gap: 6px; margin: 8px 0 6px; }
+.shop-tabs button { flex: 1; font: inherit; font-weight: 800; font-size: 12px; letter-spacing: 1px; padding: 7px; border: 0; border-radius: 10px; background: rgba(255, 255, 255, 0.1); color: var(--cream); cursor: pointer; }
+.shop-tabs button.on { background: var(--gold); color: #3a2800; }
+.shop-grid { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 2px; }
+.shop-tile { font: inherit; color: var(--cream); border: 0; border-radius: 12px; padding: 8px 6px; background: rgba(255, 255, 255, 0.09); display: grid; justify-items: center; gap: 2px; cursor: pointer; box-shadow: inset 0 0 0 2px transparent; }
+.shop-tile i { font-style: normal; font-size: 24px; line-height: 1.1; }
+.shop-tile b { font-size: 12px; }
+.shop-tile span { font-size: 11px; font-weight: 800; color: var(--gold); }
+.shop-tile.mischief { background: rgba(255, 110, 90, 0.16); }
+.shop-tile.poor { opacity: 0.45; }
+.shop-tile.sel { box-shadow: inset 0 0 0 2px var(--gold); }
+.shop-detail { margin-top: 8px; min-height: 64px; padding: 8px; border-radius: 12px; background: rgba(0, 0, 0, 0.18); }
+.shop-detail .what { display: flex; gap: 8px; align-items: center; font-size: 13px; }
+.shop-detail .what i { font-style: normal; font-size: 22px; }
+.shop-detail .what em { opacity: 0.65; font-style: normal; }
+.shop-detail .buy { width: 100%; margin-top: 6px; font: inherit; font-weight: 800; padding: 9px; border: 0; border-radius: 10px; background: var(--gold); color: #3a2800; cursor: pointer; }
+.shop-detail .buy:disabled, .shop-detail .shop-to button:disabled { opacity: 0.4; cursor: default; }
+.shop-detail .shop-to { padding: 6px 0 0; }
+.shop-detail .hint-line { font-size: 12px; opacity: 0.6; text-align: center; padding-top: 14px; }
+.card.shop .btn { margin-top: 8px; }
+.shop-head i { font-size: 36px; }

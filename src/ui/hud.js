@@ -454,21 +454,23 @@ export class Hud {
   showResult({ title, kind, strokes, par, bonuses, holePoints, challenge, card, last, board = null, cards = null, acorns = 0, onCard = null, onReroll = null, onNext, onToggle = null, onShop = null, points = 0 }) {
     this.clearLayer();
     const node = el('div', 'overlay', `
-      <div class="card result">
+      <div class="card result${board ? ' room' : ''}">
         <h2>HOLE ${card.currentLabel}</h2>
         <h1 class="${kind}">${title}</h1>
-        <div class="result-score">${strokes} ${strokes === 1 ? 'stroke' : 'strokes'} · par ${par}</div>
-        ${challenge && !challenge.won ? `<div class="missed">☆ Missed: ${challenge.text}</div>` : ''}
-        <div class="bonus-list">
+        <div class="result-score">${strokes} ${strokes === 1 ? 'stroke' : 'strokes'} · par ${par}${board ? ` · <b class="gold">★ +${holePoints.toLocaleString()}</b>` : ''}</div>
+        ${challenge && !challenge.won && !board ? `<div class="missed">☆ Missed: ${challenge.text}</div>` : ''}
+        ${board ? '' : `<div class="bonus-list">
           ${mergeBonuses(bonuses).map((b, i) => `<div class="bonus" style="animation-delay:${0.25 + i * 0.12}s"><span>${b.label}</span><b>+${b.points}</b></div>`).join('')}
           <div class="total-line"><span>HOLE POINTS</span><span class="gold">★ ${holePoints.toLocaleString()}</span></div>
-        </div>
+        </div>`}
         ${board ? '<div class="spect hidden"></div><div class="wait-note hidden"></div>' : ''}
         ${cards ? `<div class="hand"><div class="hand-head"><span class="hand-title">KEEP A CARD FOR THE NEXT HOLE</span><button class="reroll" data-a="reroll" ${acorns < 1 ? 'disabled' : ''}>⟳ 🌰<b>${acorns}</b></button></div><div class="hand-row">${cardsHtml(cards)}</div></div>` : ''}
         ${board ? `<div class="board live">${boardHtml(board)}</div>` : ''}
-        ${scorecardHtml(card, true)}
-        ${onShop ? `<button class="shop-btn" data-a="shop">🦝 TABI'S SHOP <b>★ ${points.toLocaleString()}</b></button>` : ''}
-        <button class="btn" data-a="next">${last ? 'FINISH ROUND' : 'NEXT HOLE'}<span class="auto"></span></button>
+        ${board ? '' : scorecardHtml(card, true)}
+        <div class="res-actions">
+          ${onShop ? `<button class="shop-btn" data-a="shop">🦝 SHOP<b>★ ${points.toLocaleString()}</b></button>` : ''}
+          <button class="btn" data-a="next">${last ? 'FINISH ROUND' : 'NEXT HOLE'}<span class="auto"></span></button>
+        </div>
       </div>`);
     node.querySelector('[data-a="next"]').addEventListener('click', onNext);
     node.querySelector('[data-a="shop"]')?.addEventListener('click', (e) => { e.stopPropagation(); onShop(); });
@@ -534,19 +536,24 @@ export class Hud {
    */
   showShop({ points, items, targets, onBuy, onClose }) {
     const SAYS = ['Psst. Fresh mischief, cheap!', 'No refunds. Tanuki honour.', 'Something for you… or for THEM?', 'Ooh, a big spender!', 'Everything must go!'];
-    let money = points, pending = null;
+    let money = points, tab = 'self', sel = null;
+    const tabs = [['self', 'FOR YOU'], ['mischief', 'MISCHIEF']].filter(([k]) => items.some((it) => it.kind === k));
     const node = el('div', 'overlay shop-wrap', '');
     const paint = (say) => {
+      const list = items.filter((it) => it.kind === tab);
+      const it = items.find((x) => x.id === sel);
       node.innerHTML = `
         <div class="card shop">
           <div class="shop-head"><i>🦝</i><div><b>TABI'S SHOP</b><span>${esc(say)}</span></div><em>★ ${money.toLocaleString()}</em></div>
-          <div class="shop-note">Works on your next hole</div>
-          <div class="shop-list">${items.map((it) => `
-            <div class="shop-item ${it.kind}${it.price > money ? ' poor' : ''}">
-              <i>${it.e}</i><div><b>${esc(it.label)}</b><span>${esc(it.blurb)}</span></div>
-              <button data-buy="${it.id}" ${it.price > money ? 'disabled' : ''}>★ ${it.price}</button>
-            </div>
-            ${pending === it.id ? `<div class="shop-to"><span>FOR WHO?</span>${targets.map((t) => `<button data-to="${esc(t.id)}">${t.rank}. ${esc(t.name)}</button>`).join('')}</div>` : ''}`).join('')}
+          ${tabs.length > 1 ? `<div class="shop-tabs">${tabs.map(([k, l]) => `<button data-tab="${k}" class="${k === tab ? 'on' : ''}">${l}</button>`).join('')}</div>` : ''}
+          <div class="shop-grid">${list.map((x) => `
+            <button class="shop-tile ${x.kind}${x.price > money ? ' poor' : ''}${x.id === sel ? ' sel' : ''}" data-pick="${x.id}"><i>${x.e}</i><b>${esc(x.label)}</b><span>★ ${x.price}</span></button>`).join('')}
+          </div>
+          <div class="shop-detail">${it ? `
+            <div class="what"><i>${it.e}</i><span>${esc(it.blurb)}. <em>Next hole.</em></span></div>
+            ${it.kind === 'mischief'
+              ? `<div class="shop-to">${targets.map((t) => `<button data-to="${esc(t.id)}" ${it.price > money ? 'disabled' : ''}>${t.rank}. ${esc(t.name)}</button>`).join('')}</div>`
+              : `<button class="buy" data-buy="${it.id}" ${it.price > money ? 'disabled' : ''}>BUY · ★ ${it.price}</button>`}` : '<div class="hint-line">Tap something to see what it does</div>'}
           </div>
           <button class="btn ghost" data-a="close">BACK</button>
         </div>`;
@@ -554,18 +561,15 @@ export class Hud {
     paint(SAYS[Math.floor(Math.random() * SAYS.length)]);
     node.addEventListener('click', (e) => {
       e.stopPropagation();
-      const buy = e.target.closest('[data-buy]')?.dataset.buy, to = e.target.closest('[data-to]')?.dataset.to;
+      const q = (a) => e.target.closest(`[${a}]`)?.getAttribute(a);
       if (e.target.closest('[data-a="close"]')) { node.remove(); onClose?.(); return; }
-      if (buy) {
-        const it = items.find((x) => x.id === buy);
-        if (it.kind === 'mischief') { pending = pending === buy ? null : buy; paint('Who gets it? Hehe.'); return; }
-        if (onBuy(buy, null)) { money -= it.price; paint(`${it.e} ${it.label}! Good choice.`); }
-        return;
-      }
-      if (to && pending) {
-        const it = items.find((x) => x.id === pending);
-        if (onBuy(pending, to)) { money -= it.price; const who = targets.find((t) => t.id === to)?.name || 'them'; pending = null; paint(`${it.e} On its way to ${who}. Hehehe.`); }
-      }
+      const t = q('data-tab'); if (t) { tab = t; sel = null; paint(t === 'mischief' ? 'Who shall we pick on? Hehe.' : 'Treat yourself!'); return; }
+      const pk = q('data-pick'); if (pk) { sel = pk; paint(items.find((x) => x.id === pk).kind === 'mischief' ? 'Who gets it? Hehe.' : 'Good choice.'); return; }
+      const it = items.find((x) => x.id === sel);
+      if (!it) return;
+      if (q('data-buy') && onBuy(it.id, null)) { money -= it.price; paint(`${it.e} ${it.label}! Pleasure doing business.`); return; }
+      const to = q('data-to');
+      if (to && onBuy(it.id, to)) { money -= it.price; const who = targets.find((x) => x.id === to)?.name || 'them'; paint(`${it.e} On its way to ${who}. Hehehe.`); }
     });
     this.layer.appendChild(node);
   }
