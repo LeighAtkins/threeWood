@@ -13,11 +13,10 @@
  *   - phones behind strict mobile NATs work: it is a plain WebSocket;
  *   - bots live here, not on the host's phone: they play the same game code
  *     (src/net/bots.js, the shot planner and physics), stepped by the
- *     object's alarm, and keep playing whoever leaves.
+ *     object's alarm, and pause when no humans are connected.
  *
  * Deploy: `npx wrangler deploy` in this folder. The object hibernates between
- * messages, so an idle room costs nothing; the Workers paid plan covers far
- * more rooms than 10,000 players need.
+ * messages. Multiplayer is disabled by default as a billing circuit breaker.
  */
 
 import { Bots, BOT_LEVELS, botLook, NAMES } from '../src/net/bots.js';
@@ -33,6 +32,7 @@ const GONE_AFTER = 180_000;  // away this long and the seat is given up (a phone
 const QUIET_AFTER = 15_000;  // a socket silent this long is dead (its phone pings every 5 s): close it
 const LOG_KEEP = 600;        // game messages kept for a phone that reconnects to catch up on
 const SWEEP_EVERY = 15_000;
+const MAX_ROOM_AGE = 2 * 60 * 60_000; // hard bound on autonomous work, including stale rooms
 const KEEP_EMPTY = 60_000;   // a room with nobody in it is forgotten after this
 
 export class RoomObject {
@@ -44,9 +44,27 @@ export class RoomObject {
     this.seq = 0;
     this.round = null;      // { seed, length, holes, index } while a round is on
     this.state.blockConcurrencyWhile(async () => {
+      if (this.env.ROOMS_ENABLED !== 'true') { await this.stop(); return; }
       const saved = await this.state.storage.get('room');
-      if (saved) { this.players = new Map(saved.players); this.hostId = saved.hostId; this.seq = saved.seq || 0; this.created = saved.created; this.round = saved.round || null; }
+      if (saved) { this.players = new Map(saved.players); this.hostId = saved.hostId; this.seq = saved.seq || 0; this.created = saved.created; this.round = saved.round || null; this.emptySince = saved.emptySince || null; }
     });
+  }
+
+  // Fail closed: stale alarms and sockets must stop even after a redeploy.
+  async stop() {
+    await this.state.storage.deleteAlarm();
+    for (const ws of this.state.getWebSockets()) {
+      try { ws.close(1012, 'Multiplayer temporarily disabled'); } catch { /* closed */ }
+    }
+  }
+
+  expired(now = Date.now()) { return !!this.created && now - this.created >= MAX_ROOM_AGE; }
+
+  async destroy() {
+    await this.stop();
+    await this.state.storage.deleteAll();
+    this.players.clear(); this.hostId = null; this.created = null;
+    this.round = null; this.bots = null; this.emptySince = null;
   }
 
   // ---- Bots ---------------------------------------------------------------------
@@ -118,7 +136,7 @@ export class RoomObject {
     this.scheduleTick();
   }
 
-  botsPlaying() { return !!(this.bots?.list.length && ((this.botNet?.g.world && this.round) || this.bots.pending?.length)); }
+  botsPlaying() { return this.sockets().some((ws) => ws.deserializeAttachment()?.id) && !!(this.bots?.list.length && ((this.botNet?.g.world && this.round) || this.bots.pending?.length)); }
 
   async scheduleTick() {
     if (!this.botsPlaying()) return;
@@ -159,7 +177,9 @@ export class RoomObject {
   }
 
   async fetch(req) {
+    if (this.env.ROOMS_ENABLED !== 'true') { await this.stop(); return new Response('Multiplayer temporarily unavailable', { status: 503 }); }
     if (req.headers.get('Upgrade') !== 'websocket') return new Response('expected websocket', { status: 426 });
+    if (this.expired()) { await this.destroy(); return new Response('Room expired', { status: 410 }); }
     const url = new URL(req.url);
     // A code only exists once someone has made the room (/new); a stranger's
     // guess at a code is turned away rather than quietly opening a new room
@@ -213,7 +233,7 @@ export class RoomObject {
     await this.shareRoster();
   }
 
-  async save() { await this.state.storage.put('room', { players: [...this.players.entries()], hostId: this.hostId, seq: this.seq, created: this.created, round: this.round }); }
+  async save() { await this.state.storage.put('room', { players: [...this.players.entries()], hostId: this.hostId, seq: this.seq, created: this.created, round: this.round, emptySince: this.emptySince }); }
 
   async shareRoster() {
     this.broadcast({ t: 'roster', players: [...this.players.values()], hostId: this.hostId });
@@ -221,6 +241,8 @@ export class RoomObject {
   }
 
   async webSocketMessage(ws, raw) {
+    if (this.env.ROOMS_ENABLED !== 'true') { await this.stop(); return; }
+    if (this.expired()) { await this.destroy(); return; }
     let msg;
     try { msg = JSON.parse(raw); } catch { return; }
     if (!msg || typeof msg !== 'object') return;
@@ -331,6 +353,7 @@ export class RoomObject {
    * pocket), so their seat is kept until the sweep finds nobody on it.
    */
   async drop(ws, graceful = false) {
+    if (this.env.ROOMS_ENABLED !== 'true') { await this.state.storage.deleteAlarm(); return; }
     const id = ws.deserializeAttachment()?.id;
     if (!id || !this.players.has(id)) return;
     // (unless another socket of theirs is already back in)
@@ -355,7 +378,9 @@ export class RoomObject {
 
   /** Sweep: seats whose socket has been silent (or gone) too long are given up. */
   async alarm() {
+    if (this.env.ROOMS_ENABLED !== 'true') { await this.stop(); return; }
     const now = Date.now();
+    if (this.expired(now)) { await this.destroy(); return; }
     // Bots step every BOT_TICK; the sweep runs every SWEEP_EVERY
     if (this.round && !this.botNet?.g.world) this.botsToHole(); // (after an eviction)
     this.tickBots();
@@ -377,9 +402,9 @@ export class RoomObject {
       } else delete p.lostAt;
     }
     const humans = [...this.players.values()].filter((p) => !p.bot).length;
-    if (humans) { this.emptySince = null; await this.rearm(now); }
-    else if (!this.emptySince) { this.emptySince = now; this.round = null; await this.state.storage.setAlarm(now + KEEP_EMPTY); }
-    else if (now - this.emptySince >= KEEP_EMPTY) { this.players.clear(); this.hostId = null; this.created = null; this.round = null; this.bots = null; await this.state.storage.deleteAll(); }
+    if (humans) { if (this.emptySince) { this.emptySince = null; await this.save(); } await this.rearm(now); }
+    else if (!this.emptySince) { this.emptySince = now; this.round = null; await this.save(); await this.state.storage.setAlarm(now + KEEP_EMPTY); }
+    else if (now - this.emptySince >= KEEP_EMPTY) { await this.destroy(); }
     else await this.state.storage.setAlarm(this.emptySince + KEEP_EMPTY);
   }
 
@@ -393,6 +418,7 @@ export class RoomObject {
 /** The Worker: `/new` mints a code and opens its room; `/room/ABCD` upgrades to that room's object. */
 export default {
   async fetch(req, env) {
+    if (env.ROOMS_ENABLED !== 'true') return new Response('Multiplayer temporarily unavailable', { status: 503, headers: { 'Access-Control-Allow-Origin': '*', 'Retry-After': '3600' } });
     const url = new URL(req.url);
     const cors = { 'Access-Control-Allow-Origin': '*' };
     if (url.pathname === '/new') {

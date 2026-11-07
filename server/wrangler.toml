@@ -15,3 +15,10 @@ class_name = "RoomObject"
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["RoomObject"]
+
+# Incident containment: fail closed in code even if this variable is absent.
+[vars]
+ROOMS_ENABLED = "false"
+
+[limits]
+cpu_ms = 50
