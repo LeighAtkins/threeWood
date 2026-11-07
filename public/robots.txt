@@ -1,0 +1,14 @@
+# Cooperative crawler policy. This does not enforce an edge block.
+User-agent: GPTBot
+User-agent: ClaudeBot
+User-agent: CCBot
+User-agent: Google-Extended
+Disallow: /
+
+# Allow ordinary search indexing, but exclude telemetry and scanner targets.
+User-agent: *
+Disallow: /play-events/
+Disallow: /wp-admin/
+Disallow: /wp-login.php
+Disallow: /.git/
+Disallow: /.env
