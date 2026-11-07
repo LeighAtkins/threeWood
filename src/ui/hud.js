@@ -1,3 +1,4 @@
+import { MULTIPLAYER_ENABLED } from '../net/config.js';
 import { SWING, markerToPercent } from '../core/swing.js';
 import { glyph, pips, tipIcon } from './glyphs.js';
 import { blobRadius, greenDistance } from '../course/shapes.js';
@@ -410,7 +411,7 @@ export class Hud {
           <button class="btn ghost" data-a="9">QUICK 9</button>
         </div>
         <div class="title-foot">${best ? `BEST ROUND ${vsPar(best.score)} · ★ ${best.points.toLocaleString()}<br>` : ''}COURSE ${esc(seed)}${sky ? `<br>${sky}` : ''}</div>
-        <button class="btn friends" data-a="friends">PLAY WITH FRIENDS</button>
+        ${MULTIPLAYER_ENABLED ? '<button class="btn friends" data-a="friends">PLAY WITH FRIENDS</button>' : ''}
         <div class="title-more">
           <button data-a="camper">MY CAMPER</button>
           <button data-a="fishing">FISHING</button>

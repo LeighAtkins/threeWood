@@ -10,3 +10,8 @@
   Cache-Control: public, max-age=0, must-revalidate
 /sw.js
   Cache-Control: no-cache
+
+# Static engagement signals: no Functions, IDs, cookies or persistent collector.
+/play-events/*
+  Cache-Control: no-store
+  X-Robots-Tag: noindex, nofollow

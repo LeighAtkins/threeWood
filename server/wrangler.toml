@@ -1,24 +1,20 @@
+# Multiplayer permanently retired by owner decision on 2026-11-07.
+# Do not reintroduce bindings/classes through an older configuration.
 name = "threewood-rooms"
-main = "room.js"
+main = "retired.js"
 compatibility_date = "2026-01-01"
 workers_dev = false
 preview_urls = false
-
-# Parked: no public ingress while the game is inactive.
-# Restore rooms.threewood.app explicitly when multiplayer is ready.
 routes = []
-
-[[durable_objects.bindings]]
-name = "ROOMS"
-class_name = "RoomObject"
 
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["RoomObject"]
 
-# Incident containment: fail closed in code even if this variable is absent.
-[vars]
-ROOMS_ENABLED = "false"
+# Deletes only ThreeWood's room namespace and all its old room data.
+[[migrations]]
+tag = "v2-retire-rooms"
+deleted_classes = ["RoomObject"]
 
 [limits]
-cpu_ms = 50
+cpu_ms = 10

@@ -1,3 +1,4 @@
+import { MULTIPLAYER_ENABLED } from './config.js';
 /**
  * Playing a round with friends in a room.
  *
@@ -112,6 +113,7 @@ export class NetPlay {
   // ===========================================================================
 
   async openLobby(code = '') {
+    if (!MULTIPLAYER_ENABLED) return;
     this.g.hud.clearLayer();
     this.lobby.classList.remove('hidden');
     this.renderLobby(cleanCode(code));

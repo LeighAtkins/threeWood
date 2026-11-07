@@ -1,3 +1,4 @@
+import { MULTIPLAYER_ENABLED } from './config.js';
 /**
  * A room: a handful of friends on the same course, found by a four-letter code.
  *
@@ -72,6 +73,7 @@ export class Room {
 
   /** Make a room and wait for friends. */
   async host() {
+    if (!MULTIPLAYER_ENABLED) { this.fail('Multiplayer is offline. Solo golf is available.'); return; }
     try {
       const res = await fetch(`${SERVER.replace(/^ws/, 'http')}/new`);
       const { code } = await res.json();
@@ -86,11 +88,13 @@ export class Room {
 
   /** Join the room with this code. */
   join(code) {
+    if (!MULTIPLAYER_ENABLED) { this.fail('Multiplayer is offline. Solo golf is available.'); return; }
     this.code = cleanCode(code);
     this.connect();
   }
 
   connect(create = false) {
+    if (!MULTIPLAYER_ENABLED) { this.fail('Multiplayer is offline. Solo golf is available.'); return; }
     if (this.closed) return;
     let ws;
     try { ws = new WebSocket(`${SERVER}/room/${this.code}${create ? '?create=1' : ''}`); } catch { this.fail('Connection problem.'); return; }

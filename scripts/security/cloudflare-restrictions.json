@@ -1,0 +1,13 @@
+{
+  "zone": "threewood.app",
+  "zone_id": "da0f7a24f83a6dc2d69eb5d8429932c6",
+  "scanner_rule": {
+    "ref": "threewood_block_scanner_paths_v1",
+    "description": "ThreeWood: block nonexistent CMS, secret and repository probes",
+    "expression": "(http.host in {\"threewood.app\" \"www.threewood.app\"}) and (starts_with(lower(http.request.uri.path), \"/wp-admin\") or starts_with(lower(http.request.uri.path), \"/wp-includes/\") or lower(http.request.uri.path) eq \"/wp-login.php\" or starts_with(lower(http.request.uri.path), \"/.git\") or starts_with(lower(http.request.uri.path), \"/.env\") or lower(http.request.uri.path) eq \"/xmlrpc.php\" or starts_with(lower(http.request.uri.path), \"/phpmyadmin\"))",
+    "action": "block",
+    "enabled": true
+  },
+  "bot_management_update": { "ai_bots_protection": "block" },
+  "scope": "No broad Bot Fight Mode, country blocks, paid plan upgrades, or game-asset rate limits. Preserve existing rules."
+}

@@ -1,3 +1,4 @@
+import { reportPlay } from './core/engagement.js';
 import * as THREE from 'three';
 import { createGameRng, getSeedFromUrl, generateSeed, cleanSeed } from './core/rng.js';
 import {
@@ -458,6 +459,7 @@ export class Game {
         stats: { fairways: 0, fairwayChances: 0, gir: 0, putts: 0, longestDrive: 0, longestPutt: 0, pures: 0, swings: 0 },
       };
       store.set(SAVE_KEY, this.round);
+      if (!this.manual) reportPlay('round-started', this.round);
     }
     this.rng = createGameRng(`${this.seed}:play:${Date.now()}`).rng;
     this.hud.clearLayer();
@@ -2306,6 +2308,10 @@ export class Game {
     round.heat = nextHeat(round.heat || 0, this.strokes, par);
     round.scores[round.index] = { number: world.spec.number, par, strokes: this.strokes, putts: this.putts, star: won };
     const last = round.index >= round.holes.length - 1;
+    if (!this.manual) {
+      reportPlay('hole-completed', round, round.index);
+      if (last) reportPlay('round-completed', round);
+    }
     const card = this.cardData();
     round.index += 1;
     round.live = null;
