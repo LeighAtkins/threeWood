@@ -56,3 +56,25 @@ To minimize future exposure while the game is inactive, disabled `workers_dev` a
 Existing room records were retained; disabled code cancels alarms but does not purge data. Retained Durable Object data can still incur storage charges beyond the account's included storage allocation. No stored-byte metric was returned, so its exact size/cost is unverified. This is not an account-wide spend cap: other Workers and products share the account and remain outside this containment. The paid Workers subscription, if active, remains an account-level charge. Do not downgrade the account without checking the other deployed applications.
 
 Correction after checking the live Cloudflare Pages API: the frontend is hosted on Cloudflare Pages project `threewood` (`threewood.pages.dev`), with `threewood.app` and `www.threewood.app` attached. Its canonical production deployment is `9c747e61-8d97-4929-86c8-fcb47479c46c`, created October 15, and reports `uses_functions: false`. Static Pages asset requests are free and unlimited. The earlier Vercel hosting claim was based on legacy repository configuration and was incorrect for current production. No Vercel account billing settings were verified or changed; any legacy subscription is a separate, unverified exposure. Domain registration renewals and already-accrued usage remain payable.
+
+## Invoice reconciliation and account audit (2026-11-07)
+
+User supplied invoice IN-87619432, total USD 89.21, issued November 7. Usage period October 7–November 6; base subscription November 7–December 6. All seven PDF pages were extracted and checked. Only these six lines are nonzero:
+
+| Invoice line | USD |
+| --- | ---: |
+| Durable Objects storage rows written | 17.00 |
+| Durable Objects compute duration | 12.50 |
+| Durable Objects compute requests | 12.60 |
+| Workers AI regular neurons | 42.05 |
+| Workers Paid subscription | 5.00 |
+| R2 data storage | 0.06 |
+| Total | 89.21 |
+
+The Durable Object subtotal is USD 42.10, not the full USD 89.21. Other metered invoice lines are USD 0.00, including ordinary Worker requests/CPU, KV, D1, Images transformations/delivery, containers, queues, and logs. Enabled product lines with a zero-dollar amount are not extra paid subscriptions on this invoice. Metered quantities and charges use billing rounding and do not exactly match sampled GraphQL aggregates.
+
+Workers AI history identifies 443 Flux 2 Dev REST API calls and about 4.127 million neurons during the invoice period; voice-model usage is negligible by comparison. The latest reported AI calls are November 4 at 04:00 UTC. User explicitly confirmed this image generation was intentional. No AI services or credentials were disabled. The REST source does not identify the originating application or credential, so exact client attribution remains unknown.
+
+Inventory: 11 Worker scripts, 3 Durable Object namespaces, 5 R2 buckets, 2 KV namespaces, no D1 databases, and no queues. The other Durable Objects are the SofaPaint budget trackers; their recorded activity is negligible compared with RoomObject. No comparable second alarm loop was found. Active cron schedules: promote-feedback daily at 02:00 UTC and sofapaint-mcp hourly. sofapaint-auto and threewood-rooms have no cron schedules. These unrelated applications were left intact. Some Workers have no explicit CPU limit override; default platform limits still apply, and absence of an override alone is not evidence of runaway usage.
+
+A final GraphQL check returned no room invocations after 11:34 UTC November 7, and no AI inference rows since November 5. Analytics can lag and this is not continuous monitoring. Existing stored room data was retained; invoice SQL storage charge is USD 0.00. R2 has USD 0.06 of storage overage, so destructive bucket deletion is not warranted for this incident. Workers Paid base fee remains shared across other applications. Account subscription/billing-profile API calls returned 403; the supplied invoice is the billing evidence and does not establish that no separate invoices or subscriptions exist elsewhere.
