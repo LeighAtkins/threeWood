@@ -1,12 +1,12 @@
 name = "threewood-rooms"
 main = "room.js"
 compatibility_date = "2026-01-01"
-workers_dev = true
+workers_dev = false
+preview_urls = false
 
-# rooms.threewood.app: Cloudflare makes the DNS record and certificate itself
-routes = [
-  { pattern = "rooms.threewood.app", custom_domain = true }
-]
+# Parked: no public ingress while the game is inactive.
+# Restore rooms.threewood.app explicitly when multiplayer is ready.
+routes = []
 
 [[durable_objects.bindings]]
 name = "ROOMS"
