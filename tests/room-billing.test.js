@@ -61,3 +61,11 @@ test('bots cannot keep ticking without connected humans', async () => {
   assert.equal(room.botsPlaying(), false);
   await room.scheduleTick(); assert.equal(s.writes, 0);
 });
+
+
+test('disconnected seats expire after eviction using persisted away time', async () => {
+  const { s, room } = make({ players: [['p', { id: 'p', away: Date.now() - 181_000 }]], created: Date.now() - 200_000 });
+  await s.ready; await room.alarm();
+  assert.equal(room.players.size, 0);
+  assert.ok((await s.storage.get('room')).emptySince);
+});

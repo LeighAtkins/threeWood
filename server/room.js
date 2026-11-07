@@ -397,8 +397,9 @@ export class RoomObject {
       if (p.bot) continue;
       if (!live.has(p.id)) {
         await this.away(p.id);
-        p.lostAt ??= now;
-        if (now - p.lostAt > GONE_AFTER) await this.remove(p.id);
+        // away() persists this deadline. A transient lostAt set after its save
+        // was lost on eviction, allowing disconnected humans to live forever.
+        if (now - p.away > GONE_AFTER) await this.remove(p.id);
       } else delete p.lostAt;
     }
     const humans = [...this.players.values()].filter((p) => !p.bot).length;

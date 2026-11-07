@@ -19,3 +19,32 @@ Regression coverage: `node --test tests/room-billing.test.js`.
 Keep `ROOMS_ENABLED = "false"` in `server/wrangler.toml` until a separate change adds and validates admission/rate controls and a usage budget shutdown mechanism. Do not turn it on merely to test the public deployment. Validate room cleanup through actual Cloudflare hibernation in a staging namespace first. Billing notifications are alerts, not a hard spending cap. These controls apply to this Worker; they do not cap spending for the whole Cloudflare account or arbitrary future deployments.
 
 The original deployed bundle, settings and sampled metrics were saved locally in `/tmp/threewood-incident` for investigation. They contain no credentials. Preserve elsewhere if long-term evidence is needed.
+
+## Follow-up audit (2026-11-07, approximately 11:40 UTC)
+
+User confirmed the 10k page-view notification was from Cloudflare. Queried the authenticated GraphQL API for the entire deployed period, October 12 through November 7 (last day partial). These are analytics aggregates, some adaptively sampled, not exact invoice line items or unique human counts. Daily export: `docs/cloudflare-usage.csv`.
+
+| Metric | Reported total |
+| --- | ---: |
+| threewood.app zone page views, all hostnames | 18,158 |
+| Zone HTTP requests | 29,794 |
+| Outer threewood-rooms Worker requests | 4,883 |
+| Room alarm invocations | 86,032,282 |
+| Room HTTP invocations | 130 |
+| Room hibernation events | 13,904 |
+| Room invocation errors (all statuses) | 381,196 |
+| Room SQLite rows written | 67,695,359 |
+| Room SQLite rows read | 14,453,307 |
+| Room billed-duration metric | 1,140,087.76 GB-seconds |
+
+Alarm invocations account for about 99.984% of room events. November 6 alone had 3,433,622 alarm invocations and only 9 outer Worker requests. Periodic metrics show zero maximum active WebSocket connections on every day from October 16 onward, despite roughly 3.4 million alarms daily. The 102 objects returned for November 6 onward generated only alarm events in that interval. This strongly attributes the sustained work to autonomous stale rooms rather than ongoing player traffic.
+
+A second eviction bug was identified: `away()` saved a player's away timestamp before `lostAt` was assigned, but the removal condition used transient `lostAt`. Eviction could reset that removal countdown too. It now uses the persisted `away` deadline. Six targeted billing regression tests pass. The updated version was deployed with multiplayer still disabled: `f9835278-69d0-47fc-801c-40e062763191`.
+
+Recent zone HTTP aggregates show probes for `/wp-admin/install.php`, `/wp-login.php`, assorted unrelated favicon paths, and a self-identifying Palo Alto scanner. Some nonexistent paths received 200, consistent with a fallback response; this is not evidence those applications exist or were compromised. Scanner traffic contributes to the zone traffic figures; the percentage of human page views cannot be determined from these aggregates. No evidence from this audit establishes a room endpoint flood as the sustained billing cause.
+
+The original Worker settings did not show observability enabled and had logpush disabled. The historical Workers Observability endpoint returned HTTP 403 (`no_access_to_workers_observability`) with the available credential. Thus request-level historical logs, exception messages, and stacks were not available in this investigation. GraphQL still exposed event types, outcomes, dates, object IDs, storage work, and duration. Of the November 6 alarm errors, 14,669 were classified clientDisconnected and 2 scriptThrewException; do not interpret all errors as thrown exceptions or infer their exact cause without traces.
+
+A follow-up namespace query for events since 11:34 UTC (19:34 Singapore) returned no rows. Analytics reporting can lag; this is a point-in-time confirmation, not ongoing monitoring. Both public room endpoints were verified returning the disabled 503 response in the initial containment.
+
+The page-view milestone and room bill are distinct. A 10k page-view alert is not a 10k-player count or a Durable Object usage cap. The recorded alarm invocations, storage writes, and duration explain substantial chargeable work, but no invoice or billing-cycle reconciliation was performed.
